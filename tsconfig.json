@@ -7,7 +7,8 @@
     { "path": "./packages/aldus-artifact-registry" },
     { "path": "./packages/aldus-stage-runner" },
     { "path": "./packages/aldus-gate-engine" },
-    { "path": "./packages/aldus-regression" },
-    { "path": "./packages/aldus-release" }
+    { "path": "./packages/aldus-tts-ledger" },
+    { "path": "./packages/aldus-release" },
+    { "path": "./packages/aldus-regression" }
   ]
 }

@@ -1,0 +1,37 @@
+{
+  "name": "@aldus/tts-ledger",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aldus TTS Ledger — performance scripts, synthesis request and take lineage, pronunciation lexicon, and repair scoping. Records synthesis; never performs it.",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck:test": "tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@aldus/core": "*",
+    "@aldus/file-store": "*",
+    "@aldus/gate-engine": "*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@aldus/artifact-registry": "*",
+    "@aldus/testkit": "*",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

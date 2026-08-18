@@ -1,0 +1,297 @@
+/**
+ * Takes: what a synthesis request actually produced, and what a human decided about it
+ * (architecture contract §15, §14.4, §13.3).
+ *
+ * A take is one attempt at one segment. §15.1 is unambiguous about what happens to the ones
+ * nobody wants:
+ *
+ * > Rejected paid takes SHOULD be retained with unique identity until retention policy allows
+ * > cleanup.
+ *
+ * So there is no delete here, and no update that overwrites a take. A rejected take is evidence
+ * of what was tried and why it did not work — the input to §15.1's repair strategies and to
+ * WP-10's defect corpus. Superseding records the replacement without erasing the replaced, the
+ * same shape the artifact registry uses for the same reason.
+ */
+
+import { z } from "zod";
+
+import { iso8601, nonEmptyString, schemaVersionPattern, sha256Hex } from "./common.js";
+import {
+  asrFindingSchema,
+  riskSiteSchema,
+  segmentTextSchema,
+  synthesisParametersSchema,
+} from "./request.js";
+
+/**
+ * The repair ladder (contract §12.4, §15.1).
+ *
+ * §12.4: "Every repair SHOULD identify the smallest safe layer." The rungs are ordered from
+ * smallest to largest, and that order is the point — an evaluator or an operator choosing a
+ * repair should be able to see that regenerating one segment is a smaller act than rewriting
+ * narration, and that the largest rung is escalation rather than an automatic rewrite.
+ *
+ * §12.4's own list, in its own order:
+ *
+ * > - regenerate only the affected TTS segment;
+ * > - change provider mapping without rewriting content;
+ * > - change PerformanceScript without altering approved claims;
+ * > - revise narration and invalidate dependent approvals;
+ * > - escalate to human rather than applying a risky semantic rewrite.
+ */
+export const REPAIR_RUNGS = [
+  /** Re-synthesise the same segment unchanged (§12.4). Cheapest, and changes no approved value. */
+  "regenerate_segment",
+  /** Change how the segment maps onto provider parameters, leaving content untouched (§12.4). */
+  "provider_mapping",
+  /** Change performance intent without altering approved claims (§12.4). */
+  "performance_script",
+  /** Revise the narration itself (§12.4). Invalidates Content Freeze and everything downstream. */
+  "narration_rewrite",
+  /** Hand the decision to a person rather than applying a risky rewrite (§12.4, §13.3). */
+  "escalate_human",
+] as const;
+
+/** @see REPAIR_RUNGS */
+export type RepairRung = (typeof REPAIR_RUNGS)[number];
+
+/**
+ * Whether a repair at this rung changes approved spoken content.
+ *
+ * Only `narration_rewrite` does. §13.1 requires any content-changing edit to invalidate the
+ * Content Freeze "and downstream approvals" — the gate engine performs that invalidation, derived
+ * from the subject digests moving (ADR-0009). This function does not invalidate anything; it says
+ * which repairs are *expected* to, so a caller can warn an operator before they take one.
+ */
+export function invalidatesContentFreeze(rung: RepairRung): boolean {
+  return rung === "narration_rewrite";
+}
+
+/** Ordinal position on the ladder, smallest first. Useful for "prefer the smallest safe layer". */
+export function repairRungOrder(rung: RepairRung): number {
+  return REPAIR_RUNGS.indexOf(rung);
+}
+
+/** Why a take exists and what changed to produce it (contract §12.4, §15.1). */
+export const repairSchema = z
+  .object({
+    /** @see REPAIR_RUNGS */
+    rung: z.enum(REPAIR_RUNGS),
+    /** Why this repair was chosen, for an operator reading the lineage. */
+    reason: z.string().min(1).max(2000),
+    /**
+     * Which bound digests this repair moved.
+     *
+     * Recorded rather than computed: the gate engine derives invalidation from the current
+     * subjects, and duplicating that logic here would give two answers to one question. This is
+     * the evidence trail for *why* they moved.
+     */
+    changedSubjects: z.array(nonEmptyString).max(50).optional(),
+    /** Who chose the repair (contract §19.2). */
+    chosenBy: nonEmptyString.optional(),
+  })
+  .meta({
+    id: "TakeRepair",
+    title: "TakeRepair",
+    description:
+      "Why a take exists and what changed to produce it (architecture contract §12.4). Rungs are " +
+      "ordered smallest to largest, because §12.4 requires a repair to identify the smallest safe " +
+      "layer. Only `narration_rewrite` changes approved content and so invalidates Content Freeze " +
+      "(§13.1) — but the invalidation itself is the gate engine's, derived from subject drift.",
+  });
+
+/** @see repairSchema */
+export type TakeRepair = z.infer<typeof repairSchema>;
+
+/**
+ * A human's judgement on a take (contract §13.3, §15).
+ *
+ * §13.3: "final performance approval remains human-owned until a scoped evaluator is demonstrably
+ * reliable." §15 requires the ledger to carry "human decision and reason". The reason is required
+ * on a rejection and not on an acceptance — a rejection without a reason cannot become a repair
+ * strategy (§15.1) or a corpus case (WP-10), whereas "this one is fine" needs no elaboration.
+ */
+export const TAKE_DECISIONS = ["accepted", "rejected"] as const;
+
+/** @see TAKE_DECISIONS */
+export type TakeDecisionValue = (typeof TAKE_DECISIONS)[number];
+
+/** @see TAKE_DECISIONS */
+export const takeDecisionSchema = z
+  .object({
+    /** @see TAKE_DECISIONS */
+    decision: z.enum(TAKE_DECISIONS),
+    /**
+     * Who decided (contract §19.2).
+     *
+     * §13.3 keeps final performance approval human-owned, so a decision recorded by an agent is
+     * a decision the ledger can hold but a Human Ear gate will not accept — the gate engine
+     * enforces `permittedActorKinds`, and duplicating that check here would give two answers.
+     */
+    decidedBy: nonEmptyString,
+    /** ISO-8601 with offset. */
+    decidedAt: iso8601,
+    /** Why. Required for a rejection; see the type note above. */
+    reason: z.string().max(4000).optional(),
+    /**
+     * Structured defect categories, for the regression corpus (contract §12.3, WP-10).
+     *
+     * Open strings: §12.3 presents its taxonomy as examples, and §4.2 keeps adopter vocabularies
+     * out of the runtime.
+     */
+    findings: z.array(nonEmptyString).max(50).optional(),
+  })
+  .refine(
+    (decision) => decision.decision !== "rejected" || (decision.reason ?? "").trim().length > 0,
+    {
+      message:
+        "A rejection must carry a reason (architecture contract §15: the ledger records the human decision and reason). A rejection with no reason cannot become a repair strategy or a regression case.",
+      path: ["reason"],
+    },
+  )
+  .meta({
+    id: "TakeDecision",
+    title: "TakeDecision",
+    description:
+      "A human's judgement on a take (architecture contract §13.3, §15). ADDITIONAL CONSTRAINT " +
+      "NOT EXPRESSIBLE IN JSON SCHEMA: a rejection must carry a reason. An acceptance need not — " +
+      "a rejection without a reason cannot become a repair strategy (§15.1) or a corpus case, " +
+      "whereas an unelaborated acceptance loses nothing.",
+  });
+
+/** @see takeDecisionSchema */
+export type TakeDecision = z.infer<typeof takeDecisionSchema>;
+
+/** How a paid take was authorized (contract §13.2, §19.3). */
+export const takeAuthorizationSchema = z
+  .object({
+    /** The gate whose approval permitted the spend. */
+    gateId: nonEmptyString,
+    /** The `GateDecision.decisionId` that authorized it (contract §13.2). */
+    decisionId: nonEmptyString,
+    /** The spend grant drawn against (contract §19.3). */
+    grantId: nonEmptyString.optional(),
+    /**
+     * Digest of the plan scope the authorization covered.
+     *
+     * Recorded on the take so a later reader can tell whether the request that was made is the
+     * one that was approved, without re-deriving it from a plan that may since have been revised.
+     */
+    planScopeSha256: sha256Hex,
+  })
+  .meta({
+    id: "TakeAuthorization",
+    title: "TakeAuthorization",
+    description:
+      "How a paid take was authorized (architecture contract §13.2, §19.3). Records the gate " +
+      "decision and the plan-scope digest it covered, so a reader can tell whether the request " +
+      "made is the one approved.",
+  });
+
+/** @see takeAuthorizationSchema */
+export type TakeAuthorization = z.infer<typeof takeAuthorizationSchema>;
+
+/**
+ * One synthesis attempt at one segment (contract §15).
+ *
+ * The field list covers §15's requirement enumeration: segment ID; text at every stage; voice,
+ * model, settings, seed; provider request ID; charged or estimated cost; output URI and SHA-256;
+ * risk sites and ASR findings; human decision and reason; and regeneration lineage.
+ */
+export const takeRecordSchema = z
+  .object({
+    /** Schema version of this record (ADR-0003). */
+    schemaVersion: schemaVersionPattern,
+    /** Identity of this take. Unique forever — §15.1 requires rejected takes to keep identity. */
+    takeId: nonEmptyString,
+    /** Run this take belongs to (contract §6.2). */
+    runId: nonEmptyString,
+    /** The plan this take was made under (contract §13.2). */
+    planId: nonEmptyString,
+    /** Which segment (contract §15). */
+    segmentId: nonEmptyString,
+    /** Which attempt at that segment, starting at 1. */
+    attempt: z.number().int().min(1),
+    /** The text at every stage, as actually sent (contract §15). */
+    text: segmentTextSchema,
+    /** Provider, voice, model, settings, seed as actually used (contract §15, §14.4). */
+    parameters: synthesisParametersSchema,
+    /** The provider's own request identifier, for reconciliation (contract §15). */
+    providerRequestId: z.string().min(1).max(400).optional(),
+    /**
+     * What it cost (contract §15 "charged or estimated cost").
+     *
+     * A reference to a Core `CostRecord`, not a copy. §19.3 makes cost governance the gate
+     * engine's and the cost ledger's business; duplicating an amount here would create a second
+     * number to keep reconciled with the one budgets are actually computed from.
+     */
+    costRecordId: z.string().min(1).max(200).optional(),
+    /** How the spend was authorized (contract §13.2). Absent for an unpaid or local take. */
+    authorization: takeAuthorizationSchema.optional(),
+    /**
+     * The produced audio, by artifact identity (contract §15 "output URI and SHA-256").
+     *
+     * An `artifactId` from the artifact registry, which already holds the URI, digest, and
+     * archival state. §8.1 forbids treating a path as identity, and duplicating the digest here
+     * would give two places for it to disagree.
+     */
+    audioArtifactId: z.string().min(1).max(200).optional(),
+    /** Digest of the produced audio, mirrored for joins that have no registry to hand. */
+    audioSha256: sha256Hex.optional(),
+    /** Risk sites observed for this take (contract §15). */
+    riskSites: z.array(riskSiteSchema).max(500).optional(),
+    /** ASR findings over the produced audio (contract §15). Recorded, never computed here. */
+    asrFindings: z.array(asrFindingSchema).max(500).optional(),
+    /** The human decision, once made (contract §13.3, §15). */
+    decision: takeDecisionSchema.optional(),
+    /**
+     * The take this one replaces (contract §15 "fallback or regeneration lineage").
+     *
+     * The superseded take is never deleted (§15.1). This is a backwards pointer only, so lineage
+     * is a chain rather than a graph that could disagree with itself.
+     */
+    supersedes: z.string().min(1).max(200).optional(),
+    /** Why this take exists, when it replaces another (contract §12.4). */
+    repair: repairSchema.optional(),
+    /** When the take was recorded. */
+    recordedAt: iso8601,
+  })
+  .refine((take) => take.supersedes === undefined || take.repair !== undefined, {
+    message:
+      "A take that supersedes another must record the repair that produced it (architecture contract §12.4: every repair identifies the smallest safe layer).",
+    path: ["repair"],
+  })
+  .meta({
+    id: "TakeRecord",
+    title: "TakeRecord",
+    description:
+      "One synthesis attempt at one segment (architecture contract §15), carrying everything §15 " +
+      "requires of a request or segment record. ADDITIONAL CONSTRAINT NOT EXPRESSIBLE IN JSON " +
+      "SCHEMA: a take that supersedes another must record its repair, so the lineage says not " +
+      "only that something was retried but at which layer (§12.4). Rejected takes are retained " +
+      "with unique identity and are never deleted (§15.1).",
+  });
+
+/** @see takeRecordSchema */
+export type TakeRecord = z.infer<typeof takeRecordSchema>;
+
+/** Whether a take was accepted by a human (contract §13.3). */
+export function isAccepted(take: TakeRecord): boolean {
+  return take.decision?.decision === "accepted";
+}
+
+/** Whether a take was rejected by a human (contract §13.3). */
+export function isRejected(take: TakeRecord): boolean {
+  return take.decision?.decision === "rejected";
+}
+
+/**
+ * Whether a take cost money.
+ *
+ * Used to decide whether §15.1's retention rule applies. A take with an authorization or a cost
+ * record was paid for; a locally rendered or human-recorded replacement (§15.1) was not.
+ */
+export function isPaid(take: TakeRecord): boolean {
+  return take.authorization !== undefined || take.costRecordId !== undefined;
+}
