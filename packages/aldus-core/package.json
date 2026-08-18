@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Aldus Core — domain types, JSON schemas, validation, IDs, and redaction. Generic runtime contracts only.",
+  "description": "Aldus Core \u2014 domain types, JSON schemas, validation, IDs, and redaction. Generic runtime contracts only.",
   "license": "UNLICENSED",
   "exports": {
     ".": {
@@ -22,7 +22,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "schema:generate": "node --experimental-strip-types scripts/generate-json-schema.ts",
-    "schema:check": "node --experimental-strip-types scripts/generate-json-schema.ts --check"
+    "schema:check": "node --experimental-strip-types scripts/generate-json-schema.ts --check",
+    "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "zod": "^4.4.3"

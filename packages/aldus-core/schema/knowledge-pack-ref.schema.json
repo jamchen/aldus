@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.0:KnowledgePackRef",
+  "type": "object",
+  "properties": {
+    "packId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "authority": {
+      "type": "string",
+      "enum": [
+        "normative",
+        "advisory",
+        "example",
+        "deprecated"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "precedence": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "sourceRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "contentHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "packId",
+    "version",
+    "authority"
+  ],
+  "title": "KnowledgePackRef",
+  "description": "A reference to a resolved Knowledge Pack, snapshotted into a Run (architecture contract §9.1, §6.2). Reference only — discovery, manifest parsing, and precedence resolution are out of scope for the core schema. `scope` is an open string map because the dimension set (§9.2, §15.2) is adopter-extensible."
+}

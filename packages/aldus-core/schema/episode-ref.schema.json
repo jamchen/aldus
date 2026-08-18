@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.0:EpisodeRef",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "episodeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "showId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "legacyRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "episodeId",
+    "showId"
+  ],
+  "title": "EpisodeRef",
+  "description": "The durable content identity (architecture contract §6.1). Not a folder and not an execution attempt — Runs come and go, the Episode does not. `episodeId` is validated as a non-empty string rather than a fixed grammar because contract §25 item 5 leaves canonical Episode ID rules open."
+}

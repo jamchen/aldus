@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.0:RunManifest",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "episode": {
+      "$ref": "#/$defs/EpisodeRef"
+    },
+    "workflowId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "workflowVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "created",
+        "running",
+        "waiting",
+        "failed",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "currentStage": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "codeRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "knowledgePacks": {
+      "maxItems": 512,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/KnowledgePackRef"
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "runId",
+    "episode",
+    "workflowId",
+    "workflowVersion",
+    "status",
+    "knowledgePacks",
+    "createdAt",
+    "updatedAt"
+  ],
+  "title": "RunManifest",
+  "description": "One attempt to move an Episode through part or all of a workflow (architecture contract §6.2). The Episode is embedded by value so the manifest stays interpretable in isolation. `knowledgePacks` is a snapshot, not a live reference, so a completed Run remains explicable after its packs are revised (§20). `workflowId` is an open string because workflows belong to adopters, not to Core (§4.2).",
+  "$defs": {
+    "EpisodeRef": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "episodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "showId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "legacyRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "episodeId",
+        "showId"
+      ],
+      "title": "EpisodeRef",
+      "description": "The durable content identity (architecture contract §6.1). Not a folder and not an execution attempt — Runs come and go, the Episode does not. `episodeId` is validated as a non-empty string rather than a fixed grammar because contract §25 item 5 leaves canonical Episode ID rules open."
+    },
+    "KnowledgePackRef": {
+      "type": "object",
+      "properties": {
+        "packId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "authority": {
+          "type": "string",
+          "enum": [
+            "normative",
+            "advisory",
+            "example",
+            "deprecated"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "precedence": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "sourceRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "packId",
+        "version",
+        "authority"
+      ],
+      "title": "KnowledgePackRef",
+      "description": "A reference to a resolved Knowledge Pack, snapshotted into a Run (architecture contract §9.1, §6.2). Reference only — discovery, manifest parsing, and precedence resolution are out of scope for the core schema. `scope` is an open string map because the dimension set (§9.2, §15.2) is adopter-extensible."
+    }
+  }
+}

@@ -115,6 +115,14 @@ export const CoreErrorCodes = {
   SCHEMA_UNKNOWN: "ALDUS_SCHEMA_UNKNOWN",
   /** An identifier was malformed or carried the wrong prefix. */
   ID_INVALID: "ALDUS_ID_INVALID",
+  /**
+   * Monotonic ID randomness was exhausted within a single millisecond.
+   *
+   * Distinct from {@link CoreErrorCodes.ID_INVALID}: nothing the caller passed was wrong, and
+   * retrying in the next millisecond succeeds. Separating them keeps "your input was bad" and
+   * "the generator hit a ceiling" from sharing one code in production trace (§20).
+   */
+  ID_EXHAUSTED: "ALDUS_ID_EXHAUSTED",
   /** A canonical content identity could not be parsed or formatted. */
   IDENTITY_INVALID: "ALDUS_IDENTITY_INVALID",
 } as const;

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.0:ActorRef",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "human",
+        "agent",
+        "worker",
+        "system"
+      ]
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "backendId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "sessionRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    }
+  },
+  "required": [
+    "kind",
+    "id"
+  ],
+  "title": "ActorRef",
+  "description": "Identity of the party that performed an action (architecture contract §6.4, §19.2). Every mutating action records one. `backendId` and `sessionRef` are traceability metadata; contract §3.4 forbids treating an agent session as authoritative state."
+}
