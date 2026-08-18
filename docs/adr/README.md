@@ -21,4 +21,5 @@ Rules:
 | [0002](0002-schema-authoring-and-validation.md)        | Schema authoring and validation stack                   | Accepted | §25.2 (validator) |
 | [0003](0003-schema-version-policy.md)                  | Schema version and compatibility policy                 | Accepted | §25.2 (migration) |
 | [0004](0004-event-envelope-and-forward-writes.md)      | Event envelope placement and forward-record writes      | Accepted | —                 |
+| [0005](0005-file-store-locking-and-event-ordering.md)  | File-store locking and event ordering                   | Accepted | §25.3             |
 | [0006](0006-knowledge-pack-manifest-and-precedence.md) | Knowledge Pack manifest, precedence, and conflict model | Accepted | —                 |
