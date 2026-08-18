@@ -13,15 +13,25 @@
 
 import type { ActorRef, ArtifactRef, EpisodeRef, RunManifest } from "@aldus-runtime/core";
 import {
+  AldusError,
   SCHEMA_VERSION,
   formatEpisodeId,
   isCanonicalId,
   newRunId,
   validate,
 } from "@aldus-runtime/core";
+import { isArchived, type ArtifactRecord } from "@aldus-runtime/artifact-registry";
 import { initWorkspace } from "@aldus-runtime/file-store";
 import type { GateStatus } from "@aldus-runtime/gate-engine";
+import { operationsOf, type ReleaseBundle, type ReleaseOutcome } from "@aldus-runtime/release";
 import type { StageRunResult, StoredStageExecution } from "@aldus-runtime/stage-runner";
+import { segmentsAwaitingAcceptance } from "@aldus-runtime/tts-ledger";
+import type {
+  PerformanceScript,
+  RecordTakeInput,
+  TakeDecision,
+  TtsRequestPlan,
+} from "@aldus-runtime/tts-ledger";
 
 import { requireActor } from "./actor.js";
 import type { AldusContext } from "./context.js";
@@ -29,20 +39,31 @@ import { summariseCosts } from "./costs.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
 import { decideActions, type StageSnapshot, type StageSummaryStatus } from "./nextaction.js";
 import type {
+  ArchiveReport,
+  ArtifactLineageReport,
   ArtifactReport,
+  CleanupPlanReport,
   CostReport,
   EpisodeInspection,
   GateDecisionReport,
   InitReport,
   Inspection,
+  PlanReport,
+  ReleaseBundleReport,
+  ReleaseExecutionReport,
+  ReleaseReconciliationReport,
   ReleaseReport,
   RunInspection,
   RunReport,
   RunSummary,
+  ScriptReport,
   StageReport,
   StageRunReport,
   StartRunReport,
   StatusReport,
+  SynthesisReport,
+  TakeDecisionReport,
+  TakeReport,
 } from "./reports.js";
 import { ok, refused, unsuccessful, type ServiceResult } from "./results.js";
 
@@ -309,11 +330,111 @@ export class AldusServices {
     );
   }
 
-  /** Artifacts recorded against a Run (contract §8). */
+  /**
+   * Artifacts recorded against a Run (contract §8, §8.1, §20).
+   *
+   * Registry-backed, with §7's `artifacts.json` still read so a Run produced before the registry
+   * existed remains inspectable. Entries the registry does not hold are reported separately rather
+   * than merged: presenting one as registered would claim provenance and archival state nobody
+   * collected, and §3.4 makes the durable record authoritative.
+   */
   async artifacts(runId: string): Promise<ServiceResult<ArtifactReport>> {
     await this.#requireRun(runId);
-    const artifacts = await this.#context.workspace.runs.listRecords(runId, "artifacts");
-    return ok({ runId, artifacts });
+    const records = await this.#context.artifacts.listByRun(runId);
+    const collection = await this.#context.workspace.runs.listRecords(runId, "artifacts");
+
+    const registeredIds = new Set(records.map((record) => record.artifact.artifactId));
+    return ok({
+      runId,
+      artifacts: records.map((record) => record.artifact),
+      records,
+      unregistered: collection.filter((artifact) => !registeredIds.has(artifact.artifactId)),
+      unarchivedIrreplaceable: records.filter(
+        (record) => record.artifact.reconstructability === "irreplaceable" && !isArchived(record),
+      ),
+    });
+  }
+
+  /**
+   * Where an artifact came from and what came of it (contract §20).
+   *
+   * §20 requires production trace to answer "which inputs, code, packs, and configuration were
+   * used" and "which artifact became canonical"; this is that query. Lineage edges are digests
+   * rather than IDs, so re-registering identical bytes under a new ID keeps derived artifacts
+   * correctly attributed.
+   */
+  async artifactLineage(artifactId: string): Promise<ServiceResult<ArtifactLineageReport>> {
+    const graph = await this.#context.artifacts.lineage();
+    const record = graph.get(artifactId);
+    if (record === undefined) {
+      throw serviceError(
+        ServiceErrorCodes.ARTIFACT_NOT_REGISTERED,
+        `No artifact "${artifactId}" is registered in this workspace.`,
+        { category: "not_found", details: { artifactId } },
+      );
+    }
+    return ok({
+      artifactId,
+      record,
+      producer: graph.producerOf(artifactId),
+      inputs: graph.inputsOf(artifactId),
+      consumers: graph.consumersOf(artifactId),
+      ancestors: graph.ancestorsOf(artifactId),
+      descendants: graph.descendantsOf(artifactId),
+    });
+  }
+
+  /**
+   * Decide what a cleanup may remove, without removing anything (contract §8.1).
+   *
+   * Read-only, so it needs no actor: an operator must be able to see whether a cleanup is safe
+   * before configuring an identity to perform one. Defaults to every artifact the Run produced.
+   */
+  async planArtifactCleanup(
+    runId: string,
+    artifactIds?: readonly string[],
+  ): Promise<ServiceResult<CleanupPlanReport>> {
+    await this.#requireRun(runId);
+    const candidates =
+      artifactIds ??
+      (await this.#context.artifacts.listByRun(runId)).map((record) => record.artifact.artifactId);
+    const plan = await this.#context.artifacts.planCleanup(candidates);
+    return ok({
+      runId,
+      removable: plan.removable,
+      blocked: plan.blocked,
+      unknownArtifactIds: plan.unknownArtifactIds,
+      safe: plan.safe,
+    });
+  }
+
+  /**
+   * Take archival custody of every irreplaceable artifact that lacks it (contract §8.1).
+   *
+   * §8.1 requires irreplaceable artifacts to be archived **before** disposable working files are
+   * cleaned, so this is the operation an operator needs before any cleanup. Idempotent: an
+   * artifact already archived under the same digest is reported as such rather than re-copied.
+   */
+  async archiveIrreplaceable(request: {
+    runId: string;
+    actor?: ActorRef;
+  }): Promise<ServiceResult<ArchiveReport>> {
+    requireActor(request.actor ?? this.#context.actor, "archive");
+    await this.#requireRun(request.runId);
+
+    // Scoped to this Run rather than calling the registry's workspace-wide sweep: the caller asked
+    // about one Run, and silently archiving another Run's artifacts would be a side effect nobody
+    // requested — however benign archiving is.
+    const irreplaceable = (await this.#context.artifacts.listByRun(request.runId)).filter(
+      (record) => record.artifact.reconstructability === "irreplaceable",
+    );
+    const alreadyArchived = irreplaceable.filter((record) => isArchived(record));
+    const archived: ArtifactRecord[] = [];
+    for (const record of irreplaceable) {
+      if (isArchived(record)) continue;
+      archived.push(await this.#context.artifacts.archiveArtifact(record.artifact.artifactId));
+    }
+    return ok({ runId: request.runId, archived, alreadyArchived });
   }
 
   /** Cost records and their summary (contract §19.3). */
@@ -332,6 +453,268 @@ export class AldusServices {
       receipts,
       pending: receipts.filter((receipt) => receipt.status === "pending"),
       failed: receipts.filter((receipt) => receipt.status === "failed"),
+    });
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Release (contract §17)
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * A bundle's derived state (contract §17, §19.1).
+   *
+   * Read-only. State is derived from the stored receipts on every call rather than held, for the
+   * reason ADR-0009 derives gate state: a stored "in progress" flag survives a crash the operation
+   * it describes did not, and an operator then reads something that was true once.
+   */
+  async releaseBundleStatus(request: {
+    bundle: ReleaseBundle;
+  }): Promise<ServiceResult<ReleaseBundleReport>> {
+    await this.#requireRun(request.bundle.runId);
+    const status = await this.#context
+      .releaseExecutorFor(request.bundle.runId)
+      .status(request.bundle);
+    return ok({ runId: request.bundle.runId, bundleId: request.bundle.bundleId, status });
+  }
+
+  /**
+   * Repair the local record against the destinations (contract §17).
+   *
+   * A receipt can be lost while the remote operation succeeded, and retrying blindly then
+   * publishes twice. Reconciliation asks each adapter what the destination actually holds and
+   * repairs the record, so the next execution skips what already happened.
+   */
+  async reconcileRelease(request: {
+    bundle: ReleaseBundle;
+    actor?: ActorRef;
+  }): Promise<ServiceResult<ReleaseReconciliationReport>> {
+    const actor = requireActor(request.actor ?? this.#context.actor, "reconcile");
+    await this.#requireRun(request.bundle.runId);
+    this.#requireReleaseAdapters(request.bundle);
+
+    return this.#releaseAttempt(request.bundle.runId, async () => {
+      const report = await this.#context
+        .releaseExecutorFor(request.bundle.runId)
+        .reconcile(request.bundle, { actor });
+      return ok({
+        runId: request.bundle.runId,
+        bundleId: request.bundle.bundleId,
+        report,
+      });
+    });
+  }
+
+  /**
+   * Execute a release bundle (contract §17, §13.4).
+   *
+   * **Reconciliation always runs first, and there is no way to ask for it to be skipped.**
+   * `@aldus-runtime/release` exposes that switch so its own tests can demonstrate the duplicate publish it
+   * prevents; exposing it here would make double-publishing a caller's option, and ADR-0015 places
+   * policy on Aldus's side of the injection point. An adapter that cannot be queried is refused
+   * rather than retried.
+   *
+   * Authority comes from `@aldus-runtime/gate-engine` and is never re-decided here: §13.4 keeps uploading
+   * and making public separate, and a required operation whose authority is not held is a refusal
+   * rather than a warning.
+   */
+  async executeRelease(request: {
+    bundle: ReleaseBundle;
+    actor?: ActorRef;
+  }): Promise<ServiceResult<ReleaseExecutionReport>> {
+    const actor = requireActor(request.actor ?? this.#context.actor, "release");
+    await this.#requireRun(request.bundle.runId);
+    this.#requireReleaseAdapters(request.bundle);
+
+    return this.#releaseAttempt(request.bundle.runId, async () => {
+      const outcome = await this.#context
+        .releaseExecutorFor(request.bundle.runId)
+        .execute(request.bundle, { actor });
+      const report: ReleaseExecutionReport = {
+        runId: request.bundle.runId,
+        bundleId: request.bundle.bundleId,
+        outcome,
+      };
+      if (outcome.state === "succeeded") return ok(report);
+      return unsuccessful(report, explainReleaseOutcome(outcome));
+    });
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Performance and synthesis (contract §14, §15)
+  // ---------------------------------------------------------------------------------------------
+
+  /** Record a PerformanceScript (contract §14.1). */
+  async recordPerformanceScript(request: {
+    script: PerformanceScript;
+    actor?: ActorRef;
+  }): Promise<ServiceResult<ScriptReport>> {
+    const actor = requireActor(request.actor ?? this.#context.actor, "record script");
+    const manifest = await this.#requireRun(request.script.runId);
+    const script = await this.#context
+      .ledgerFor()
+      .recordScript(request.script, manifest.episode.episodeId, actor);
+    return ok({ runId: script.runId, script });
+  }
+
+  /**
+   * Record a synthesis request plan (contract §13.2, §15).
+   *
+   * A plan is the thing an operator approves, so recording one is not authorization — it is what
+   * makes authorization possible. Nothing here spends anything.
+   */
+  async recordSynthesisPlan(request: {
+    plan: TtsRequestPlan;
+    actor?: ActorRef;
+  }): Promise<ServiceResult<PlanReport>> {
+    const actor = requireActor(request.actor ?? this.#context.actor, "record plan");
+    const manifest = await this.#requireRun(request.plan.runId);
+    const plan = await this.#context
+      .ledgerFor(request.plan)
+      .recordPlan(request.plan, manifest.episode.episodeId, actor);
+    return ok({ runId: plan.runId, plan });
+  }
+
+  /**
+   * Synthesise one segment of an approved plan (contract §13.2, §15).
+   *
+   * This is the only path from Aldus to a synthesis provider, and it authorizes before it calls —
+   * see `synthesis.ts` for why the adapter is unreachable rather than merely guarded. A plan whose
+   * §13.2 authorization does not currently hold is **refused with the adapter untouched**, so no
+   * money is spent on content nobody approved.
+   *
+   * A missing adapter throws rather than refusing: ADR-0015 makes supplying one the adopter's
+   * responsibility, and no approval an operator could grant would conjure it.
+   */
+  async synthesiseSegment(request: {
+    plan: TtsRequestPlan;
+    segmentId: string;
+    actor?: ActorRef;
+  }): Promise<ServiceResult<SynthesisReport>> {
+    const actor = requireActor(request.actor ?? this.#context.actor, "synthesise");
+    const manifest = await this.#requireRun(request.plan.runId);
+
+    const gateway = this.#context.synthesisFor(request.plan);
+    if (gateway === undefined) {
+      throw serviceError(
+        ServiceErrorCodes.ADAPTER_NOT_WIRED,
+        "No synthesis adapter is wired, so nothing can perform synthesis. Aldus never calls a " +
+          "provider itself (contract §4.2, §15.1); an adopter integration supplies the adapter " +
+          "(§4.3).",
+        { category: "policy", details: { runId: request.plan.runId } },
+      );
+    }
+
+    const result = await gateway.synthesise({
+      plan: request.plan,
+      segmentId: request.segmentId,
+      episodeId: manifest.episode.episodeId,
+      actor,
+    });
+
+    if (!result.permitted) {
+      return refused({
+        reason: "synthesis_not_authorized",
+        explanation: result.explanation,
+        details: { runId: request.plan.runId, planId: request.plan.planId },
+      });
+    }
+
+    return ok({
+      runId: request.plan.runId,
+      planId: request.plan.planId,
+      segmentId: request.segmentId,
+      take: result.take,
+      adapterId: gateway.adapterId,
+    });
+  }
+
+  /**
+   * Record a charge that was incurred without a valid authorization (contract §13.2, §20).
+   *
+   * An escape hatch, and deliberately an awkward one. §13.2's enforcement point is before a Worker
+   * runs, so by the time a charge reaches the ledger the money is gone — and refusing to record it
+   * would leave §20's trace unable to answer what something cost. This admits the record and marks
+   * it plainly.
+   *
+   * It is **not** a synthesis path: it performs no synthesis and cannot reach an adapter. Recording
+   * a charge is not the same as being allowed to incur one.
+   */
+  async recordUnauthorizedCharge(request: {
+    plan: TtsRequestPlan;
+    segmentId: string;
+    take: RecordTakeInput["take"];
+    reason: string;
+    rejectedAuthorizationId?: string;
+    actor?: ActorRef;
+  }): Promise<ServiceResult<SynthesisReport>> {
+    const actor = requireActor(request.actor ?? this.#context.actor, "record unauthorized charge");
+    const manifest = await this.#requireRun(request.plan.runId);
+
+    const take = await this.#context.ledgerFor(request.plan).recordUnauthorizedCharge({
+      runId: request.plan.runId,
+      planId: request.plan.planId,
+      segmentId: request.segmentId,
+      episodeId: manifest.episode.episodeId,
+      actor,
+      take: request.take,
+      reason: request.reason,
+      ...(request.rejectedAuthorizationId === undefined
+        ? {}
+        : { rejectedAuthorizationId: request.rejectedAuthorizationId }),
+    });
+
+    return ok({
+      runId: request.plan.runId,
+      planId: request.plan.planId,
+      segmentId: request.segmentId,
+      take,
+      adapterId: "none",
+    });
+  }
+
+  /**
+   * Attach a human's judgement to a take (contract §13.3, §15).
+   *
+   * §13.3 keeps final performance approval human-owned. A take is decided once; changing one's
+   * mind is a new take superseding it, which is also what keeps the rejected take §15.1 requires
+   * retained.
+   */
+  async decideTake(request: {
+    runId: string;
+    takeId: string;
+    decision: TakeDecision;
+    actor?: ActorRef;
+  }): Promise<ServiceResult<TakeDecisionReport>> {
+    requireActor(request.actor ?? this.#context.actor, "decide take");
+    const manifest = await this.#requireRun(request.runId);
+    const take = await this.#context
+      .ledgerFor()
+      .decideTake(request.runId, request.takeId, request.decision, manifest.episode.episodeId);
+    return ok({ runId: request.runId, take });
+  }
+
+  /**
+   * Takes recorded for a Run, with their lineage (contract §15, §15.1).
+   *
+   * Read-only, so no actor. Rejected takes are present by design: §15.1 requires them retained,
+   * because a rejected take is evidence of what was tried and the input to a repair decision.
+   */
+  async takes(runId: string): Promise<ServiceResult<TakeReport>> {
+    await this.#requireRun(runId);
+    const ledger = this.#context.ledgerFor();
+    const takes = await ledger.listTakes(runId);
+    const lineage = [...(await ledger.lineage(runId)).values()];
+    return ok({
+      runId,
+      takes,
+      lineage,
+      // Segments that have been synthesised and not yet judged. A segment that was planned but
+      // never attempted is not "awaiting acceptance" — it is awaiting synthesis, which is a
+      // different situation with a different next action.
+      awaitingAcceptance: segmentsAwaitingAcceptance(
+        takes,
+        lineage.map((entry) => entry.segmentId),
+      ),
     });
   }
 
@@ -444,6 +827,56 @@ export class AldusServices {
   // ---------------------------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------------------------
+
+  /**
+   * Refuse a bundle naming a destination nothing can serve (contract §17, ADR-0015).
+   *
+   * Throws rather than refusing: a missing adapter is a wiring error the adopter must fix, and no
+   * approval an operator could grant would make it appear. Checked up front so a bundle does not
+   * half-execute before discovering its last operation has nowhere to go.
+   */
+  #requireReleaseAdapters(bundle: ReleaseBundle): void {
+    const missing = [
+      ...new Set(
+        operationsOf(bundle)
+          .map((operation) => operation.destination)
+          .filter((destination) => this.#context.releaseAdapters.find(destination) === undefined),
+      ),
+    ];
+    if (missing.length === 0) return;
+    throw serviceError(
+      ServiceErrorCodes.ADAPTER_NOT_WIRED,
+      `No release adapter is wired for ${missing.map((name) => `"${name}"`).join(", ")}. Aldus ` +
+        "names no publishing platform (contract §4.2); an adopter integration supplies the " +
+        "adapter for each destination (§4.3).",
+      { category: "policy", details: { runId: bundle.runId, destinations: missing } },
+    );
+  }
+
+  /**
+   * Map a release refusal onto a `refused` result.
+   *
+   * `@aldus-runtime/release` throws for an unheld authority (§13.4) and for an unconfirmed outcome that
+   * cannot be reconciled (§17). Both are policy answers, not malfunctions: §18's contract is that
+   * "not permitted right now" is an ordinary reply, and letting them surface as exceptions would
+   * force every adapter into try/catch to learn something it needs to display.
+   */
+  async #releaseAttempt<T>(
+    runId: string,
+    attempt: () => Promise<ServiceResult<T>>,
+  ): Promise<ServiceResult<T>> {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!(error instanceof AldusError)) throw error;
+      if (error.category !== "policy" && error.category !== "conflict") throw error;
+      return refused({
+        reason: error.code,
+        explanation: error.message,
+        details: { runId, ...(error.details ?? {}) },
+      });
+    }
+  }
 
   /** Load a Run or fail with a clear cause. */
   async #requireRun(runId: string): Promise<RunManifest> {
@@ -580,6 +1013,26 @@ function explainStageOutcome(result: StageRunResult): string {
     default:
       return "The stage did not succeed.";
   }
+}
+
+/**
+ * One sentence for a non-success release outcome (contract §17).
+ *
+ * `pending` is called out separately from `failed` because they demand opposite responses: a
+ * pending operation must be reconciled against the destination, and retrying it is how a double
+ * publish happens.
+ */
+function explainReleaseOutcome(outcome: ReleaseOutcome): string {
+  const remaining = outcome.status.remaining.join(", ");
+  if (outcome.state === "pending") {
+    return (
+      `The release is incomplete because an operation's outcome was never confirmed (${remaining}). ` +
+      "It must be reconciled against the destination rather than retried, since retrying " +
+      "something that already succeeded would publish it twice."
+    );
+  }
+  const warnings = outcome.warnings.length > 0 ? ` ${outcome.warnings.join(" ")}` : "";
+  return `The release did not complete. Outstanding operations: ${remaining || "none"}.${warnings}`;
 }
 
 /** One sentence for the workspace as a whole. */
