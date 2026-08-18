@@ -40,7 +40,13 @@ import {
   RunStoreGateDecisionStore,
 } from "./adapters.js";
 import { fileLedgerStores, type LedgerLayout } from "./ledger-store.js";
-import { resolveRequiredGates, type WorkflowGraph } from "./workflow.js";
+import { ServiceErrorCodes, serviceError } from "./errors.js";
+import {
+  predecessorsOf,
+  resolveRequiredGates,
+  validateWorkflowGraph,
+  type WorkflowGraph,
+} from "./workflow.js";
 import {
   SynthesisGateway,
   gateEngineSpendAuthorizer,
@@ -136,6 +142,29 @@ export class AldusContext {
     this.workspace = options.workspace;
     this.gateRegistry = options.gates ?? GateRegistry.from([]);
     this.stageRegistry = options.stages ?? new StageRegistry();
+    // A graph that cannot be satisfied is refused where it is supplied, not where a Run wedges.
+    // Checked here rather than in the CLI's config validation so every consumer benefits, not
+    // only the binary (ADR-0015, ADR-0028).
+    if (options.workflow !== undefined) {
+      const problems = validateWorkflowGraph(options.workflow);
+      if (problems.length > 0) {
+        throw serviceError(
+          ServiceErrorCodes.INVALID_REQUEST,
+          `The workflow graph is not satisfiable:\n${problems
+            .map((problem) => `  - ${problem.message}`)
+            .join("\n")}`,
+          {
+            category: "validation",
+            details: {
+              problems: problems.map((problem) => ({
+                kind: problem.kind,
+                stages: problem.stages,
+              })),
+            },
+          },
+        );
+      }
+    }
     this.workflow = options.workflow;
     this.actor = options.actor;
     this.backend = options.backend;
@@ -179,6 +208,17 @@ export class AldusContext {
     const definition = latest === undefined ? undefined : this.stageRegistry.get(stageId, latest);
     const resolution = resolveRequiredGates(stageId, this.workflow, definition?.requiredGates);
     return resolution.declared ? resolution.gates : undefined;
+  }
+
+  /**
+   * Stages that must succeed before one stage may run (contract §11, ADR-0028).
+   *
+   * Empty when the stage declares no ordering. Unlike {@link AldusContext.requiredGatesFor}, there
+   * is no undeclared/declared-empty distinction to preserve: an edge only ever adds a
+   * precondition, so absence and "no predecessors" mean the same thing.
+   */
+  predecessorsFor(stageId: string): readonly string[] {
+    return predecessorsOf(stageId, this.workflow);
   }
 
   /** True when an adopter supplied a synthesis adapter (contract §4.3). */

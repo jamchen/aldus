@@ -52,6 +52,17 @@ export interface StageSnapshot {
    * a pure function of state (see `workflow.ts`).
    */
   requiredGates?: readonly string[];
+  /**
+   * Stages that must have succeeded before this one may run (contract §11, ADR-0028).
+   *
+   * Orthogonal to {@link StageSnapshot.requiredGates}: a gate is an authorization, an edge is a
+   * data dependency. A stage may be held by either, both, or neither.
+   *
+   * Absent and `[]` mean the same thing here — no ordering constraint — and deliberately so.
+   * An edge only ever adds a precondition, so a missing one cannot silently unblock work the way
+   * a missing gate declaration could, and needs no conservative reading (ADR-0028).
+   */
+  after?: readonly string[];
 }
 
 /** What the policy needs to know about a Run. */
@@ -276,18 +287,19 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
   for (const stage of stages) {
     if (stage.status !== "failed") continue;
 
-    // A gate that blocks running a stage blocks retrying it too: a retry re-executes the stage,
-    // so offering one while a required gate is unsatisfied would put `status` and `aldus retry`
-    // back in the disagreement ADR-0024 exists to remove.
-    const gateBlocker = blockerFor(stage, gates, gateById, associationDeclared);
-    if (gateBlocker?.enforcement === "enforced") {
+    // Whatever blocks running a stage blocks retrying it too: a retry re-executes the stage, so
+    // offering one while a precondition is unmet would put `status` and `aldus retry` back in the
+    // disagreement ADR-0024 exists to remove.
+    const retryBlocker =
+      orderingBlockerIn(stage, stages) ?? blockerFor(stage, gates, gateById, associationDeclared);
+    if (retryBlocker?.enforcement === "enforced") {
       blocked.push({
         kind: "retry-stage",
         summary: `Retry "${stage.stageId}"`,
-        reason: gateBlocker.reason,
+        reason: retryBlocker.reason,
         stageId: stage.stageId,
-        enforcement: gateBlocker.enforcement,
-        ...(gateBlocker.gateId !== undefined ? { gateId: gateBlocker.gateId } : {}),
+        enforcement: retryBlocker.enforcement,
+        ...(retryBlocker.gateId !== undefined ? { gateId: retryBlocker.gateId } : {}),
       });
       continue;
     }
@@ -328,7 +340,11 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
     }
     if (stage.status !== "never_run" && stage.status !== "queued") continue;
 
-    const blocker = blockerFor(stage, gates, gateById, associationDeclared);
+    // Ordering before gates: when both hold a stage, running the predecessor is what makes
+    // progress, and the gate may not be decidable until the predecessor has produced what it
+    // binds (ADR-0028).
+    const blocker =
+      orderingBlockerIn(stage, stages) ?? blockerFor(stage, gates, gateById, associationDeclared);
     if (blocker !== undefined) {
       blocked.push({
         kind: "run-stage",
@@ -375,10 +391,20 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
 
 /** Why a stage may not run, when something stops it. */
 export interface StageBlocker {
+  /**
+   * What kind of precondition is unmet.
+   *
+   * `gate` is an authorization someone must decide; `ordering` is a stage that must succeed
+   * first. They are reported separately because an operator acts on them differently — one is
+   * "approve something", the other is "run something else" (ADR-0028).
+   */
+  kind: "gate" | "ordering";
   /** Operator-facing explanation, identical to the one `status` prints for this state. */
   reason: string;
   /** The gate responsible, when one is identifiable. */
   gateId?: string;
+  /** Predecessors not yet succeeded, when `kind` is `ordering`. */
+  after?: readonly string[];
   /** Whether this actually stops the stage running, or is only worth saying. @see BlockEnforcement */
   enforcement: BlockEnforcement;
 }
@@ -409,6 +435,43 @@ export function enforcedGateBlockerFor(
 }
 
 /**
+ * Everything that stops this stage running, gate or ordering (ADR-0024, ADR-0028).
+ *
+ * What `AldusServices.runStage` refuses on. Ordering is checked **first**, and the order is not
+ * arbitrary: when a stage is both gated and ordered, running its predecessor is the step that
+ * makes progress, and the gate may not even be decidable until the predecessor has produced the
+ * subjects the gate binds. Naming the gate first would send an operator to approve something they
+ * have no evidence for yet.
+ */
+export function enforcedBlockerFor(
+  stageId: string,
+  input: ActionPolicyInput,
+): StageBlocker | undefined {
+  return orderingBlockerFor(stageId, input) ?? enforcedGateBlockerFor(stageId, input);
+}
+
+/**
+ * Whether a declared predecessor has not succeeded yet (contract §11, ADR-0028).
+ *
+ * Always `enforced`, and that is safe here in a way the conservative *gate* fallback was not.
+ * ADR-0024's deadlock came from refusing on something the runtime had **guessed**: every gate is
+ * unsatisfied when a Run starts, so refusing every undeclared stage left nothing runnable and no
+ * way out, because the subjects those gates bind are produced by the very stages being refused.
+ *
+ * An unmet predecessor is the opposite on both counts. It is *declared*, not inferred — and it
+ * clears by running the predecessor, which is always possible, because a graph with no runnable
+ * entry point is a cycle and is refused when the graph is resolved. There is no configuration in
+ * which every stage is refused with nothing an operator can do.
+ */
+export function orderingBlockerFor(
+  stageId: string,
+  input: ActionPolicyInput,
+): StageBlocker | undefined {
+  const stage = input.stages.find((candidate) => candidate.stageId === stageId);
+  return stage === undefined ? undefined : orderingBlockerIn(stage, input.stages);
+}
+
+/**
  * Whether any gate is worth reporting against this stage, enforced or not (ADR-0024).
  *
  * Callers deciding whether to *act* want {@link enforcedGateBlockerFor}. This one is for display.
@@ -426,6 +489,36 @@ export function gateBlockerFor(
     (candidate) => candidate.requiredGates !== undefined,
   );
   return blockerFor(stage, input.gates, gateById, associationDeclared);
+}
+
+/**
+ * Whether a declared predecessor of `stage` has not succeeded (contract §11, ADR-0028).
+ *
+ * The shared implementation behind both the display path and {@link orderingBlockerFor}, so
+ * `status` and `runStage` cannot form different opinions about the same graph.
+ */
+function orderingBlockerIn(
+  stage: StageSnapshot,
+  stages: readonly StageSnapshot[],
+): StageBlocker | undefined {
+  const after = stage.after ?? [];
+  if (after.length === 0) return undefined;
+
+  const succeeded = new Set(
+    stages.filter((entry) => entry.status === "succeeded").map((entry) => entry.stageId),
+  );
+  const outstanding = after.filter((predecessor) => !succeeded.has(predecessor));
+  if (outstanding.length === 0) return undefined;
+
+  return {
+    kind: "ordering",
+    enforcement: "enforced",
+    after: outstanding,
+    reason:
+      `Stage "${stage.stageId}" must run after ${formatList(outstanding)}, which ` +
+      `${outstanding.length === 1 ? "has" : "have"} not succeeded yet (contract §11). ` +
+      `Run ${outstanding.length === 1 ? "it" : "them"} first.`,
+  };
 }
 
 /**
@@ -457,6 +550,7 @@ function blockerFor(
     // is guessing — and a guess must not refuse work (ADR-0024).
     return {
       gateId: blocker.gateId,
+      kind: "gate",
       enforcement: "advisory",
       reason: associationDeclared
         ? `Gate "${blocker.gateId}" is ${blocker.state} and is blocking (contract §13). ` +
@@ -474,6 +568,7 @@ function blockerFor(
       // would proceed past a guard the adopter believes is protecting it.
       return {
         gateId,
+        kind: "gate",
         enforcement: "enforced",
         reason:
           `Stage "${stage.stageId}" requires gate "${gateId}", which is not registered, so it ` +
@@ -483,6 +578,7 @@ function blockerFor(
     if (isBlocking(gate)) {
       return {
         gateId,
+        kind: "gate",
         enforcement: "enforced",
         reason:
           `Gate "${gateId}" is ${gate.state} and is blocking (contract §13). Stage ` +
