@@ -44,7 +44,7 @@ import { summariseCosts } from "./costs.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
 import {
   decideActions,
-  enforcedGateBlockerFor,
+  enforcedBlockerFor,
   type ActionPolicyInput,
   type StageSnapshot,
   type StageSummaryStatus,
@@ -78,6 +78,7 @@ import type {
 } from "./reports.js";
 import { ok, refused, unsuccessful, type ServiceResult } from "./results.js";
 import { deriveRunState, type RunState } from "./runstate.js";
+import { terminalStagesOf } from "./workflow.js";
 
 /** What `init` needs. */
 export interface InitRequest {
@@ -105,9 +106,12 @@ export interface StartRunRequest {
   /**
    * The stages this Run intends to reach (contract §11, ADR-0026).
    *
-   * Defaults to every stage the workflow graph names. Declare it when this Run will deliberately
-   * stop short — a conditional stage that this edition skips, or a run that never publishes —
-   * because a graph says what a workflow *can* do and cannot say what one Run set out to do.
+   * Defaults to the graph's terminal stages — those nothing else waits on — when the graph
+   * declares ordering edges, and to every stage it names when it does not (ADR-0028).
+   *
+   * Declare it when this Run will deliberately stop short: a conditional stage that this edition
+   * skips, or a run that never publishes. A graph says what a workflow *can* do and cannot say
+   * what one Run set out to do.
    */
   goalStages?: readonly string[];
   actor?: ActorRef;
@@ -360,7 +364,11 @@ export class AldusServices {
 
     if (requested === undefined) {
       if (graph === undefined) return undefined;
-      return graph.stages.map((node) => node.stageId);
+      // Terminals when the graph declares edges; every stage otherwise. Without edges every stage
+      // is trivially terminal, so the narrower answer would be the same list dressed up as a
+      // deduction (ADR-0028).
+      const terminals = terminalStagesOf(graph);
+      return terminals.length > 0 ? terminals : graph.stages.map((node) => node.stageId);
     }
 
     if (graph !== undefined) {
@@ -877,18 +885,24 @@ export class AldusServices {
     // gate blocks an undeclared stage — is right for the next-action display and would be a
     // deadlock here: every gate is unsatisfied when a Run starts, and the subjects those gates
     // bind are produced by the very stages that would be refused (ADR-0024).
-    const blocker = enforcedGateBlockerFor(
+    //
+    // An unmet *predecessor* refuses unconditionally, and that asymmetry is deliberate: an edge
+    // is declared rather than guessed, and it clears by running the predecessor, which is always
+    // possible because a graph with no runnable entry point is a cycle and was refused when the
+    // graph was resolved (ADR-0028).
+    const blocker = enforcedBlockerFor(
       request.stageId,
       await this.#policyInput(request.runId, manifest, runner),
     );
     if (blocker !== undefined) {
       return refused({
-        reason: "stage_gate_unsatisfied",
+        reason: blocker.kind === "ordering" ? "stage_predecessor_unmet" : "stage_gate_unsatisfied",
         explanation: blocker.reason,
         details: {
           runId: request.runId,
           stageId: request.stageId,
           ...(blocker.gateId !== undefined ? { gateId: blocker.gateId } : {}),
+          ...(blocker.after !== undefined ? { after: blocker.after } : {}),
         },
       });
     }
@@ -1052,7 +1066,11 @@ export class AldusServices {
   async #runState(runId: string, manifest: RunManifest, runner: StageRunner): Promise<RunState> {
     const state = await runner.stageState(runId);
     const stages = this.#stageReports(state.stages).map((report) =>
-      toSnapshot(report, this.#context.requiredGatesFor(report.stageId)),
+      toSnapshot(
+        report,
+        this.#context.requiredGatesFor(report.stageId),
+        this.#context.predecessorsFor(report.stageId),
+      ),
     );
     return deriveRunState(manifest, stages, this.#context.workflow);
   }
@@ -1102,7 +1120,11 @@ export class AldusServices {
       // Required gates are resolved here rather than inside the policy, so `decideActions` stays
       // a pure function of state and the workflow graph stays a caller concern (ADR-0021).
       stages: stages.map((report) =>
-        toSnapshot(report, this.#context.requiredGatesFor(report.stageId)),
+        toSnapshot(
+          report,
+          this.#context.requiredGatesFor(report.stageId),
+          this.#context.predecessorsFor(report.stageId),
+        ),
       ),
       gates,
     };
@@ -1189,6 +1211,7 @@ function gateIdOf(entry: StoredStageExecution): string | undefined {
 function toSnapshot(
   report: StageReport,
   requiredGates: readonly string[] | undefined,
+  after: readonly string[] = [],
 ): StageSnapshot {
   return {
     stageId: report.stageId,
@@ -1198,6 +1221,9 @@ function toSnapshot(
     ...(report.attempt !== undefined ? { attempt: report.attempt } : {}),
     // Absent stays absent: the policy distinguishes "declared none" from "not declared".
     ...(requiredGates !== undefined ? { requiredGates } : {}),
+    // Empty is omitted rather than passed through — for edges the two mean the same thing, and
+    // omitting keeps a snapshot of a graph-less workflow identical to what it was before ADR-0028.
+    ...(after.length > 0 ? { after } : {}),
   };
 }
 

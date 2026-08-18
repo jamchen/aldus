@@ -24,9 +24,14 @@ export {
 export { AldusContext, type AldusContextOptions, type SubjectsProvider } from "./context.js";
 
 export {
+  hasEdges,
+  predecessorsOf,
   resolveRequiredGates,
+  terminalStagesOf,
+  validateWorkflowGraph,
   type RequiredGatesResolution,
   type WorkflowGraph,
+  type WorkflowGraphProblem,
   type WorkflowStageNode,
 } from "./workflow.js";
 
@@ -60,8 +65,10 @@ export { ServiceErrorCodes, serviceError, type ServiceErrorCode } from "./errors
 
 export {
   decideActions,
+  enforcedBlockerFor,
   enforcedGateBlockerFor,
   gateBlockerFor,
+  orderingBlockerFor,
   type ActionPlan,
   type ActionPolicyInput,
   type BlockedAction,

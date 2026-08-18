@@ -44,3 +44,4 @@ Rules:
 | [0025](0025-config-strictness.md)                       | An operator's config module rejects keys Aldus does not recognise                          | Accepted | #46 (strictness)  |
 | [0026](0026-derived-run-status.md)                      | A Run's status is derived; its completion is declared intent                               | Accepted | —                 |
 | [0027](0027-stage-artifact-registration.md)             | A stage registers artifacts through a port, and never states its own provenance            | Accepted | —                 |
+| [0028](0028-workflow-stage-ordering.md)                 | A workflow graph declares stage ordering, separately from gating                           | Accepted | #55               |
