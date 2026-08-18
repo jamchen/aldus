@@ -106,14 +106,13 @@ writeFileSync(
       type: "module",
       description: "Throwaway project proving the published tarballs install and work.",
       dependencies: byName,
-      // @types/node is a realistic consumer dependency, and required here: the published
-      // declarations reference Node globals (`AbortSignal` on stage cancellation, `Headers` on
-      // `redactHeaders`). A consumer without it gets errors from inside our own .d.ts files.
-      // Whether the packages should declare @types/node themselves is a real question — see
-      // the note in docs/RELEASING.md.
+      // `@types/node` is deliberately NOT installed here. The published declarations reference
+      // Node globals (`AbortSignal` on stage cancellation, `Headers` on `redactHeaders`), and
+      // the packages that expose them now declare `@types/node` as a real dependency — so a
+      // consumer gets it transitively. Installing it here would hide that: the typecheck would
+      // pass whether or not the packages declared what their own .d.ts files require.
       devDependencies: {
         typescript: readTypeScriptRange(),
-        "@types/node": readTypesNodeRange(),
       },
       overrides: byName,
     },
@@ -151,15 +150,6 @@ cpSync(join(fixtureDir, "types.ts"), join(consumerRoot, "types.ts"));
 function readTypeScriptRange() {
   const root = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
   return root.devDependencies?.typescript ?? "latest";
-}
-
-/** Match the @types/node the packages were built against, for the same reason. */
-function readTypesNodeRange() {
-  for (const pkg of publishSet()) {
-    const range = pkg.manifest.devDependencies?.["@types/node"];
-    if (range !== undefined) return range;
-  }
-  return "latest";
 }
 
 // --- 3. Install only the tarballs ------------------------------------------------------------

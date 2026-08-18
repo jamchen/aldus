@@ -246,12 +246,17 @@ repeat it.
 
 ## Known considerations
 
-- **The published declarations reference Node globals** (`AbortSignal` on stage cancellation,
-  `Headers` on `redactHeaders`), so a TypeScript consumer needs `@types/node`. It currently is
-  not declared as a dependency of any package, which means a consumer discovers the requirement
-  through an error inside our `.d.ts` files rather than through their own install. Declaring
-  `@types/node` as a runtime dependency on the packages whose public types reference it would be
-  friendlier; the clean-consumer fixture installs it explicitly so the gap stays visible.
-- **Source maps ship without sources.** `dist/*.map` reference `../src/*.ts`, which is not in the
-  tarball, so the maps resolve to nothing. Either add `src` to `files[]` or stop emitting maps —
-  worth deciding before consumers rely on either.
+Both items previously listed here were resolved before the first release. They are kept as
+notes because each is a rule a future package must follow.
+
+- **A package whose public declarations reference Node globals declares `@types/node` as a
+  runtime dependency.** Three do — `core` (`Headers`, in `redactHeaders`), `services` and
+  `stage-runner` (`AbortSignal`, on stage cancellation). Without the declaration a consumer meets
+  the requirement as an error inside _our_ `.d.ts` files rather than through their own install.
+  The clean-consumer fixture deliberately does **not** install `@types/node`, so the typecheck
+  only passes while the packages declare what their declarations need. Adding a Node global to a
+  public type without adding the dependency will fail the gate.
+- **`src` ships, so source maps resolve.** `dist/*.map` reference `../src/*.ts`; without the
+  sources the maps point at nothing and "go to definition" lands nowhere. Shipping source also
+  suits a contracts-heavy library under Apache-2.0, where the source is public regardless. The
+  cost is roughly doubled tarball size, which is small in absolute terms.

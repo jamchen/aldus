@@ -21,6 +21,7 @@
   },
   "files": [
     "dist",
+    "src",
     "LICENSE",
     "NOTICE"
   ],
@@ -38,11 +39,11 @@
     "@aldus-runtime/gate-engine": "0.1.0",
     "@aldus-runtime/release": "0.1.0",
     "@aldus-runtime/stage-runner": "0.1.0",
-    "@aldus-runtime/tts-ledger": "0.1.0"
+    "@aldus-runtime/tts-ledger": "0.1.0",
+    "@types/node": "^26.2.0"
   },
   "devDependencies": {
     "@aldus-runtime/testkit": "0.1.0",
-    "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
