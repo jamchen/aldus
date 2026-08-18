@@ -56,6 +56,15 @@ export function allPackages() {
  * `private` has been cleared. {@link assertReleaseReady} checks `private` separately, at the
  * point where it actually matters.
  */
+/**
+ * The repository every published package must point at, in npm's canonical spelling.
+ *
+ * Declared once because three places knew this string independently — the manifests, the
+ * licensing test, and this check — and changing two of them left the release gate refusing a
+ * release that was otherwise correct. Exported so the mismatch cannot recur silently.
+ */
+export const REPOSITORY_URL = "git+https://github.com/jamchen/aldus.git";
+
 export function publishSet() {
   return allPackages().filter((pkg) => !NEVER_PUBLISH.has(pkg.name));
 }
@@ -102,7 +111,9 @@ export function assertReleaseReady(packages = publishSet()) {
     if (manifest.license !== "Apache-2.0") {
       problems.push(`${name}: license is ${JSON.stringify(manifest.license)}, expected Apache-2.0`);
     }
-    if (manifest.repository?.url !== "https://github.com/jamchen/aldus") {
+    // npm's canonical spelling. A plain `https://…` is accepted and then rewritten on publish,
+    // so the manifests carry the form that actually reaches the registry (see licensing.test.ts).
+    if (manifest.repository?.url !== REPOSITORY_URL) {
       problems.push(`${name}: repository.url must be the canonical repository for provenance`);
     }
     if (manifest.publishConfig?.access !== "public") {
