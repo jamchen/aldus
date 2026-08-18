@@ -1,0 +1,340 @@
+{
+  "schemaVersion": "1.0",
+  "note": "Fixtures are pinned at schemaVersion 1.0 and are FROZEN. A MAJOR schema bump revisits them deliberately (ADR-0003); they are never edited to make a failing test pass. `jsonSchemaDetectable: false` marks a defect that only the normative Zod schema catches, because the constraint is a cross-field refinement JSON Schema cannot express (ADR-0002).",
+  "valid": [
+    {
+      "schema": "ActorRef",
+      "case": "minimal",
+      "file": "valid/ActorRef.minimal.json",
+      "description": "Only the two required fields: who acted and of what kind."
+    },
+    {
+      "schema": "ActorRef",
+      "case": "full",
+      "file": "valid/ActorRef.full.json",
+      "description": "Every optional traceability field populated (§10 backend and session refs)."
+    },
+    {
+      "schema": "StructuredError",
+      "case": "minimal",
+      "file": "valid/StructuredError.minimal.json",
+      "description": "The four required fields of a persistable failure (§19.1)."
+    },
+    {
+      "schema": "StructuredError",
+      "case": "full",
+      "file": "valid/StructuredError.full.json",
+      "description": "Nested cause chain, redacted details, and a timestamp."
+    },
+    {
+      "schema": "KnowledgePackRef",
+      "case": "minimal",
+      "file": "valid/KnowledgePackRef.minimal.json",
+      "description": "Identity, version, and authority only (§9.1)."
+    },
+    {
+      "schema": "KnowledgePackRef",
+      "case": "full",
+      "file": "valid/KnowledgePackRef.full.json",
+      "description": "Scope map, precedence, source revision, and a verifiable content digest."
+    },
+    {
+      "schema": "EpisodeRef",
+      "case": "minimal",
+      "file": "valid/EpisodeRef.minimal.json",
+      "description": "Durable content identity with no display or legacy metadata (§6.1)."
+    },
+    {
+      "schema": "EpisodeRef",
+      "case": "full",
+      "file": "valid/EpisodeRef.full.json",
+      "description": "Includes a title and a pointer to a pre-Aldus identity (§4.3)."
+    },
+    {
+      "schema": "ArtifactRef",
+      "case": "minimal",
+      "file": "valid/ArtifactRef.minimal.json",
+      "description": "A source artifact with no declared inputs and unknown size (§8)."
+    },
+    {
+      "schema": "ArtifactRef",
+      "case": "full",
+      "file": "valid/ArtifactRef.full.json",
+      "description": "An irreplaceable artifact with lineage inputs and a known size (§8.1)."
+    },
+    {
+      "schema": "RunManifest",
+      "case": "minimal",
+      "file": "valid/RunManifest.minimal.json",
+      "description": "A freshly created Run with no stage entered and no packs resolved (§6.2)."
+    },
+    {
+      "schema": "RunManifest",
+      "case": "full",
+      "file": "valid/RunManifest.full.json",
+      "description": "A Run parked on a human gate, with a snapshotted pack set (§5.1, §9)."
+    },
+    {
+      "schema": "StageAttempt",
+      "case": "minimal",
+      "file": "valid/StageAttempt.minimal.json",
+      "description": "A queued attempt that has not started and consumed nothing (§6.3)."
+    },
+    {
+      "schema": "StageAttempt",
+      "case": "full",
+      "file": "valid/StageAttempt.full.json",
+      "description": "A failed retry recording its inputs, outputs, actor, and structured failure."
+    },
+    {
+      "schema": "StageExecution",
+      "case": "minimal",
+      "file": "valid/StageExecution.minimal.json",
+      "description": "A stage that has not yet been attempted (§6.3)."
+    },
+    {
+      "schema": "StageExecution",
+      "case": "full",
+      "file": "valid/StageExecution.full.json",
+      "description": "Two append-only attempts with strictly ascending ordinals (§6.3)."
+    },
+    {
+      "schema": "GateDecision",
+      "case": "minimal",
+      "file": "valid/GateDecision.minimal.json",
+      "description": "An approval bound to nothing, with invalidation explicitly declined (§13)."
+    },
+    {
+      "schema": "GateDecision",
+      "case": "full",
+      "file": "valid/GateDecision.full.json",
+      "description": "A hash-bound decision that expires if any bound input changes (§13.2)."
+    },
+    {
+      "schema": "CostRecord",
+      "case": "minimal",
+      "file": "valid/CostRecord.minimal.json",
+      "description": "A pre-execution cost preview, with no actual charge yet (§19.3)."
+    },
+    {
+      "schema": "CostRecord",
+      "case": "full",
+      "file": "valid/CostRecord.full.json",
+      "description": "A charged cost traced to its authorising decision and provider request (§13.2, §15)."
+    },
+    {
+      "schema": "ReleaseReceipt",
+      "case": "minimal",
+      "file": "valid/ReleaseReceipt.minimal.json",
+      "description": "An in-flight operation whose outcome is not yet known, awaiting reconciliation (§17)."
+    },
+    {
+      "schema": "ReleaseReceipt",
+      "case": "full",
+      "file": "valid/ReleaseReceipt.full.json",
+      "description": "A failed operation carrying its remote identity and structured failure."
+    }
+  ],
+  "invalid": [
+    {
+      "schema": "ActorRef",
+      "case": "unknown-kind",
+      "file": "invalid/ActorRef.unknown-kind.json",
+      "description": "`kind` outside the closed ACTOR_KINDS enum.",
+      "expectedPath": "kind",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "ActorRef",
+      "case": "empty-id",
+      "file": "invalid/ActorRef.empty-id.json",
+      "description": "`id` empty; actor identity is required for every mutating action (§19.2).",
+      "expectedPath": "id",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "StructuredError",
+      "case": "unknown-category",
+      "file": "invalid/StructuredError.unknown-category.json",
+      "description": "`category` outside the closed ERROR_CATEGORIES enum.",
+      "expectedPath": "category",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "StructuredError",
+      "case": "missing-retryable",
+      "file": "invalid/StructuredError.missing-retryable.json",
+      "description": "`retryable` omitted; retry classification is required (§19.1).",
+      "expectedPath": "retryable",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "KnowledgePackRef",
+      "case": "unknown-authority",
+      "file": "invalid/KnowledgePackRef.unknown-authority.json",
+      "description": "`authority` outside the closed PACK_AUTHORITIES enum (§9.1).",
+      "expectedPath": "authority",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "KnowledgePackRef",
+      "case": "malformed-content-hash",
+      "file": "invalid/KnowledgePackRef.malformed-content-hash.json",
+      "description": "`contentHash` is not a 64-character lowercase hex digest.",
+      "expectedPath": "contentHash",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "EpisodeRef",
+      "case": "malformed-schema-version",
+      "file": "invalid/EpisodeRef.malformed-schema-version.json",
+      "description": "`schemaVersion` missing its MINOR component (ADR-0003).",
+      "expectedPath": "schemaVersion",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "EpisodeRef",
+      "case": "missing-show-id",
+      "file": "invalid/EpisodeRef.missing-show-id.json",
+      "description": "`showId` omitted; an Episode always belongs to a show (§6.1).",
+      "expectedPath": "showId",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "ArtifactRef",
+      "case": "malformed-sha256",
+      "file": "invalid/ArtifactRef.malformed-sha256.json",
+      "description": "`sha256` is not a hex digest; hashes are load-bearing identity (§8.1).",
+      "expectedPath": "sha256",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "ArtifactRef",
+      "case": "uppercase-sha256",
+      "file": "invalid/ArtifactRef.uppercase-sha256.json",
+      "description": "`sha256` uppercase; two spellings of one digest would compare unequal (§8.1).",
+      "expectedPath": "sha256",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "ArtifactRef",
+      "case": "negative-size-bytes",
+      "file": "invalid/ArtifactRef.negative-size-bytes.json",
+      "description": "`sizeBytes` negative, which indicates a producer defect.",
+      "expectedPath": "sizeBytes",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "ArtifactRef",
+      "case": "unknown-reconstructability",
+      "file": "invalid/ArtifactRef.unknown-reconstructability.json",
+      "description": "`reconstructability` outside the enum that governs archival (§8.1).",
+      "expectedPath": "reconstructability",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "RunManifest",
+      "case": "timestamp-without-offset",
+      "file": "invalid/RunManifest.timestamp-without-offset.json",
+      "description": "`createdAt` has no UTC offset, so it is not comparable across machines (§5.1, §20).",
+      "expectedPath": "createdAt",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "RunManifest",
+      "case": "unknown-status",
+      "file": "invalid/RunManifest.unknown-status.json",
+      "description": "`status` outside the closed RUN_STATUSES enum (§6.2).",
+      "expectedPath": "status",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "StageAttempt",
+      "case": "attempt-zero",
+      "file": "invalid/StageAttempt.attempt-zero.json",
+      "description": "`attempt` is 0; ordinals are 1-based so retry limits stay countable (§19.1).",
+      "expectedPath": "attempt",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "StageAttempt",
+      "case": "missing-actor",
+      "file": "invalid/StageAttempt.missing-actor.json",
+      "description": "`actor` omitted; every mutating action records identity (§19.2).",
+      "expectedPath": "actor",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "StageExecution",
+      "case": "non-ascending-attempts",
+      "file": "invalid/StageExecution.non-ascending-attempts.json",
+      "description": "Attempt ordinals descend, meaning a writer overwrote history instead of appending (§6.3). Cross-field refinement — not expressible in JSON Schema.",
+      "expectedPath": "attempts",
+      "jsonSchemaDetectable": false
+    },
+    {
+      "schema": "StageExecution",
+      "case": "unknown-status",
+      "file": "invalid/StageExecution.unknown-status.json",
+      "description": "`status` outside the closed STAGE_STATUSES enum (§6.3).",
+      "expectedPath": "status",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "GateDecision",
+      "case": "unknown-decision",
+      "file": "invalid/GateDecision.unknown-decision.json",
+      "description": "`decision` outside the four outcomes of §13.",
+      "expectedPath": "decision",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "GateDecision",
+      "case": "missing-expires-on-change",
+      "file": "invalid/GateDecision.missing-expires-on-change.json",
+      "description": "`expiresOnChange` omitted; the invalidation policy must be stated, not inherited (§13.1).",
+      "expectedPath": "expiresOnChange",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "CostRecord",
+      "case": "no-amounts",
+      "file": "invalid/CostRecord.no-amounts.json",
+      "description": "Neither `estimated` nor `actual` present, so the record would under-report spend (§19.3). Cross-field refinement — not expressible in JSON Schema.",
+      "expectedPath": "actual",
+      "jsonSchemaDetectable": false
+    },
+    {
+      "schema": "CostRecord",
+      "case": "float-amount",
+      "file": "invalid/CostRecord.float-amount.json",
+      "description": "`amount` is a number; money is a decimal string because IEEE-754 corrupts totals (§19.3).",
+      "expectedPath": "estimated.amount",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "CostRecord",
+      "case": "bad-currency",
+      "file": "invalid/CostRecord.bad-currency.json",
+      "description": "`currency` lowercase; ISO-4217 codes are uppercase.",
+      "expectedPath": "estimated.currency",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "ReleaseReceipt",
+      "case": "missing-idempotency-key",
+      "file": "invalid/ReleaseReceipt.missing-idempotency-key.json",
+      "description": "`idempotencyKey` omitted; without it a partial release cannot be safely resumed (§17).",
+      "expectedPath": "idempotencyKey",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "ReleaseReceipt",
+      "case": "unknown-status",
+      "file": "invalid/ReleaseReceipt.unknown-status.json",
+      "description": "`status` outside the closed RELEASE_STATUSES enum (§17).",
+      "expectedPath": "status",
+      "jsonSchemaDetectable": true
+    }
+  ]
+}

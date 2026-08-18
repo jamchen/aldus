@@ -38,6 +38,14 @@ interface ContractField {
   optional: boolean;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
 /** Extract every `interface X { … }` declared in the contract's TypeScript blocks. */
 function parseContractInterfaces(markdown: string): Map<string, ContractField[]> {
   const interfaces = new Map<string, ContractField[]>();
@@ -95,8 +103,12 @@ describe("architecture contract conformance", () => {
   describe.each(VERBATIM_TYPES)("%s", (name) => {
     const fields = contract.get(name);
     const document = documents[name];
-    const properties = Object.keys(document.properties ?? {});
-    const required = new Set(document.required ?? []);
+    // JsonSchemaDocument is Record<string, unknown>, so these two keys need narrowing before
+    // use. Narrow explicitly rather than casting: an emitted document that unexpectedly lacks
+    // `properties` or `required` should surface as an empty list here and fail the assertion
+    // below, not as a runtime type error inside the check.
+    const properties = Object.keys(isRecord(document.properties) ? document.properties : {});
+    const required = new Set(isStringArray(document.required) ? document.required : []);
 
     it("is declared in the contract", () => {
       expect(fields, `${name} is no longer declared in the architecture contract`).toBeDefined();

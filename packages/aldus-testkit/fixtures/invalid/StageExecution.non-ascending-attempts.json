@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "run-a",
+  "stageId": "stage-a",
+  "status": "succeeded",
+  "attempts": [
+    {
+      "attemptId": "att_01JQXK0000000000000000001",
+      "stageId": "stage-a",
+      "attempt": 2,
+      "status": "queued",
+      "actor": {
+        "kind": "human",
+        "id": "operator-a"
+      },
+      "inputArtifacts": [],
+      "outputArtifacts": []
+    },
+    {
+      "attemptId": "att_01JQXK0000000000000000004",
+      "stageId": "stage-a",
+      "attempt": 1,
+      "status": "queued",
+      "actor": {
+        "kind": "human",
+        "id": "operator-a"
+      },
+      "inputArtifacts": [],
+      "outputArtifacts": []
+    }
+  ]
+}

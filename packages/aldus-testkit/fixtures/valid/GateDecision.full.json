@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "dec_01JQXK0000000000000000002",
+  "gateId": "performance-freeze",
+  "runId": "run-a",
+  "decision": "changes_requested",
+  "subjectHashes": [
+    "a1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801",
+    "b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801a2"
+  ],
+  "decidedBy": {
+    "kind": "agent",
+    "id": "agent-a",
+    "displayName": "Agent A",
+    "backendId": "backend-a",
+    "sessionRef": "session-a"
+  },
+  "decidedAt": "2026-01-01T00:05:00.000Z",
+  "comment": "Pacing drifts in the second segment; re-tag before synthesis.",
+  "expiresOnChange": true
+}

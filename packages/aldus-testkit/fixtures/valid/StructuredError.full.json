@@ -1,0 +1,18 @@
+{
+  "code": "ALDUS_EXAMPLE_FAILURE",
+  "category": "io",
+  "message": "The stage could not read its declared input.",
+  "retryable": true,
+  "details": {
+    "stageId": "stage-a"
+  },
+  "causes": [
+    {
+      "code": "ALDUS_EXAMPLE_ROOT_CAUSE",
+      "category": "io",
+      "message": "The underlying read returned no bytes.",
+      "retryable": true
+    }
+  ],
+  "occurredAt": "2026-01-01T00:00:00.000Z"
+}

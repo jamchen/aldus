@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0",
+  "costId": "cost-a",
+  "runId": "run-a",
+  "provider": "provider-a",
+  "operation": "synthesis",
+  "estimated": {
+    "amount": "0.0142",
+    "currency": "usd"
+  },
+  "billingStatus": "estimated",
+  "recordedAt": "2026-01-01T00:00:00.000Z"
+}

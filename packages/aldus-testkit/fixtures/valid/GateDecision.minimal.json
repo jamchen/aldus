@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0",
+  "decisionId": "dec_01JQXK0000000000000000001",
+  "gateId": "content-freeze",
+  "runId": "run-a",
+  "decision": "approved",
+  "subjectHashes": [],
+  "decidedBy": {
+    "kind": "human",
+    "id": "operator-a"
+  },
+  "decidedAt": "2026-01-01T00:00:00.000Z",
+  "expiresOnChange": false
+}

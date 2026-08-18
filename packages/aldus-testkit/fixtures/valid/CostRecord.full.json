@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "costId": "cost_01JQXK0000000000000000002",
+  "runId": "run-a",
+  "stageId": "stage-a",
+  "attemptId": "att_01JQXK0000000000000000002",
+  "provider": "provider-a",
+  "operation": "synthesis",
+  "quantity": {
+    "unit": "characters",
+    "amount": 1420
+  },
+  "estimated": {
+    "amount": "0.0142",
+    "currency": "USD"
+  },
+  "actual": {
+    "amount": "0.0138",
+    "currency": "USD"
+  },
+  "billingStatus": "charged",
+  "authorizationId": "dec_01JQXK0000000000000000002",
+  "providerRequestId": "provider-request-a",
+  "recordedAt": "2026-01-01T00:05:00.000Z"
+}

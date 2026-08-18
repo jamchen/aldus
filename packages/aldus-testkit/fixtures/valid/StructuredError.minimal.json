@@ -1,0 +1,6 @@
+{
+  "code": "ALDUS_EXAMPLE_FAILURE",
+  "category": "io",
+  "message": "The stage could not read its declared input.",
+  "retryable": true
+}
