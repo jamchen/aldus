@@ -10,6 +10,11 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      allow-latest-move:
+        description: "Permit the latest dist-tag to move (a deliberate promotion, or a first publish)"
+        type: boolean
+        default: false
+    inputs:
       dry_run:
         description: "Verify and pack, then stop before publishing"
         type: boolean
@@ -130,8 +135,16 @@ jobs:
           npm install -g npm@latest
           npm --version
 
+      # Recorded before and after, and asserted afterwards (ADR-0023 decision 4). The 0.1.0
+      # bootstrap published with --tag next and still moved latest, because npm creates latest
+      # on a package's first publish. Nothing in the pipeline noticed at the time.
+      - name: Record dist-tags before publishing
+        run: |
+          set -euo pipefail
+          node scripts/dist-tags.mjs snapshot "${RUNNER_TEMP}/dist-tags-before.json"
+
       # --tag next, never latest. Nothing becomes the default install until the owner promotes it
-      # after adopter smoke tests (ADR-0020, ADR-0022).
+      # after adopter smoke tests (ADR-0020, ADR-0022, ADR-0023).
       - name: Publish
         run: |
           set -euo pipefail
@@ -142,6 +155,14 @@ jobs:
             ( cd "${dir}" && npm publish --tag next --access public --provenance )
             echo "::endgroup::"
           done < "${RUNNER_TEMP}/publish-dirs.txt"
+
+      # Fails the release if latest moved. `allow-latest-move` is a deliberate input, so a
+      # legitimate promotion states its intent rather than being inferred from the outcome.
+      - name: Assert dist-tags after publishing
+        run: |
+          set -euo pipefail
+          node scripts/dist-tags.mjs assert "${RUNNER_TEMP}/dist-tags-before.json" \
+            ${{ inputs.allow-latest-move && '--allow-latest-move' || '' }}
 
       - name: Summary
         run: |

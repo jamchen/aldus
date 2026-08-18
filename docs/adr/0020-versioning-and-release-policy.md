@@ -1,6 +1,7 @@
 # ADR-0020: Lockstep versioning, exact internal pins, and `next` before `latest`
 
 - Status: Accepted
+- Amended by: [ADR-0023](0023-bootstrap-release-exception.md) — decision 3 only; the rest stands
 - Date: 2026-08-18
 - Closes: issue #29 item 3 (monorepo versioning and release policy)
 - Relates to: §21 Repository and open-source boundary, ADR-0001, ADR-0015, ADR-0017, ADR-0018
@@ -59,6 +60,12 @@ been verified yet.
 
 The first release publishes under the `next` dist-tag. Nothing is assigned or promoted to
 `latest` until the clean-consumer gate and an adopter smoke test pass and the owner approves.
+
+> **Amended by [ADR-0023](0023-bootstrap-release-exception.md), 2026-08-18.** This assumed
+> `--tag next` keeps a first publish off `latest`. It does not: npm assigns `latest` on the
+> first publish of a package regardless of `--tag`, because a package must have one. The
+> `0.1.0` bootstrap therefore carries both tags, and later unvalidated releases use prerelease
+> versions rather than relying on a flag.
 
 `latest` is what `npm install @aldus-runtime/core` resolves to. Publishing straight there hands
 the first person who types that command a runtime whose composed surface no adopter has ever

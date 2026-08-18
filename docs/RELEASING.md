@@ -244,6 +244,34 @@ repeat it.
 
 ---
 
+## Version and tag policy
+
+Read this before choosing a version number. It is the part that is easy to get wrong, and the
+`0.1.0` bootstrap got it wrong (ADR-0023).
+
+| Situation                               | Version                           | Tag                  | Reaches `latest`?                               |
+| --------------------------------------- | --------------------------------- | -------------------- | ----------------------------------------------- |
+| Not validated by an adopter             | `0.2.0-next.0`, `0.2.0-next.1`, … | `next`               | No — npm does not move `latest` to a prerelease |
+| Validated by an adopter, owner approves | `0.2.0`                           | `next`, then promote | Yes, deliberately                               |
+| `0.1.0` bootstrap                       | `0.1.0`                           | both                 | Yes — a documented exception                    |
+
+**`--tag next` alone does not keep a release off `latest`.** npm assigns `latest` on a package's
+_first_ publish regardless of the flag, because a package must have one. That is exactly how
+`0.1.0` ended up on `latest` despite every publish specifying `--tag next`. For every package
+that already exists the flag behaves as expected — but a rule that only holds from the second
+publish onwards is not one to rely on, which is why unvalidated releases use a prerelease
+_version_ instead. The registry enforces that; a flag's behaviour depends on state.
+
+The release workflow snapshots `latest` and `next` for all twelve packages before publishing,
+asserts afterwards, and fails if `latest` moved. A deliberate promotion passes
+`allow-latest-move` on `workflow_dispatch`, so the intent is stated rather than inferred.
+
+Promoting to `latest` later, once an adopter has validated:
+
+```bash
+npm dist-tag add @aldus-runtime/<name>@<version> latest   # per package, all twelve
+```
+
 ## Known considerations
 
 Both items previously listed here were resolved before the first release. They are kept as
