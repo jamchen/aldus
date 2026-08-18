@@ -80,6 +80,10 @@ the workspace, behave exactly as before.
 
 ### Added
 
+- **A refused stage says when its gate cannot yet be decided** ([#57]) — a gate with no subjects
+  supplied is not merely undecided but undecidable, and "decide the gate" is advice an operator
+  cannot act on. Where the refused stage is what produces those subjects, it is advice they can
+  never act on. Reported only when the subjects provider is genuinely empty for that gate.
 - **`AldusConfig.workflow`** ([#46]) — a workflow graph is now reachable from the CLI, so the
   stage↔gate association of ADR-0021 can actually be used from the binary.
 - **A config module may export a function** ([#54]) — `export default ({ workspace }) => ({ … })`,
@@ -112,6 +116,7 @@ the workspace, behave exactly as before.
 [#46]: https://github.com/jamchen/aldus/issues/46
 [#47]: https://github.com/jamchen/aldus/issues/47
 [#39]: https://github.com/jamchen/aldus/issues/39
+[#57]: https://github.com/jamchen/aldus/issues/57
 [#50]: https://github.com/jamchen/aldus/pull/50
 [#54]: https://github.com/jamchen/aldus/issues/54
 

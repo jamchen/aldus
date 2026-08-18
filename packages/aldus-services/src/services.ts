@@ -895,14 +895,37 @@ export class AldusServices {
       await this.#policyInput(request.runId, manifest, runner),
     );
     if (blocker !== undefined) {
+      // A gate with no subjects at all is not merely undecided — it is *undecidable*, and
+      // telling an operator to decide it is advice they cannot act on. Distinguishing the two is
+      // the same separation ADR-0024 made between "decide this gate" and "I cannot tell whether
+      // this gate applies", one layer further in.
+      //
+      // The most common cause is a gate binding an artifact that does not exist yet, which is
+      // ordinary early in a Run. The case worth naming is when the stage being refused is what
+      // *produces* those subjects: then the gate needs the artifact, the artifact needs the
+      // stage, and the stage needs the gate. Aldus cannot prove that — what a gate binds is
+      // adopter process supplied through a `SubjectsProvider` (§4.2), so nothing relates a
+      // subject to its producer — but naming the possibility costs one line and is the only
+      // clue an operator gets.
+      const undecidable =
+        blocker.kind === "gate" && blocker.gateId !== undefined
+          ? ((await this.#context.subjectsFor(request.runId))[blocker.gateId] ?? []).length === 0
+          : false;
+
       return refused({
         reason: blocker.kind === "ordering" ? "stage_predecessor_unmet" : "stage_gate_unsatisfied",
-        explanation: blocker.reason,
+        explanation: undecidable
+          ? `${blocker.reason} Nothing has supplied the values gate "${blocker.gateId}" binds, ` +
+            "so it cannot be decided yet — something must produce them first. If this stage is " +
+            "what produces them, it is gated on its own output and the gate belongs on the stage " +
+            "that consumes it."
+          : blocker.reason,
         details: {
           runId: request.runId,
           stageId: request.stageId,
           ...(blocker.gateId !== undefined ? { gateId: blocker.gateId } : {}),
           ...(blocker.after !== undefined ? { after: blocker.after } : {}),
+          ...(undecidable ? { gateUndecidable: true } : {}),
         },
       });
     }

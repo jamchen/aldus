@@ -276,3 +276,59 @@ describe("status and run agree", () => {
     expect(blocked?.reason).toBe(run.refusal.explanation);
   });
 });
+
+describe("an undecidable gate is distinguished from an undecided one (#57)", () => {
+  // The same separation ADR-0024 made between "decide this gate" and "I cannot tell whether this
+  // gate applies", one layer further in. A gate with no subjects at all cannot be decided, so
+  // telling an operator to decide it is advice they cannot act on — and when the refused stage is
+  // what produces those subjects, it is advice they can never act on.
+  it("says the gate cannot be decided yet when nothing has supplied its subjects", async () => {
+    const { services, runId } = await withRun({
+      stages: registryOf(countingStage("paid.work", [GATE])),
+      gates: [gateDefinition(GATE)],
+      subjects: {}, // nothing has produced what the gate binds
+    });
+
+    const result = await services.runStage({ runId, stageId: "paid.work" });
+
+    expect(result.outcome).toBe("refused");
+    if (result.outcome !== "refused") return;
+    expect(result.refusal.explanation).toContain("cannot be decided yet");
+    expect(result.refusal.explanation).toContain("gated on its own output");
+    expect(result.refusal.details).toMatchObject({ gateUndecidable: true });
+    expect(sideEffects["paid.work"]).toBeUndefined();
+  });
+
+  it("does not say it when the gate has subjects and is merely undecided", async () => {
+    // The ordinary case. Over-reporting would make the hint noise an operator learns to skip,
+    // which is how it stops working on the day it matters.
+    const { services, runId } = await withRun({
+      stages: registryOf(countingStage("paid.work", [GATE])),
+      gates: [gateDefinition(GATE)],
+      subjects: subjectsForAll([GATE]),
+    });
+
+    const result = await services.runStage({ runId, stageId: "paid.work" });
+
+    expect(result.outcome).toBe("refused");
+    if (result.outcome !== "refused") return;
+    expect(result.refusal.explanation).not.toContain("cannot be decided yet");
+    expect(result.refusal.details).not.toMatchObject({ gateUndecidable: true });
+  });
+
+  it("does not say it for an ordering block, which is always actionable", async () => {
+    const { services, runId } = await withRun({
+      stages: registryOf(countingStage("first", []), countingStage("second", [])),
+      gates: [],
+      subjects: {},
+      workflow: { stages: [{ stageId: "first" }, { stageId: "second", after: ["first"] }] },
+    });
+
+    const result = await services.runStage({ runId, stageId: "second" });
+
+    expect(result.outcome).toBe("refused");
+    if (result.outcome !== "refused") return;
+    expect(result.refusal.reason).toBe("stage_predecessor_unmet");
+    expect(result.refusal.explanation).not.toContain("cannot be decided yet");
+  });
+});
