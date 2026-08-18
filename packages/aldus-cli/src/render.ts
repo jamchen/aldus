@@ -49,6 +49,10 @@ export function renderInit(report: InitReport): string {
   if (report.episode !== undefined) {
     lines.push(`Episode: ${report.episode.episodeId}`);
     if (report.episode.title !== undefined) lines.push(`Title:   ${report.episode.title}`);
+  } else {
+    // Stated rather than left out. The two outcomes previously differed only by an absent line,
+    // so an operator who meant to create an Episode saw what looked like unqualified success.
+    lines.push("No Episode created. Pass --show <id> to create one.");
   }
   return lines.join("\n");
 }

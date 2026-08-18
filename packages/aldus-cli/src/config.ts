@@ -28,6 +28,8 @@ import type {
   SpendGrantProvider,
   SubjectsProvider,
   SynthesisAdapter,
+  WorkflowGraph,
+  WorkflowStageNode,
 } from "@aldus-runtime/services";
 import { StageRegistry, type StageDefinition } from "@aldus-runtime/stage-runner";
 
@@ -73,7 +75,37 @@ export interface AldusConfig {
   spendGrants?: SpendGrantProvider;
   /** Where irreplaceable artifact bytes are kept (contract §8.1). */
   archive?: ArtifactArchive;
+  /**
+   * Which gates gate which stages, for this workflow (contract §11, ADR-0021).
+   *
+   * §11 calls a workflow "a versioned graph of stages and gates" and makes that graph
+   * adopter-supplied, so it can only come from here. Without it a stage's own `requiredGates`
+   * still applies, and a workflow declaring neither behaves as it did before ADR-0021.
+   *
+   * One graph per context. An adopter whose single config module serves several workflows
+   * selects the graph itself — the context is constructed before a Run is known, so Aldus
+   * cannot select by `workflowId` on its behalf.
+   */
+  workflow?: WorkflowGraph;
 }
+
+/**
+ * Every key {@link AldusConfig} recognises.
+ *
+ * Declared as data because {@link assertKnownKeys} compares against it at runtime. A key added
+ * to the interface and forgotten here is rejected by the type checker at the point of use, which
+ * is the intended direction: the list cannot silently fall behind the interface.
+ */
+const KNOWN_CONFIG_KEYS = [
+  "archive",
+  "gates",
+  "releaseAdapters",
+  "spendGrants",
+  "stages",
+  "subjects",
+  "synthesisAdapter",
+  "workflow",
+] as const satisfies readonly (keyof AldusConfig)[];
 
 /** A config module may export its config as `default` or as `config`. */
 interface ConfigModule {
@@ -84,9 +116,10 @@ interface ConfigModule {
 /**
  * Load an operator's config module.
  *
- * @throws {AldusError} `ALDUS_CONFIG_UNREADABLE` when the module cannot be imported, and
- * `ALDUS_CONFIG_INVALID` when it exports nothing usable. Both are environment problems rather
- * than refusals: no approval makes a missing file appear.
+ * @throws {AldusError} `ALDUS_CONFIG_UNREADABLE` when the module cannot be imported,
+ * `ALDUS_CONFIG_INVALID` when it exports nothing usable or a malformed workflow graph, and
+ * `ALDUS_CONFIG_UNKNOWN_KEY` when it sets a key Aldus does not recognise. All are environment
+ * problems rather than refusals: no approval makes a missing file appear.
  */
 export async function loadConfig(specifier: string, cwd: string): Promise<AldusConfig> {
   const url = resolveSpecifier(specifier, cwd);
@@ -113,7 +146,103 @@ export async function loadConfig(specifier: string, cwd: string): Promise<AldusC
       { category: "validation", retryable: false, details: { specifier } },
     );
   }
+
+  assertKnownKeys(config, specifier);
+  if (config.workflow !== undefined) assertWorkflowGraph(config.workflow, specifier);
   return config;
+}
+
+/**
+ * Refuse a config that sets a key Aldus does not recognise.
+ *
+ * An unrecognised key is a mistake every time — a typo, or a field from a newer version — and
+ * ignoring it silently makes the symptom appear somewhere other than the cause. A config that
+ * set `workflow` before that field existed loaded cleanly and did nothing, and what an operator
+ * then saw was `status` naming the wrong next action: a wiring problem wearing a gate problem's
+ * clothes.
+ *
+ * This is an **error, not a warning**. A config is authored deliberately and read once at
+ * startup, so there is no cost to being told immediately, and a warning on a stream nobody reads
+ * is the silent drop with extra steps.
+ *
+ * Note this is the opposite of how Aldus treats *persisted records*, which ignore unknown
+ * properties so a record written by a newer build stays readable (ADR-0002, ADR-0003). The two
+ * are different problems: a stored record is read by builds it was not written for, while a
+ * config is authored against the version installed beside it.
+ *
+ * @throws {AldusError} `ALDUS_CONFIG_UNKNOWN_KEY`
+ */
+function assertKnownKeys(config: AldusConfig, specifier: string): void {
+  const known = new Set<string>(KNOWN_CONFIG_KEYS);
+  const unknown = Object.keys(config).filter((key) => !known.has(key));
+  if (unknown.length === 0) return;
+
+  throw new AldusError(
+    "ALDUS_CONFIG_UNKNOWN_KEY",
+    `The Aldus config module at "${specifier}" sets ${unknown.map((key) => `"${key}"`).join(", ")}, ` +
+      `which Aldus does not recognise. Recognised keys are: ${KNOWN_CONFIG_KEYS.join(", ")}.`,
+    { category: "validation", retryable: false, details: { specifier, unknown } },
+  );
+}
+
+/**
+ * Refuse a malformed workflow graph, naming the stage at fault (contract §11, ADR-0021).
+ *
+ * The graph decides which gates stand in the way of which stages, so a malformed one produces a
+ * wrong answer to "what is safe to do next" rather than an obvious failure. Naming the offending
+ * node is what makes that debuggable — a generic parse error would send an operator through the
+ * whole graph looking for it.
+ *
+ * @throws {AldusError} `ALDUS_CONFIG_INVALID`
+ */
+function assertWorkflowGraph(workflow: WorkflowGraph, specifier: string): void {
+  const fail = (problem: string, details: Record<string, unknown>): never => {
+    throw new AldusError(
+      "ALDUS_CONFIG_INVALID",
+      `The workflow graph in the Aldus config module at "${specifier}" is invalid: ${problem}`,
+      { category: "validation", retryable: false, details: { specifier, ...details } },
+    );
+  };
+
+  if (!Array.isArray(workflow.stages)) {
+    fail('"workflow.stages" must be an array of stage nodes.', {});
+    return;
+  }
+
+  const seen = new Set<string>();
+  workflow.stages.forEach((node: WorkflowStageNode, index: number) => {
+    const at = `workflow.stages[${index}]`;
+    const stageId: unknown = node?.stageId;
+    if (typeof stageId !== "string" || stageId.length === 0) {
+      fail(`${at} has no "stageId".`, { index });
+      return;
+    }
+    if (seen.has(stageId)) {
+      // Two nodes for one stage make resolution order-dependent, and `resolveRequiredGates` takes
+      // the first — so the second would be silently ignored, which is this issue over again.
+      fail(`${at} repeats stage "${stageId}", which an earlier node already declares.`, {
+        index,
+        stageId,
+      });
+      return;
+    }
+    seen.add(stageId);
+
+    if (node.requiredGates === undefined) return;
+    if (!Array.isArray(node.requiredGates)) {
+      fail(`${at} ("${stageId}") has a "requiredGates" that is not an array.`, { index, stageId });
+      return;
+    }
+    for (const gate of node.requiredGates) {
+      if (typeof gate !== "string" || gate.length === 0) {
+        fail(`${at} ("${stageId}") lists a gate id that is not a non-empty string.`, {
+          index,
+          stageId,
+        });
+        return;
+      }
+    }
+  });
 }
 
 /** Turn a path or bare specifier into something `import()` accepts. */
