@@ -17,30 +17,55 @@
 
 import { parseArgs } from "node:util";
 
+import type { ArtifactArchive } from "@aldus-runtime/artifact-registry";
 import type { ActorRef } from "@aldus-runtime/core";
 import { AldusError, toStructuredError } from "@aldus-runtime/core";
 import { FileWorkspace } from "@aldus-runtime/file-store";
 import { GateRegistry, type GateDefinition } from "@aldus-runtime/gate-engine";
-import { StageRegistry } from "@aldus-runtime/stage-runner";
+import type { ReleaseAdapter, ReleaseBundle } from "@aldus-runtime/release";
 import {
   AldusContext,
   AldusServices,
   parseActor,
+  ServiceErrorCodes,
   type ServiceResult,
+  type SpendGrantProvider,
   type SubjectsProvider,
+  type SynthesisAdapter,
 } from "@aldus-runtime/services";
+import { StageRegistry } from "@aldus-runtime/stage-runner";
+import type {
+  PerformanceScript,
+  RecordTakeInput,
+  TakeDecision,
+  TakeDecisionValue,
+  TtsRequestPlan,
+} from "@aldus-runtime/tts-ledger";
 
+import { loadConfig, stageRegistryOf, type AldusConfig } from "./config.js";
+import { readJsonDocument, requireFlag } from "./documents.js";
 import { ExitCodes, type ExitCode } from "./exit.js";
 import {
+  renderArchive,
+  renderArtifactLineage,
   renderArtifacts,
+  renderCleanupPlan,
   renderCosts,
   renderGateDecision,
   renderInit,
   renderInspection,
+  renderPlan,
   renderRelease,
+  renderReleaseBundle,
+  renderReleaseExecution,
+  renderReleaseReconciliation,
+  renderScript,
   renderStageRun,
   renderStartRun,
   renderStatus,
+  renderSynthesis,
+  renderTakeDecision,
+  renderTakes,
 } from "./render.js";
 import { USAGE } from "./usage.js";
 
@@ -67,6 +92,19 @@ export interface CliEnvironment {
   gates?: readonly GateDefinition[];
   /** Current digests of what gates bind (contract §13.2). */
   subjects?: SubjectsProvider;
+  /**
+   * Adapters that perform release operations (contract §17, §4.3, ADR-0015).
+   *
+   * Supplied by the host — in the `aldus` binary, by the operator's config module. Aldus owns
+   * the orchestration and the refusal; an adapter talks to one destination.
+   */
+  releaseAdapters?: readonly ReleaseAdapter[];
+  /** The adapter that performs synthesis (contract §14, §15, §4.3). */
+  synthesisAdapter?: SynthesisAdapter;
+  /** Spend grants in force, per plan (contract §13.2, §19.3). */
+  spendGrants?: SpendGrantProvider;
+  /** Where irreplaceable artifact bytes are kept (contract §8.1). */
+  archive?: ArtifactArchive;
   /** Clock, injectable for deterministic tests. */
   now?: () => Date;
 }
@@ -85,6 +123,9 @@ const COMMON_OPTION_SPEC = {
   run: { type: "string" as const },
   actor: { type: "string" as const },
   "actor-name": { type: "string" as const },
+  // Consumed before dispatch by `withConfig`, and declared here so `strict: true` does not
+  // reject it on every command.
+  config: { type: "string" as const },
   help: { type: "boolean" as const, default: false },
 } as const;
 
@@ -103,10 +144,63 @@ export async function run(environment: CliEnvironment): Promise<ExitCode> {
   }
 
   try {
-    return await dispatch(command, rest, environment);
+    return await dispatch(command, rest, await withConfig(environment));
   } catch (error) {
     return reportError(error, environment);
   }
+}
+
+/**
+ * Fold an operator's config module into the environment (ADR-0015, ADR-0019).
+ *
+ * What the host injected always wins, so a test that supplies a fake adapter is not overridden
+ * by whatever happens to be configured on the machine. In the `aldus` binary nothing is injected,
+ * so the config module is the only source — which is the point.
+ */
+async function withConfig(environment: CliEnvironment): Promise<CliEnvironment> {
+  const specifier = configSpecifier(environment);
+  if (specifier === undefined) return environment;
+
+  const config: AldusConfig = await loadConfig(specifier, environment.cwd);
+  const stages = stageRegistryOf(config.stages);
+
+  return {
+    ...environment,
+    ...(environment.stages === undefined && stages !== undefined ? { stages } : {}),
+    ...(environment.gates === undefined && config.gates !== undefined
+      ? { gates: config.gates }
+      : {}),
+    ...(environment.subjects === undefined && config.subjects !== undefined
+      ? { subjects: config.subjects }
+      : {}),
+    ...(environment.releaseAdapters === undefined && config.releaseAdapters !== undefined
+      ? { releaseAdapters: config.releaseAdapters }
+      : {}),
+    ...(environment.synthesisAdapter === undefined && config.synthesisAdapter !== undefined
+      ? { synthesisAdapter: config.synthesisAdapter }
+      : {}),
+    ...(environment.spendGrants === undefined && config.spendGrants !== undefined
+      ? { spendGrants: config.spendGrants }
+      : {}),
+    ...(environment.archive === undefined && config.archive !== undefined
+      ? { archive: config.archive }
+      : {}),
+  };
+}
+
+/** Where the config module is named, if anywhere. `--config` beats the environment. */
+function configSpecifier(environment: CliEnvironment): string | undefined {
+  const index = environment.argv.indexOf("--config");
+  if (index >= 0) {
+    const value = environment.argv[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+      throw new AldusError("ALDUS_INVALID_REQUEST", "--config needs a module path.", {
+        category: "validation",
+      });
+    }
+    return value;
+  }
+  return environment.env["ALDUS_CONFIG"];
 }
 
 /** Route one command to one service call. */
@@ -138,6 +232,12 @@ async function dispatch(
       return await runCosts(argv, environment);
     case "release":
       return await runRelease(argv, environment);
+    case "script":
+      return await runScript(argv, environment);
+    case "synthesis":
+      return await runSynthesis(argv, environment);
+    case "takes":
+      return await runTakes(argv, environment);
     default:
       environment.stderr(`Unknown command "${command}".\n\n${USAGE}`);
       return ExitCodes.error;
@@ -183,6 +283,14 @@ function servicesFor(options: CommonOptions, environment: CliEnvironment): Aldus
     stages: environment.stages ?? new StageRegistry(),
     ...(options.actor !== undefined ? { actor: options.actor } : {}),
     ...(environment.subjects !== undefined ? { subjects: environment.subjects } : {}),
+    ...(environment.releaseAdapters !== undefined
+      ? { releaseAdapters: environment.releaseAdapters }
+      : {}),
+    ...(environment.synthesisAdapter !== undefined
+      ? { synthesisAdapter: environment.synthesisAdapter }
+      : {}),
+    ...(environment.spendGrants !== undefined ? { spendGrants: environment.spendGrants } : {}),
+    ...(environment.archive !== undefined ? { archive: environment.archive } : {}),
     ...(environment.now !== undefined ? { now: environment.now } : {}),
   });
   return new AldusServices(context);
@@ -214,10 +322,30 @@ function emit<T>(
   return ExitCodes.unsuccessful;
 }
 
-/** Turn a thrown value into a rendered message and an exit code. */
+/**
+ * Turn a thrown value into a rendered message and an exit code.
+ *
+ * A `policy` category maps to `refused`, because a policy answer is one a script may reasonably
+ * wait on and retry — with one exception. `ALDUS_ADAPTER_NOT_WIRED` is thrown with that category
+ * but is documented in `@aldus-runtime/services` as "a wiring error, not a policy refusal:
+ * nothing an operator can approve will make it appear". Retrying it unchanged can never help,
+ * which is exit 2's definition, so it is mapped there. Reported upstream rather than fixed in
+ * services, since the mapping from an error to an exit code is this adapter's business anyway.
+ */
 function reportError(error: unknown, environment: CliEnvironment): ExitCode {
   const structured = toStructuredError(error);
-  const isRefusal = error instanceof AldusError && error.category === "policy";
+  const isWiringError = structured.code === ServiceErrorCodes.ADAPTER_NOT_WIRED;
+  const isRefusal = !isWiringError && error instanceof AldusError && error.category === "policy";
+  const outcome = isRefusal ? "refused" : "error";
+
+  // `--json` is read from argv rather than from parsed options, because the failure being
+  // reported may be the parse itself. A caller that asked for machine-readable output and got an
+  // empty stdout would have to fall back to scraping stderr, which is the opposite of §18's
+  // intent — so the error is emitted in the same shape a refusal takes.
+  if (environment.argv.includes("--json")) {
+    environment.stdout(JSON.stringify({ outcome, error: structured }, null, 2));
+  }
+
   environment.stderr(`${structured.code}: ${structured.message}`);
   return isRefusal ? ExitCodes.refused : ExitCodes.error;
 }
@@ -382,14 +510,75 @@ async function runDecision(
   return emit(result, options, environment, renderGateDecision);
 }
 
+/**
+ * `artifacts [list|lineage|cleanup-plan|archive]` (contract §8, §20).
+ *
+ * Subcommands rather than flags, matching `release status`'s existing shape. `list` stays the
+ * default so the §18 verb keeps working unchanged.
+ */
 async function runArtifacts(
   argv: readonly string[],
   environment: CliEnvironment,
 ): Promise<ExitCode> {
-  const { options } = parseCommon(argv, environment);
+  const { options, positionals } = parseCommon(argv, environment);
   const services = servicesFor(options, environment);
-  const result = await services.artifacts(requireRunId(options, "artifacts"));
-  return emit(result, options, environment, renderArtifacts);
+  const [subcommand = "list", ...rest] = positionals;
+
+  switch (subcommand) {
+    case "list":
+      return emit(
+        await services.artifacts(requireRunId(options, "artifacts")),
+        options,
+        environment,
+        renderArtifacts,
+      );
+
+    case "lineage": {
+      const artifactId = rest[0];
+      if (artifactId === undefined) {
+        throw new AldusError("ALDUS_INVALID_REQUEST", '"artifacts lineage" needs an artifact id.', {
+          category: "validation",
+        });
+      }
+      return emit(
+        await services.artifactLineage(artifactId),
+        options,
+        environment,
+        renderArtifactLineage,
+      );
+    }
+
+    case "cleanup-plan":
+      // Read-only, and deliberately separate from any command that removes anything: §8.1 wants
+      // an operator able to see whether a cleanup is safe before performing one.
+      return emit(
+        await services.planArtifactCleanup(
+          requireRunId(options, "artifacts cleanup-plan"),
+          rest.length > 0 ? rest : undefined,
+        ),
+        options,
+        environment,
+        renderCleanupPlan,
+      );
+
+    case "archive":
+      return emit(
+        await services.archiveIrreplaceable({
+          runId: requireRunId(options, "artifacts archive"),
+          ...(options.actor !== undefined ? { actor: options.actor } : {}),
+        }),
+        options,
+        environment,
+        renderArchive,
+      );
+
+    default:
+      throw new AldusError(
+        "ALDUS_INVALID_REQUEST",
+        `"artifacts ${subcommand}" is not a command. Use list, lineage, cleanup-plan, or archive.`,
+        { category: "validation", details: { subcommand } },
+      );
+  }
 }
 
 async function runCosts(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
@@ -399,18 +588,290 @@ async function runCosts(argv: readonly string[], environment: CliEnvironment): P
   return emit(result, options, environment, renderCosts);
 }
 
+/**
+ * `release [status|plan|reconcile|execute]` (contract §17, §13.4).
+ *
+ * `plan`, `reconcile`, and `execute` all take `--bundle <path>`: a `ReleaseBundle` carries
+ * operation lists with branded criticality (§17's hard-gate/best-effort distinction), and
+ * flattening that into flags would be both a worse interface and a lossy one.
+ */
 async function runRelease(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
-  const { options, positionals } = parseCommon(argv, environment);
+  const { options, values, positionals } = parseCommon(argv, environment, {
+    bundle: { type: "string" },
+    "dry-run": { type: "boolean", default: false },
+  });
+  const services = servicesFor(options, environment);
   const subcommand = positionals[0] ?? "status";
-  if (subcommand !== "status") {
+
+  if (subcommand === "status") {
+    const result = await services.releaseStatus(requireRunId(options, "release status"));
+    return emit(result, options, environment, renderRelease);
+  }
+
+  if (subcommand !== "plan" && subcommand !== "reconcile" && subcommand !== "execute") {
     throw new AldusError(
       "ALDUS_INVALID_REQUEST",
-      `"release ${subcommand}" is not a command. Only "release status" exists — performing a ` +
-        "release is WP-12's, and this build has no release adapters.",
+      `"release ${subcommand}" is not a command. Use status, plan, reconcile, or execute.`,
       { category: "validation", details: { subcommand } },
     );
   }
+
+  const path = requireFlag(values, "bundle", `release ${subcommand}`, "path to a bundle JSON file");
+  const bundle = await readJsonDocument<ReleaseBundle>(path, "--bundle", environment.cwd);
+
+  if (subcommand === "plan") {
+    return emit(
+      await services.releaseBundleStatus({ bundle }),
+      options,
+      environment,
+      renderReleaseBundle,
+    );
+  }
+
+  if (subcommand === "reconcile") {
+    return emit(
+      await services.reconcileRelease({
+        bundle,
+        ...(options.actor !== undefined ? { actor: options.actor } : {}),
+      }),
+      options,
+      environment,
+      renderReleaseReconciliation,
+    );
+  }
+
+  // `execute` publishes. `--dry-run` answers "what would this do" using the read-only status
+  // service rather than a second code path, so the preview cannot drift from the thing previewed.
+  if (values["dry-run"] === true) {
+    if (!options.json) {
+      environment.stderr(
+        "Dry run: showing the bundle's current state. Nothing was executed and nothing was published.",
+      );
+    }
+    return emit(
+      await services.releaseBundleStatus({ bundle }),
+      options,
+      environment,
+      renderReleaseBundle,
+    );
+  }
+
+  return emit(
+    await services.executeRelease({
+      bundle,
+      ...(options.actor !== undefined ? { actor: options.actor } : {}),
+    }),
+    options,
+    environment,
+    renderReleaseExecution,
+  );
+}
+
+/** `script record --file <path>` — record a PerformanceScript (contract §14.1). */
+async function runScript(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
+  const { options, values, positionals } = parseCommon(argv, environment, {
+    file: { type: "string" },
+  });
+  const subcommand = positionals[0] ?? "record";
+  if (subcommand !== "record") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      `"script ${subcommand}" is not a command. Only "script record" exists.`,
+      { category: "validation", details: { subcommand } },
+    );
+  }
+
+  const path = requireFlag(
+    values,
+    "file",
+    "script record",
+    "path to a PerformanceScript JSON file",
+  );
+  const script = await readJsonDocument<PerformanceScript>(path, "--file", environment.cwd);
   const services = servicesFor(options, environment);
-  const result = await services.releaseStatus(requireRunId(options, "release status"));
-  return emit(result, options, environment, renderRelease);
+
+  return emit(
+    await services.recordPerformanceScript({
+      script,
+      ...(options.actor !== undefined ? { actor: options.actor } : {}),
+    }),
+    options,
+    environment,
+    renderScript,
+  );
+}
+
+/**
+ * `synthesis [plan|run|charge]` (contract §13.2, §15).
+ *
+ * `run` is the only command in this CLI that can spend money, and the only path from Aldus to a
+ * synthesis provider. It authorizes before it calls — see `synthesis.ts` in
+ * `@aldus-runtime/services` — so a plan whose §13.2 authorization does not hold is refused with
+ * the adapter untouched. Nothing here re-decides that; the refusal is rendered as it arrives.
+ */
+async function runSynthesis(
+  argv: readonly string[],
+  environment: CliEnvironment,
+): Promise<ExitCode> {
+  const { options, values, positionals } = parseCommon(argv, environment, {
+    file: { type: "string" },
+    plan: { type: "string" },
+    segment: { type: "string" },
+    take: { type: "string" },
+    reason: { type: "string" },
+    "rejected-authorization": { type: "string" },
+  });
+  const services = servicesFor(options, environment);
+  const subcommand = positionals[0] ?? "plan";
+
+  if (subcommand === "plan") {
+    const path = requireFlag(values, "file", "synthesis plan", "path to a request plan JSON file");
+    const plan = await readJsonDocument<TtsRequestPlan>(path, "--file", environment.cwd);
+    return emit(
+      await services.recordSynthesisPlan({
+        plan,
+        ...(options.actor !== undefined ? { actor: options.actor } : {}),
+      }),
+      options,
+      environment,
+      renderPlan,
+    );
+  }
+
+  if (subcommand === "run") {
+    const planPath = requireFlag(
+      values,
+      "plan",
+      "synthesis run",
+      "path to a request plan JSON file",
+    );
+    const plan = await readJsonDocument<TtsRequestPlan>(planPath, "--plan", environment.cwd);
+    const segmentId = requireFlag(values, "segment", "synthesis run", "segment id");
+    return emit(
+      await services.synthesiseSegment({
+        plan,
+        segmentId,
+        ...(options.actor !== undefined ? { actor: options.actor } : {}),
+      }),
+      options,
+      environment,
+      renderSynthesis,
+    );
+  }
+
+  if (subcommand === "charge") {
+    // The escape hatch of ADR-0012 §5: a charge that already happened without a valid
+    // authorization. It performs no synthesis and cannot reach an adapter — recording a charge is
+    // not the same as being allowed to incur one.
+    const planPath = requireFlag(
+      values,
+      "plan",
+      "synthesis charge",
+      "path to a request plan JSON file",
+    );
+    const plan = await readJsonDocument<TtsRequestPlan>(planPath, "--plan", environment.cwd);
+    const segmentId = requireFlag(values, "segment", "synthesis charge", "segment id");
+    const takePath = requireFlag(values, "take", "synthesis charge", "path to a take JSON file");
+    const take = await readJsonDocument<RecordTakeInput["take"]>(
+      takePath,
+      "--take",
+      environment.cwd,
+    );
+    const reason = requireFlag(values, "reason", "synthesis charge", "why it was unauthorized");
+    const rejected = values["rejected-authorization"];
+
+    return emit(
+      await services.recordUnauthorizedCharge({
+        plan,
+        segmentId,
+        take,
+        reason,
+        ...(typeof rejected === "string" ? { rejectedAuthorizationId: rejected } : {}),
+        ...(options.actor !== undefined ? { actor: options.actor } : {}),
+      }),
+      options,
+      environment,
+      renderSynthesis,
+    );
+  }
+
+  throw new AldusError(
+    "ALDUS_INVALID_REQUEST",
+    `"synthesis ${subcommand}" is not a command. Use plan, run, or charge.`,
+    { category: "validation", details: { subcommand } },
+  );
+}
+
+/** `takes [list|decide]` (contract §13.3, §15, §15.1). */
+async function runTakes(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
+  const { options, values, positionals } = parseCommon(argv, environment, {
+    decision: { type: "string" },
+    reason: { type: "string" },
+  });
+  const services = servicesFor(options, environment);
+  const [subcommand = "list", ...rest] = positionals;
+
+  if (subcommand === "list") {
+    return emit(
+      await services.takes(requireRunId(options, "takes")),
+      options,
+      environment,
+      renderTakes,
+    );
+  }
+
+  if (subcommand !== "decide") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      `"takes ${subcommand}" is not a command. Use list or decide.`,
+      { category: "validation", details: { subcommand } },
+    );
+  }
+
+  const takeId = rest[0];
+  if (takeId === undefined) {
+    throw new AldusError("ALDUS_INVALID_REQUEST", '"takes decide" needs a take id.', {
+      category: "validation",
+    });
+  }
+
+  const value = values["decision"];
+  if (value !== "accepted" && value !== "rejected") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      '"takes decide" needs --decision accepted|rejected.',
+      { category: "validation", details: { decision: value } },
+    );
+  }
+
+  const actor = options.actor;
+  if (actor === undefined) {
+    // Caught here as well as in the service, because a decision is built from the actor's
+    // identity: constructing one from a placeholder would produce a record §3.6 says is worthless.
+    throw new AldusError(
+      "ALDUS_ACTOR_REQUIRED",
+      "Deciding a take records who decided (contract §19.2, §13.3). Pass --actor human:<id>.",
+      { category: "policy" },
+    );
+  }
+
+  const reason = values["reason"];
+  const decision: TakeDecision = {
+    decision: value satisfies TakeDecisionValue,
+    decidedBy: actor.id,
+    decidedAt: (environment.now?.() ?? new Date()).toISOString(),
+    ...(typeof reason === "string" ? { reason } : {}),
+  };
+
+  return emit(
+    await services.decideTake({
+      runId: requireRunId(options, "takes decide"),
+      takeId,
+      decision,
+      actor,
+    }),
+    options,
+    environment,
+    renderTakeDecision,
+  );
 }

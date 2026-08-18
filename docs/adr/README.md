@@ -35,3 +35,4 @@ Rules:
 | [0016](0016-service-composition-and-injection.md)      | Service composition and injection points                             | Accepted | —                 |
 | [0017](0017-npm-scope.md)                              | The published npm scope is `@aldus-runtime`                          | Accepted | §25.10 (partial)  |
 | [0018](0018-licensing.md)                              | Apache-2.0 for the runtime; adopter content stays privately licensed | Accepted | #29 (license)     |
+| [0019](0019-cli-configuration-and-verbs.md)            | How the CLI receives adapters, and how its verb list grew            | Accepted | —                 |

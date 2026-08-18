@@ -11,18 +11,33 @@
 
 export { run, type CliEnvironment } from "./cli.js";
 
+export { loadConfig, stageRegistryOf, type AldusConfig } from "./config.js";
+
+export { readJsonDocument, requireFlag } from "./documents.js";
+
 export { ExitCodes, type ExitCode } from "./exit.js";
 
 export {
+  renderArchive,
+  renderArtifactLineage,
   renderArtifacts,
+  renderCleanupPlan,
   renderCosts,
   renderGateDecision,
   renderInit,
   renderInspection,
+  renderPlan,
   renderRelease,
+  renderReleaseBundle,
+  renderReleaseExecution,
+  renderReleaseReconciliation,
+  renderScript,
   renderStageRun,
   renderStartRun,
   renderStatus,
+  renderSynthesis,
+  renderTakeDecision,
+  renderTakes,
 } from "./render.js";
 
 export { USAGE } from "./usage.js";
