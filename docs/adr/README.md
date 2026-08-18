@@ -45,3 +45,4 @@ Rules:
 | [0026](0026-derived-run-status.md)                      | A Run's status is derived; its completion is declared intent                               | Accepted | —                 |
 | [0027](0027-stage-artifact-registration.md)             | A stage registers artifacts through a port, and never states its own provenance            | Accepted | —                 |
 | [0028](0028-workflow-stage-ordering.md)                 | A workflow graph declares stage ordering, separately from gating                           | Accepted | #55               |
+| [0029](0029-config-sees-the-invocation.md)              | A config module is given the invocation it is configuring                                  | Accepted | —                 |

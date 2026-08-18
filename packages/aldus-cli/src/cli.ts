@@ -145,18 +145,122 @@ const COMMON_OPTION_SPEC = {
  * message, so everything is mapped to an exit code and a rendered explanation.
  */
 export async function run(environment: CliEnvironment): Promise<ExitCode> {
-  const [command, ...rest] = environment.argv;
-
-  if (command === undefined || command === "--help" || command === "-h" || command === "help") {
-    environment.stdout(USAGE);
-    return ExitCodes.success;
-  }
+  // Kept outside the try so a failure that happens *after* the workspace is known can still say
+  // which workspace it was. An error raised before then has nothing to report and says nothing.
+  let invocation: Invocation = {};
 
   try {
-    return await dispatch(command, rest, await withConfig(environment));
+    const {
+      argv,
+      workspace: workspaceFlag,
+      config: configFlag,
+    } = takeLeadingGlobals(environment.argv);
+    const [command, ...rest] = argv;
+
+    if (command === undefined || command === "--help" || command === "-h" || command === "help") {
+      environment.stdout(USAGE);
+      return ExitCodes.success;
+    }
+
+    const workspace = workspaceFlag ?? environment.env["ALDUS_WORKSPACE"] ?? environment.cwd;
+    const specifier = configFlag ?? environment.env["ALDUS_CONFIG"];
+    invocation = { workspace, ...(specifier !== undefined ? { config: specifier } : {}) };
+
+    const bound = bindWorkspace(environment, workspace);
+    return await dispatch(command, rest, await withConfig(bound, specifier, workspace));
   } catch (error) {
-    return reportError(error, environment);
+    return reportError(error, environment, invocation);
   }
+}
+
+/** What the CLI resolved for this invocation, for use in diagnostics. */
+interface Invocation {
+  workspace?: string;
+  config?: string;
+}
+
+/** Global flags that take a value and are meaningful before a subcommand is chosen. */
+const LEADING_GLOBALS = ["--workspace", "--config"] as const;
+
+/**
+ * Resolve `--workspace` and `--config` before a subcommand is chosen, wherever they were written.
+ *
+ * Both decide things that happen before per-command parsing — the workspace decides which state
+ * the command acts on, and the config decides what is registered — so both have to be readable
+ * from the raw argv. That is two jobs, and conflating them is what made the first attempt at this
+ * wrong:
+ *
+ * - **Finding the value** scans the whole vector, because the common position is *after* the
+ *   subcommand (`aldus run stage --workspace X`) and that is where the defect lived.
+ * - **Stripping** removes only *leading* occurrences, because those would otherwise land in the
+ *   command position and fail as an unknown command. One written after the subcommand is left
+ *   in place so {@link parseCommon} keeps parsing it exactly as before — the common invocation
+ *   is untouched, and both positions produce the same answer.
+ *
+ * @throws {AldusError} `ALDUS_INVALID_REQUEST` when a flag is given without a value.
+ */
+function takeLeadingGlobals(argv: readonly string[]): {
+  argv: readonly string[];
+  workspace?: string;
+  config?: string;
+} {
+  let index = 0;
+  while (index < argv.length && LEADING_GLOBALS.some((flag) => flag === argv[index])) {
+    // The value is validated by `flagValue` below; here we only need to know it consumed a pair.
+    index += 2;
+  }
+  const remaining = argv.slice(index);
+
+  const workspace = flagValue(argv, "--workspace", "a path");
+  const config = flagValue(argv, "--config", "a module path");
+  return {
+    argv: remaining,
+    ...(workspace !== undefined ? { workspace } : {}),
+    ...(config !== undefined ? { config } : {}),
+  };
+}
+
+/**
+ * The value of a flag anywhere in argv, refusing one that swallowed the next flag.
+ *
+ * `--workspace --json` is a missing value rather than a workspace literally named `--json`, and
+ * treating it as the latter produces a confusing failure much later — a directory that does not
+ * exist, reported by whatever tried to read it.
+ *
+ * @throws {AldusError} `ALDUS_INVALID_REQUEST`
+ */
+function flagValue(argv: readonly string[], flag: string, needs: string): string | undefined {
+  const index = argv.indexOf(flag);
+  if (index < 0) return undefined;
+  const value = argv[index + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new AldusError("ALDUS_INVALID_REQUEST", `${flag} needs ${needs}.`, {
+      category: "validation",
+      details: { flag },
+    });
+  }
+  return value;
+}
+
+/**
+ * Make the resolved workspace visible to everything downstream, including a config module.
+ *
+ * Two things happen here, and the second is deliberately blunt.
+ *
+ * `env` gains the resolved value so {@link parseCommon} reaches the same answer whether the flag
+ * was written before or after the subcommand — its `ALDUS_WORKSPACE` fallback now holds what
+ * `--workspace` resolved to.
+ *
+ * `process.env` gains it too, because a config module is imported into *this* process and can
+ * only read the real environment. A module that read `process.env.ALDUS_WORKSPACE` previously saw
+ * the shell's value while the command acted on `--workspace`, and configured a different
+ * workspace than the one being operated on. Mutating the process environment is unpleasant, and
+ * still the right trade: `--workspace` and `ALDUS_WORKSPACE` disagreeing is a bug regardless of
+ * how a config is written, and this makes every existing config correct without being rewritten.
+ */
+function bindWorkspace(environment: CliEnvironment, workspace: string): CliEnvironment {
+  process.env["ALDUS_WORKSPACE"] = workspace;
+  return { ...environment, env: { ...environment.env, ALDUS_WORKSPACE: workspace } };
 }
 
 /**
@@ -166,11 +270,17 @@ export async function run(environment: CliEnvironment): Promise<ExitCode> {
  * by whatever happens to be configured on the machine. In the `aldus` binary nothing is injected,
  * so the config module is the only source — which is the point.
  */
-async function withConfig(environment: CliEnvironment): Promise<CliEnvironment> {
-  const specifier = configSpecifier(environment);
+async function withConfig(
+  environment: CliEnvironment,
+  specifier: string | undefined,
+  workspace: string,
+): Promise<CliEnvironment> {
   if (specifier === undefined) return environment;
 
-  const config: AldusConfig = await loadConfig(specifier, environment.cwd);
+  // The workspace is passed rather than left to the module to guess. `cwd` stays separate: it
+  // resolves a relative `--config` path, and the module lives where the operator wrote it, which
+  // is not necessarily inside the workspace.
+  const config: AldusConfig = await loadConfig(specifier, environment.cwd, { workspace });
   const stages = stageRegistryOf(config.stages);
 
   return {
@@ -198,21 +308,6 @@ async function withConfig(environment: CliEnvironment): Promise<CliEnvironment> 
       ? { workflow: config.workflow }
       : {}),
   };
-}
-
-/** Where the config module is named, if anywhere. `--config` beats the environment. */
-function configSpecifier(environment: CliEnvironment): string | undefined {
-  const index = environment.argv.indexOf("--config");
-  if (index >= 0) {
-    const value = environment.argv[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      throw new AldusError("ALDUS_INVALID_REQUEST", "--config needs a module path.", {
-        category: "validation",
-      });
-    }
-    return value;
-  }
-  return environment.env["ALDUS_CONFIG"];
 }
 
 /** Route one command to one service call. */
@@ -347,22 +442,77 @@ function emit<T>(
  * which is exit 2's definition, so it is mapped there. Reported upstream rather than fixed in
  * services, since the mapping from an error to an exit code is this adapter's business anyway.
  */
-function reportError(error: unknown, environment: CliEnvironment): ExitCode {
+function reportError(
+  error: unknown,
+  environment: CliEnvironment,
+  invocation: Invocation = {},
+): ExitCode {
   const structured = toStructuredError(error);
   const isWiringError = structured.code === ServiceErrorCodes.ADAPTER_NOT_WIRED;
   const isRefusal = !isWiringError && error instanceof AldusError && error.category === "policy";
   const outcome = isRefusal ? "refused" : "error";
+  const context = misconfigurationContext(structured.code, invocation);
 
   // `--json` is read from argv rather than from parsed options, because the failure being
   // reported may be the parse itself. A caller that asked for machine-readable output and got an
   // empty stdout would have to fall back to scraping stderr, which is the opposite of §18's
   // intent — so the error is emitted in the same shape a refusal takes.
   if (environment.argv.includes("--json")) {
-    environment.stdout(JSON.stringify({ outcome, error: structured }, null, 2));
+    const detailed =
+      context === undefined
+        ? structured
+        : { ...structured, details: { ...structured.details, ...invocation } };
+    environment.stdout(JSON.stringify({ outcome, error: detailed }, null, 2));
   }
 
-  environment.stderr(`${structured.code}: ${structured.message}`);
+  environment.stderr(`${structured.code}: ${structured.message}${context ?? ""}`);
   return isRefusal ? ExitCodes.refused : ExitCodes.error;
+}
+
+/**
+ * Errors whose usual cause is a workspace or config other than the one the reader assumes.
+ *
+ * `ALDUS_STAGE_NOT_REGISTERED` is the one that cost an adopter real time: it sends you to audit
+ * a stage list that is correct and complete, while the fault is two layers away in workspace
+ * resolution. The stage runner cannot say this — it knows nothing of `--workspace` or `--config`,
+ * and should not — so the adapter that resolved them names them here.
+ */
+const MISCONFIGURATION_PRONE_CODES: readonly string[] = [
+  "ALDUS_STAGE_NOT_REGISTERED",
+  "ALDUS_NO_STAGES_CONFIGURED",
+  "ALDUS_EPISODE_NOT_FOUND",
+  "ALDUS_RUN_NOT_FOUND",
+];
+
+/** A trailing line naming the workspace and config in effect, when that is likely to be the fault. */
+function misconfigurationContext(code: string, invocation: Invocation): string | undefined {
+  if (!MISCONFIGURATION_PRONE_CODES.includes(code)) return undefined;
+  if (invocation.workspace === undefined) return undefined;
+  const config =
+    invocation.config === undefined ? "no config module" : `config "${invocation.config}"`;
+  return `\n  Workspace: ${invocation.workspace} (${config})`;
+}
+
+/**
+ * Refuse before the service call when *nothing* is registered.
+ *
+ * An empty registry and a missing stage are different problems wearing the same error. "No stage
+ * is registered with id X" reads as a typo when the list is populated, and as a mystery when the
+ * list is empty — and an empty list almost always means no config was loaded, or one was loaded
+ * against a workspace other than the one being operated on. Saying so here costs one lookup and
+ * removes the misdirection.
+ *
+ * @throws {AldusError} `ALDUS_NO_STAGES_CONFIGURED`
+ */
+function assertStagesConfigured(environment: CliEnvironment, stageId: string): void {
+  if ((environment.stages?.ids().length ?? 0) > 0) return;
+  throw new AldusError(
+    "ALDUS_NO_STAGES_CONFIGURED",
+    `No stages are registered at all, so "${stageId}" cannot be run. Stages come from a config ` +
+      "module (§4.2 keeps them out of the runtime), so either none was loaded, or the one that " +
+      "was loaded registered nothing for this workspace.",
+    { category: "validation", retryable: false, details: { stageId } },
+  );
 }
 
 /** Require a `--run` for commands that need one. */
@@ -502,6 +652,8 @@ async function runStage(
       category: "validation",
     });
   }
+
+  assertStagesConfigured(environment, stageId);
 
   const services = servicesFor(options, environment);
   const request = {
