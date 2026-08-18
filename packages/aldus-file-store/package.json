@@ -3,8 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Aldus File Store — file-backed Episode, Run, and Event stores with atomic writes and crash recovery.",
-  "license": "UNLICENSED",
+  "description": "Aldus File Store \u2014 file-backed Episode, Run, and Event stores with atomic writes and crash recovery.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamchen/aldus",
+    "directory": "packages/aldus-file-store"
+  },
+  "homepage": "https://github.com/jamchen/aldus/tree/main/packages/aldus-file-store#readme",
+  "bugs": {
+    "url": "https://github.com/jamchen/aldus/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,7 +21,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -b",

@@ -62,6 +62,19 @@ npm install
 npm run verify
 ```
 
+## License
+
+Aldus is licensed under the [Apache License 2.0](LICENSE).
+
+That covers the runtime, its official packages, and this repository. **Adopter-owned Knowledge
+Packs, integrations, workflows, and content assets may remain privately licensed** — the
+architecture contract §4.2 and §4.3 already keep them outside this repository, and the license
+boundary follows the same line (ADR-0018).
+
+Third-party dependency licenses are recorded in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). No third-party code is bundled into any
+published package.
+
 ## Scope
 
 Aldus Core is generic. It contains no show, host, brand, TTS provider, publishing platform, or

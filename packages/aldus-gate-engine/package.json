@@ -3,8 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Aldus Gate Engine — hash-bound human gates, cascading invalidation, and spend authorization.",
-  "license": "UNLICENSED",
+  "description": "Aldus Gate Engine \u2014 hash-bound human gates, cascading invalidation, and spend authorization.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamchen/aldus",
+    "directory": "packages/aldus-gate-engine"
+  },
+  "homepage": "https://github.com/jamchen/aldus/tree/main/packages/aldus-gate-engine#readme",
+  "bugs": {
+    "url": "https://github.com/jamchen/aldus/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,7 +21,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -b",

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Aldus AI production runtime \u2014 monorepo root",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -26,5 +26,13 @@
     "prettier": "^3.9.6",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamchen/aldus"
+  },
+  "homepage": "https://github.com/jamchen/aldus#readme",
+  "bugs": {
+    "url": "https://github.com/jamchen/aldus/issues"
   }
 }

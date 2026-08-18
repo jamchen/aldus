@@ -3,8 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Aldus Artifact Registry — content-addressed artifact identity, provenance, lineage, archival, and cleanup policy.",
-  "license": "UNLICENSED",
+  "description": "Aldus Artifact Registry \u2014 content-addressed artifact identity, provenance, lineage, archival, and cleanup policy.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamchen/aldus",
+    "directory": "packages/aldus-artifact-registry"
+  },
+  "homepage": "https://github.com/jamchen/aldus/tree/main/packages/aldus-artifact-registry#readme",
+  "bugs": {
+    "url": "https://github.com/jamchen/aldus/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,7 +21,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -b",
