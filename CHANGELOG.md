@@ -43,10 +43,38 @@ unaffected.
 workspace, silently created no Episode, and printed success output differing only by an absent
 line.
 
+**Run status is now derived rather than stored** ([#47]). `RunManifest.status` was written once
+at creation and never again, so four of five §6.2 states were unreachable and the field the
+`status` and `inspect` commands print first was permanently stale.
+
+_What you will see:_ anything reading `RunManifest.status` and expecting `"created"` changes
+behaviour. A Run resting between stages now reports `running` — §6.2 has no idle state, and §5.1
+makes long pauses ordinary, so "in progress" cannot mean "a process is executing right now".
+
+_What has not changed:_ `RunReport.run` is still the faithful stored manifest. The derived answer
+lives on `RunReport.state`, deliberately, so nothing can round-trip a derived status back into
+storage.
+
+_Schema:_ `SCHEMA_VERSION` moves 1.2 → 1.3 — additive, MINOR under ADR-0003. Records written by
+1.2 stay readable and need no migration.
+
 ### Added
 
 - **`AldusConfig.workflow`** ([#46]) — a workflow graph is now reachable from the CLI, so the
   stage↔gate association of ADR-0021 can actually be used from the binary.
+- **`RunManifest.goalStages`** ([#47]) — the stages a Run intends to reach. `completed` derives
+  from these rather than from "every stage in the graph", because optionality is a property of an
+  episode's edition and not of the stage. **A workflow with conditional stages should set this
+  explicitly:** the graph carries no edges, so the default is every stage it names, which will
+  leave such a Run permanently incomplete.
+- **`aldus cancel --run <id> [--reason]`** ([#47]) — a Run can be abandoned, with a recorded actor
+  and an emitted event. Cancellation cannot be derived: an abandoned Run and one someone is still
+  thinking about look identical in a log.
+- **`StageContext.registerOutput`** ([#39]) — a stage registers an artifact by supplying only what
+  it knows; the runner fills `producerRunId`, `producerStageId`, `codeRevision`, `configHash` and
+  the digest. A stage cannot claim provenance that disagrees with its own attempt, because the
+  registration type has no field to write it in. Purely additive — closing over a registry keeps
+  working.
 
 ### Fixed
 
@@ -55,6 +83,8 @@ line.
 
 [#45]: https://github.com/jamchen/aldus/issues/45
 [#46]: https://github.com/jamchen/aldus/issues/46
+[#47]: https://github.com/jamchen/aldus/issues/47
+[#39]: https://github.com/jamchen/aldus/issues/39
 [#50]: https://github.com/jamchen/aldus/pull/50
 
 ## 0.1.0 — 2026-08-18
