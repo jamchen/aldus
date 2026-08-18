@@ -22,10 +22,13 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
+    "@aldus/artifact-registry": "*",
     "@aldus/core": "*",
     "@aldus/file-store": "*",
     "@aldus/gate-engine": "*",
-    "@aldus/stage-runner": "*"
+    "@aldus/release": "*",
+    "@aldus/stage-runner": "*",
+    "@aldus/tts-ledger": "*"
   },
   "devDependencies": {
     "@aldus/testkit": "*",

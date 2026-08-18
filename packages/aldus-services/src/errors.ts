@@ -31,6 +31,22 @@ export const ServiceErrorCodes = {
   EPISODE_ALREADY_EXISTS: "ALDUS_EPISODE_ALREADY_EXISTS",
   /** Arguments were internally inconsistent or incomplete. */
   INVALID_REQUEST: "ALDUS_INVALID_REQUEST",
+  /**
+   * An operation needs an injected adapter that was never wired.
+   *
+   * ADR-0015 makes Aldus responsible for composing its packages and the adopter responsible for
+   * supplying concrete adapters. A missing adapter is therefore a wiring error, not a policy
+   * refusal: nothing an operator can approve will make it appear.
+   */
+  ADAPTER_NOT_WIRED: "ALDUS_ADAPTER_NOT_WIRED",
+  /** A stored TTS ledger file is not the shape it should be. */
+  LEDGER_FILE_MALFORMED: "ALDUS_LEDGER_FILE_MALFORMED",
+  /** A take was addressed that the ledger does not hold. */
+  LEDGER_TAKE_NOT_FOUND: "ALDUS_LEDGER_TAKE_NOT_FOUND",
+  /** A plan was addressed that the ledger does not hold. */
+  LEDGER_PLAN_NOT_FOUND: "ALDUS_LEDGER_PLAN_NOT_FOUND",
+  /** An artifact was addressed that the registry does not hold. */
+  ARTIFACT_NOT_REGISTERED: "ALDUS_ARTIFACT_NOT_REGISTERED",
 } as const;
 
 /** @see ServiceErrorCodes */

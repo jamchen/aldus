@@ -36,6 +36,7 @@
 import type { AldusEvent, CostRecord, GateDecision } from "@aldus/core";
 import type { EventStore, RunStore } from "@aldus/file-store";
 import type { CostReader, GateDecisionStore, GateEventSink } from "@aldus/gate-engine";
+import type { LedgerEventSink } from "@aldus/tts-ledger";
 
 /**
  * A {@link GateDecisionStore} backed by a Run's `approvals.json` (contract §7).
@@ -79,6 +80,28 @@ export class RunStoreCostReader implements CostReader {
  * be called from inside that lock. See this module's header.
  */
 export class EventStoreGateEventSink implements GateEventSink {
+  readonly #events: EventStore;
+
+  constructor(events: EventStore) {
+    this.#events = events;
+  }
+
+  async emit(event: AldusEvent): Promise<void> {
+    await this.#events.append(event.runId, event);
+  }
+}
+
+/**
+ * A {@link LedgerEventSink} backed by the append-only event log (contract §6.4, §15).
+ *
+ * Structurally identical to {@link EventStoreGateEventSink} and deliberately not merged with it:
+ * the two satisfy different packages' ports, and a shared class would make either package's port
+ * unable to change without the other's consent. The duplication is four lines; the coupling would
+ * outlast it.
+ *
+ * The same lock caution applies — see this module's header.
+ */
+export class LedgerEventStoreSink implements LedgerEventSink {
   readonly #events: EventStore;
 
   constructor(events: EventStore) {

@@ -16,11 +16,36 @@ export { parseActor, requireActor } from "./actor.js";
 
 export {
   EventStoreGateEventSink,
+  LedgerEventStoreSink,
   RunStoreCostReader,
   RunStoreGateDecisionStore,
 } from "./adapters.js";
 
 export { AldusContext, type AldusContextOptions, type SubjectsProvider } from "./context.js";
+
+export {
+  FileLexiconStore,
+  FilePlanStore,
+  FileScriptStore,
+  FileTakeStore,
+  LedgerLayout,
+  TTS_DIRECTORY,
+  fileLedgerStores,
+  type LedgerFileName,
+} from "./ledger-store.js";
+
+export {
+  SynthesisGateway,
+  gateEngineSpendAuthorizer,
+  isIssuedSynthesisPermit,
+  type SpendGrantProvider,
+  type SynthesisAdapter,
+  type SynthesisGatewayOptions,
+  type SynthesisOutcome,
+  type SynthesisPermit,
+  type SynthesisRequest,
+  type SynthesisResult,
+} from "./synthesis.js";
 
 export { summariseCosts } from "./costs.js";
 
@@ -38,21 +63,32 @@ export {
 } from "./nextaction.js";
 
 export type {
+  ArchiveReport,
+  ArtifactLineageReport,
   ArtifactReport,
+  CleanupPlanReport,
   CostReport,
   CostSummary,
   EpisodeInspection,
   GateDecisionReport,
   InitReport,
   Inspection,
+  PlanReport,
+  ReleaseBundleReport,
+  ReleaseExecutionReport,
+  ReleaseReconciliationReport,
   ReleaseReport,
   RunInspection,
   RunReport,
   RunSummary,
+  ScriptReport,
   StageReport,
   StageRunReport,
   StartRunReport,
   StatusReport,
+  SynthesisReport,
+  TakeDecisionReport,
+  TakeReport,
 } from "./reports.js";
 
 export {

@@ -15,7 +15,21 @@ import type {
   RunManifest,
   StructuredError,
 } from "@aldus/core";
+import type {
+  ArtifactRecord,
+  CleanupBlock,
+  LineageEdge,
+  LineageResult,
+  ProducerInfo,
+} from "@aldus/artifact-registry";
 import type { GateStatus } from "@aldus/gate-engine";
+import type { BundleStatus, ReconciliationReport, ReleaseOutcome } from "@aldus/release";
+import type {
+  PerformanceScript,
+  SegmentLineage,
+  TakeRecord,
+  TtsRequestPlan,
+} from "@aldus/tts-ledger";
 
 import type { ActionPlan, StageSnapshot } from "./nextaction.js";
 
@@ -153,10 +167,139 @@ export interface CostReport {
   summary: CostSummary;
 }
 
-/** Artifacts recorded against a Run (contract §8). */
+/**
+ * Artifacts recorded against a Run (contract §8, §8.1, §20).
+ *
+ * Registry-backed. The registry is the authoritative list (`@aldus/artifact-registry`), and §7's
+ * per-run `artifacts.json` is a materialized view a stage runner maintains — so `records` carries
+ * provenance and archival state that the collection cannot, and `artifacts` remains for callers
+ * that only want the `ArtifactRef`s.
+ */
 export interface ArtifactReport {
   runId: string;
+  /** Every registered artifact's `ArtifactRef`, in registry order. */
   artifacts: ArtifactRef[];
+  /** The full records: provenance, archive receipt, supersession (contract §8.1). */
+  records: ArtifactRecord[];
+  /**
+   * Artifacts present in §7's `artifacts.json` that the registry does not hold.
+   *
+   * Non-empty for a Run produced before the registry existed, or by a producer that wrote the
+   * collection directly. Reported rather than merged: §3.4 makes durable records authoritative,
+   * and quietly presenting an unregistered entry as registered would claim provenance and
+   * archival state that were never collected.
+   */
+  unregistered: ArtifactRef[];
+  /**
+   * Registered irreplaceable artifacts with no verified archive receipt (contract §8.1).
+   *
+   * §8.1 requires these to be archived before disposable working files are cleaned, so an
+   * operator needs to see them before planning any cleanup.
+   */
+  unarchivedIrreplaceable: ArtifactRecord[];
+}
+
+/** One artifact's place in the derivation graph (contract §20). */
+export interface ArtifactLineageReport {
+  artifactId: string;
+  /** The record itself. */
+  record: ArtifactRecord;
+  /** Run, stage, code revision, and configuration digest that produced it (contract §8.1). */
+  producer: ProducerInfo | undefined;
+  /** Immediate declared inputs, one edge per digest. */
+  inputs: LineageEdge[];
+  /** Artifacts directly derived from it. */
+  consumers: ArtifactRecord[];
+  /** Everything it was transitively derived from, nearest first. */
+  ancestors: LineageResult;
+  /** Everything transitively derived from it, nearest first. */
+  descendants: LineageResult;
+}
+
+/** What a cleanup would do, decided before anything is removed (contract §8.1). */
+export interface CleanupPlanReport {
+  runId: string;
+  /** Artifacts whose working files may be removed. */
+  removable: ArtifactRecord[];
+  /** Artifacts that must not be removed, each with why. */
+  blocked: CleanupBlock[];
+  /** Candidate IDs the registry does not hold. */
+  unknownArtifactIds: string[];
+  /** True when nothing blocks the plan. */
+  safe: boolean;
+}
+
+/** Result of archiving irreplaceable artifacts (contract §8.1). */
+export interface ArchiveReport {
+  runId: string;
+  /** Records archived by this call. */
+  archived: ArtifactRecord[];
+  /** Records that already held a verified receipt. */
+  alreadyArchived: ArtifactRecord[];
+}
+
+/** Result of executing a release bundle (contract §17). */
+export interface ReleaseExecutionReport {
+  runId: string;
+  bundleId: string;
+  outcome: ReleaseOutcome;
+}
+
+/** Result of reconciling a release bundle against its destinations (contract §17). */
+export interface ReleaseReconciliationReport {
+  runId: string;
+  bundleId: string;
+  report: ReconciliationReport;
+}
+
+/** A release bundle's derived state (contract §17, §19.1). */
+export interface ReleaseBundleReport {
+  runId: string;
+  bundleId: string;
+  status: BundleStatus;
+}
+
+/** A recorded synthesis request plan (contract §13.2, §15). */
+export interface PlanReport {
+  runId: string;
+  plan: TtsRequestPlan;
+}
+
+/** A recorded PerformanceScript (contract §14). */
+export interface ScriptReport {
+  runId: string;
+  script: PerformanceScript;
+}
+
+/** Result of one synthesis (contract §13.2, §15). */
+export interface SynthesisReport {
+  runId: string;
+  planId: string;
+  segmentId: string;
+  /** The recorded take, carrying the authorization the charge rests on (§19.3). */
+  take: TakeRecord;
+  /** Which adapter performed it, for trace (contract §20). */
+  adapterId: string;
+}
+
+/** Result of attaching a human decision to a take (contract §13.3, §15). */
+export interface TakeDecisionReport {
+  runId: string;
+  take: TakeRecord;
+}
+
+/** Takes recorded for a Run, with what they imply (contract §15, §15.1). */
+export interface TakeReport {
+  runId: string;
+  takes: TakeRecord[];
+  /** Per-segment lineage: attempts, supersession, and which take was accepted. */
+  lineage: SegmentLineage[];
+  /**
+   * Segments with no accepted take yet (contract §13.3).
+   *
+   * §13.3 keeps final performance approval human-owned, so these are what still needs an ear.
+   */
+  awaitingAcceptance: string[];
 }
 
 /** Release receipts and what they imply (contract §17). */
