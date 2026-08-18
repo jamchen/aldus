@@ -8,6 +8,7 @@ reusable production knowledge.
   ([繁體中文](docs/ALDUS-ARCHITECTURE.zh-Hant.md))
 - **Decisions:** [`docs/adr/`](docs/adr/)
 - **Working agreement:** [`CLAUDE.md`](CLAUDE.md)
+- **Changes between versions:** [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Status
 
