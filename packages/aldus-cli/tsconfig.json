@@ -7,5 +7,14 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../aldus-core" }, { "path": "../aldus-services" }]
+  "references": [
+    { "path": "../aldus-artifact-registry" },
+    { "path": "../aldus-core" },
+    { "path": "../aldus-file-store" },
+    { "path": "../aldus-gate-engine" },
+    { "path": "../aldus-release" },
+    { "path": "../aldus-services" },
+    { "path": "../aldus-stage-runner" },
+    { "path": "../aldus-tts-ledger" }
+  ]
 }

@@ -275,11 +275,35 @@ describe("help and usage", () => {
       "approve",
       "reject",
       "artifacts",
+      "artifacts lineage",
+      "artifacts cleanup-plan",
+      "artifacts archive",
       "costs",
       "release status",
+      "release plan",
+      "release reconcile",
+      "release execute",
+      "script record",
+      "synthesis plan",
+      "synthesis run",
+      "synthesis charge",
+      "takes",
+      "takes decide",
     ]) {
       expect(USAGE, `usage does not mention "${command}"`).toContain(command);
     }
+  });
+
+  // The two irreversible commands. §18.1 requires explicit scoped authority for paid synthesis
+  // and publishing; an operator reading help should learn that before running one, not after.
+  it("marks the operations that spend money or publish", () => {
+    expect(USAGE).toContain("spends money");
+    expect(USAGE).toContain("publishes");
+    expect(USAGE).toContain("Operations that are not reversible");
+  });
+
+  it("explains that a missing adapter is exit 2 rather than a refusal", () => {
+    expect(USAGE).toContain("including a missing adapter");
   });
 
   // §4.2 keeps provider, platform, and adopter identities out of the runtime, and help text is
@@ -326,11 +350,13 @@ describe("commands over a seeded workspace", () => {
 
   // Performing a release is WP-12's. Silently accepting the verb would imply a capability this
   // build does not have.
-  it("refuses a release subcommand it cannot perform", async () => {
+  it("rejects a release subcommand that does not exist, and names the ones that do", async () => {
     const runId = await seed();
     const result = await invoke(base, "release", "publish", "--run", runId);
     expect(result.code).toBe(ExitCodes.error);
-    expect(result.stderr).toContain("WP-12");
+    // Naming the alternatives matters more than naming the mistake: an operator who guessed
+    // "publish" needs to learn that the verb is "execute", not merely that they were wrong.
+    expect(result.stderr).toContain("status, plan, reconcile, or execute");
   });
 
   it("inspects a Run by id", async () => {
