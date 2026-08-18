@@ -51,6 +51,16 @@ npm run schema:check     # fail if committed JSON Schema is stale
 npm run format           # prettier --write
 ```
 
+## The contract is executable
+
+`packages/aldus-core/test/contract-conformance.test.ts` parses the TypeScript declarations out
+of `docs/ALDUS-ARCHITECTURE.md` and checks the implemented schemas against them: every declared
+field present, optionality preserved, and no unlisted additions.
+
+So a schema change that departs from the contract fails CI. If the departure is intended, add
+it to `SANCTIONED_ADDITIONS` in that test **and** justify it in an ADR or the work-package
+issue. If the contract itself changed, the test starts failing until the schema follows.
+
 ## Schemas
 
 Zod definitions in `packages/aldus-core/src/schema/` are the single source of truth. TypeScript
