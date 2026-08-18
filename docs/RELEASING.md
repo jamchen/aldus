@@ -272,6 +272,30 @@ Promoting to `latest` later, once an adopter has validated:
 npm dist-tag add @aldus-runtime/<name>@<version> latest   # per package, all twelve
 ```
 
+## Who may release what
+
+Recorded because a standing authorization that lives only in a conversation is one context loss
+away from being forgotten or overstepped.
+
+| Action                             | Authority                                               | Enforced by                                                        |
+| ---------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------ |
+| Prerelease `0.2.0-next.N` → `next` | **standing**, granted 2026-08-18 — publish, then report | the `npm-publish` environment reviewer                             |
+| Any non-prerelease version         | the owner, per release                                  | same                                                               |
+| Promoting anything to `latest`     | **the owner, always**                                   | not automatable; `--allow-latest-move` must be passed deliberately |
+| Changing this table                | the owner                                               | —                                                                  |
+
+The scope is deliberately narrow. A prerelease on the `next` tag is irreversible — npm unpublish
+is unavailable after 72 hours — but its blast radius is bounded: nothing installs `next` by
+default, so the population exposed to a bad prerelease is people who opted in and are watching.
+`latest` changes what every future `npm install` resolves, which is a different kind of act and
+stays a human decision.
+
+The GitHub environment still requires a reviewer for every publish, including prereleases. That is
+not redundant with the standing authorization: the authorization says _what may be released
+without asking_, and the environment gate is what makes any release auditable and attributable at
+all. Removing it would make the publish path unobservable, which is a separate loss from who
+decides.
+
 ## Known considerations
 
 Both items previously listed here were resolved before the first release. They are kept as

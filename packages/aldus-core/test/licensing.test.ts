@@ -110,7 +110,13 @@ describe("workspace packages", () => {
 
     it("points at the canonical repository, with its own directory", () => {
       // npm provenance resolves a package back to its source through these fields.
-      expect(manifest.repository?.url).toBe("https://github.com/jamchen/aldus");
+      //
+      // The `git+…​.git` form is npm's own canonical spelling, not a preference. A plain
+      // `https://github.com/jamchen/aldus` is accepted and then **rewritten on publish** — the
+      // published 0.1.0 metadata records the git+ form regardless of what the manifest said,
+      // with a `npm pkg fix` warning on every package. Keeping the plain form bought a warning
+      // twelve times over and a source that disagreed with the registry.
+      expect(manifest.repository?.url).toBe("git+https://github.com/jamchen/aldus.git");
       expect(manifest.repository?.directory).toBe(`packages/${dir}`);
     });
   });

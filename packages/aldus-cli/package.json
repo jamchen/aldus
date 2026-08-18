@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jamchen/aldus",
+    "url": "git+https://github.com/jamchen/aldus.git",
     "directory": "packages/aldus-cli"
   },
   "homepage": "https://github.com/jamchen/aldus/tree/main/packages/aldus-cli#readme",
