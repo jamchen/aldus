@@ -600,7 +600,10 @@ export class AldusServices {
         "No synthesis adapter is wired, so nothing can perform synthesis. Aldus never calls a " +
           "provider itself (contract §4.2, §15.1); an adopter integration supplies the adapter " +
           "(§4.3).",
-        { category: "policy", details: { runId: request.plan.runId } },
+        // Not "policy": a policy refusal is something an operator could approve away, and no
+        // approval conjures an adapter. Misclassifying it tells a caller to wait and retry
+        // forever (ADR-0015, and the doc comment on ADAPTER_NOT_WIRED).
+        { category: "validation", retryable: false, details: { runId: request.plan.runId } },
       );
     }
 
@@ -849,7 +852,13 @@ export class AldusServices {
       `No release adapter is wired for ${missing.map((name) => `"${name}"`).join(", ")}. Aldus ` +
         "names no publishing platform (contract §4.2); an adopter integration supplies the " +
         "adapter for each destination (§4.3).",
-      { category: "policy", details: { runId: bundle.runId, destinations: missing } },
+      // See the note at the synthesis throw site: a missing adapter is a wiring error, and no
+      // approval makes one appear.
+      {
+        category: "validation",
+        retryable: false,
+        details: { runId: bundle.runId, destinations: missing },
+      },
     );
   }
 
