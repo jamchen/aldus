@@ -8,9 +8,12 @@
   },
   "include": ["src/**/*.ts"],
   "references": [
+    { "path": "../aldus-artifact-registry" },
     { "path": "../aldus-core" },
     { "path": "../aldus-file-store" },
     { "path": "../aldus-gate-engine" },
-    { "path": "../aldus-stage-runner" }
+    { "path": "../aldus-release" },
+    { "path": "../aldus-stage-runner" },
+    { "path": "../aldus-tts-ledger" }
   ]
 }
