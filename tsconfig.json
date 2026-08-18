@@ -4,6 +4,7 @@
     { "path": "./packages/aldus-core" },
     { "path": "./packages/aldus-testkit" },
     { "path": "./packages/aldus-file-store" },
-    { "path": "./packages/aldus-artifact-registry" }
+    { "path": "./packages/aldus-artifact-registry" },
+    { "path": "./packages/aldus-regression" }
   ]
 }
