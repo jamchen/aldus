@@ -10,15 +10,14 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
-      allow-latest-move:
-        description: "Permit the latest dist-tag to move (a deliberate promotion, or a first publish)"
-        type: boolean
-        default: false
-    inputs:
       dry_run:
         description: "Verify and pack, then stop before publishing"
         type: boolean
         default: true
+      allow-latest-move:
+        description: "Permit the latest dist-tag to move (a deliberate promotion, or a first publish)"
+        type: boolean
+        default: false
 
 # Least privilege at the top; the publish job adds id-token below.
 permissions:
