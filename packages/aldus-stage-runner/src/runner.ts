@@ -39,9 +39,11 @@ import type { EventStore, LockManager, RunStore } from "@aldus-runtime/file-stor
 import { assertCapabilities, type AgentBackend } from "./backend.js";
 import {
   isGateRequiredSignal,
+  type ArtifactRecorder,
   type StageDefinition,
   type StageContext,
   type StageOutcome,
+  type StageOutputRegistration,
   type StageRunResult,
 } from "./definition.js";
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
@@ -93,6 +95,15 @@ export interface StageRunnerOptions {
   actor: ActorRef;
   /** Backend whose capabilities are checked before execution (contract §10). */
   backend?: AgentBackend;
+  /**
+   * Where `context.registerOutput` sends produced files (contract §8, ADR-0027).
+   *
+   * A port rather than a registry: this package must not depend on
+   * `@aldus-runtime/artifact-registry`, which is lower in the stack. Optional, so a runner used
+   * for stages that produce no artifacts needs no wiring — but a stage that calls
+   * `registerOutput` without one is refused rather than silently ignored.
+   */
+  artifacts?: ArtifactRecorder;
   /** Clock, injectable so tests produce reproducible timestamps. */
   now?: () => Date;
   /** Delay used between retries, injectable so tests do not wait. */
@@ -129,6 +140,7 @@ export class StageRunner {
     Pick<StageRunnerOptions, "runs" | "events" | "locks" | "stageStatePath" | "registry" | "actor">
   > & {
     backend?: AgentBackend;
+    artifacts?: ArtifactRecorder;
     now: () => Date;
     sleep: (ms: number) => Promise<void>;
     newAttemptId: () => string;
@@ -144,6 +156,7 @@ export class StageRunner {
       registry: options.registry,
       actor: options.actor,
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
+      ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
       now: options.now ?? (() => new Date()),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       newAttemptId: options.newAttemptId ?? defaultNewAttemptId,
@@ -438,6 +451,35 @@ export class StageRunner {
       recordOutput: (artifact) => {
         assertValid("ArtifactRef", artifact);
         outputs.push(artifact);
+      },
+      registerOutput: async (registration: StageOutputRegistration) => {
+        const recorder = this.#options.artifacts;
+        if (recorder === undefined) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.ARTIFACT_RECORDER_UNAVAILABLE,
+            `Stage "${definition.id}" called registerOutput, but no artifact recorder is wired. ` +
+              "Supply one when constructing the runner (contract §8, ADR-0027).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { runId, stageId: definition.id, path: registration.path },
+            },
+          );
+        }
+        // Provenance comes from the attempt, never from the stage: §8.1 requires an artifact to
+        // record which stage, run, code revision, and configuration produced it, and the runner
+        // is the only party that knows all four for certain.
+        const artifact = await recorder.register({
+          ...registration,
+          producerRunId: runId,
+          producerStageId: definition.id,
+          ...(manifest.codeRevision === undefined ? {} : { codeRevision: manifest.codeRevision }),
+          configHash: input.configurationHash,
+          configuration: metadata.configuration,
+        });
+        assertValid("ArtifactRef", artifact);
+        outputs.push(artifact);
+        return artifact;
       },
       note: (message) => {
         notes.push(message);

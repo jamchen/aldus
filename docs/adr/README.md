@@ -42,3 +42,4 @@ Rules:
 | [0023](0023-bootstrap-release-exception.md)             | The bootstrap release carries `latest`; later unvalidated releases use prerelease versions | Accepted | —                 |
 | [0024](0024-gate-enforcement-at-the-service-layer.md)   | A declared gate refuses a stage; the conservative default does not                         | Accepted | #45               |
 | [0025](0025-config-strictness.md)                       | An operator's config module rejects keys Aldus does not recognise                          | Accepted | #46 (strictness)  |
+| [0027](0027-stage-artifact-registration.md)             | A stage registers artifacts through a port, and never states its own provenance            | Accepted | —                 |

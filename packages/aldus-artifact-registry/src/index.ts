@@ -33,6 +33,13 @@ export {
 } from "./archive.js";
 
 export {
+  stageArtifactRecorder,
+  type StageArtifactRecorder,
+  type StageArtifactRequest,
+  type StageSuppliedProvenance,
+} from "./stage-recorder.js";
+
+export {
   isArchived,
   planCleanup,
   requiresArchiveBeforeCleanup,
