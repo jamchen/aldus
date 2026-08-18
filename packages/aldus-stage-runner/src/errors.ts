@@ -38,6 +38,15 @@ export const StageRunnerErrorCodes = {
   /** Execution was cancelled by an operator or a supervising runtime (contract §19.1). */
   STAGE_CANCELLED: "ALDUS_STAGE_CANCELLED",
   /**
+   * A stage called `registerOutput` but no artifact recorder is wired (contract §8, ADR-0027).
+   *
+   * A wiring error, not a policy refusal: no approval an operator could grant makes a recorder
+   * appear, so it is not retryable. Refusing beats silently doing nothing — a stage that
+   * believed it registered an irreplaceable take and did not would find out the day a cleanup
+   * removed the bytes (§8.1).
+   */
+  ARTIFACT_RECORDER_UNAVAILABLE: "ALDUS_ARTIFACT_RECORDER_UNAVAILABLE",
+  /**
    * A stage execution was asked to advance from a state it cannot advance from.
    *
    * For example, retrying a stage whose latest attempt is `waiting_for_gate`: the gate has to be

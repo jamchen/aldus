@@ -38,6 +38,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@aldus-runtime/stage-runner": "0.1.0",
     "@aldus-runtime/testkit": "0.1.0",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",

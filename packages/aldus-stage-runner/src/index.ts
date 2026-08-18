@@ -17,6 +17,8 @@
 export {
   GateRequiredSignal,
   isGateRequiredSignal,
+  type ArtifactRecorder,
+  type ArtifactRecorderRequest,
   type CostPolicy,
   type RetryBackoff,
   type RetryPolicy,
@@ -24,6 +26,8 @@ export {
   type StageDefinition,
   type StageIdempotency,
   type StageOutcome,
+  type StageOutputRegistration,
+  type StageProvenanceExtras,
   type StageRunResult,
   type StageSchema,
   type StageSchemaResult,

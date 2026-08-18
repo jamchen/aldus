@@ -17,7 +17,12 @@ import { builders, createTestContext, type TestContext } from "@aldus-runtime/te
 import { z } from "zod";
 
 import type { AgentBackend, AgentCapabilities } from "../src/backend.js";
-import type { StageDefinition, StageOutcome, StageContext } from "../src/definition.js";
+import type {
+  ArtifactRecorder,
+  StageDefinition,
+  StageOutcome,
+  StageContext,
+} from "../src/definition.js";
 import { StageRegistry } from "../src/registry.js";
 import { StageRunner } from "../src/runner.js";
 import { stageStatePathFor } from "../src/workspace.js";
@@ -54,6 +59,8 @@ export interface TempRunOptions {
   backend?: AgentBackend;
   /** Recorded delays instead of real waiting, so retry tests do not sleep. */
   sleeps?: number[];
+  /** Where `registerOutput` sends files. Omitted so the unwired refusal stays testable. */
+  artifacts?: ArtifactRecorder;
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -75,6 +82,7 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
     registry,
     actor: TEST_ACTOR,
     ...(options.backend !== undefined ? { backend: options.backend } : {}),
+    ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
     now: () => {
       clock += 1000;
       return new Date(clock);

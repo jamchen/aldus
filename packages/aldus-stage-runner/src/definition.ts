@@ -15,7 +15,7 @@
  * stopping at gates — are the runner's to enforce, and are covered in `runner.ts`.
  */
 
-import type { ArtifactRef, StructuredError } from "@aldus-runtime/core";
+import type { ArtifactRef, Reconstructability, StructuredError } from "@aldus-runtime/core";
 
 /**
  * The minimum a validator must offer for the runner to use it.
@@ -117,6 +117,93 @@ export type StageOutcome<O> =
     };
 
 /**
+ * Provenance only the stage knows (contract §8.1, §20).
+ *
+ * Deliberately narrow. The fields §8.1 names — which stage, run, code revision, and
+ * configuration produced an artifact — are **not** here, because the runner supplies them from
+ * the attempt. A stage cannot state them, so it cannot state them wrongly: an artifact whose
+ * provenance disagrees with the attempt that produced it is unrepresentable rather than merely
+ * discouraged.
+ */
+export interface StageProvenanceExtras {
+  /**
+   * Provider seed, where one was used (contract §8.1, §14.4).
+   *
+   * Recorded for trace only. §8.1 states a seed "MUST NOT be treated as a reproducibility
+   * guarantee", and nothing re-derives an artifact from one.
+   */
+  providerSeed?: string;
+  /** Knowledge Packs in force when the artifact was produced (contract §20). */
+  knowledgePackIds?: readonly string[];
+  /** Free-text note from the producer. Already redacted (§19.2). */
+  note?: string;
+}
+
+/**
+ * What a stage states about an output it wants registered (contract §8, §8.1).
+ *
+ * Everything here is something only the stage knows. Notice what is absent: `producerRunId`,
+ * `producerStageId`, `codeRevision`, `configHash`, and `sha256`. The first four come from the
+ * attempt, and the digest is computed from the bytes — §8.1 makes the digest half of an
+ * artifact's identity, and §13 binds approvals to it, so a caller-supplied digest could bind an
+ * approval to bytes nobody checked.
+ */
+export interface StageOutputRegistration {
+  /** Path to the produced bytes. Hashed and sized by the registry. */
+  path: string;
+  /** What kind of artifact this is (contract §8.2). Open string; Core names no taxonomy (§4.2). */
+  kind: string;
+  /** IANA media type of the bytes. */
+  mediaType: string;
+  /**
+   * How recoverable it is (contract §8).
+   *
+   * The one field a stage must get right and nothing else can supply: §8.1 makes
+   * `irreplaceable` what stops a cleanup removing bytes a human already accepted and paid for.
+   */
+  reconstructability: Reconstructability;
+  /** Digests of the inputs it was derived from (contract §8.1). Defaults to none. */
+  inputHashes?: readonly string[];
+  /** Provenance the attempt cannot know. @see StageProvenanceExtras */
+  provenance?: StageProvenanceExtras;
+  /** Artifact ID to use. Defaults to a freshly minted one. */
+  artifactId?: string;
+  /** URI recorded as the artifact's location. Defaults to a `file:` URI for `path`. */
+  uri?: string;
+}
+
+/**
+ * A registration with the attempt's own facts filled in (contract §8.1).
+ *
+ * Built by the runner, never by a stage. This is the shape an {@link ArtifactRecorder} receives.
+ */
+export interface ArtifactRecorderRequest extends StageOutputRegistration {
+  /** Run that produced it — from the attempt, not the stage. */
+  producerRunId: string;
+  /** Stage that produced it — from the attempt, not the stage. */
+  producerStageId: string;
+  /** Revision of the runtime code, from the Run manifest. Absent when the Run records none. */
+  codeRevision?: string;
+  /** Digest of the exact configuration this attempt ran under (contract §11, §20). */
+  configHash: string;
+  /** The attempt's configuration, already redacted (contract §19.2). */
+  configuration?: Record<string, unknown>;
+}
+
+/**
+ * Somewhere to register a produced artifact (contract §8, ADR-0027).
+ *
+ * A **port**, not a dependency. `@aldus-runtime/artifact-registry` satisfies it structurally, and
+ * this package deliberately does not import it: a runner depending on the registry would invert
+ * the layering, and §7 requires core models to stay independent of physical storage. Whoever
+ * composes the two wires them together (ADR-0015).
+ */
+export interface ArtifactRecorder {
+  /** Hash the bytes, record the artifact, and return the reference. */
+  register(request: ArtifactRecorderRequest): Promise<ArtifactRef>;
+}
+
+/**
  * What a stage is given when it runs.
  *
  * Everything the stage may legitimately touch arrives through here. §11 requires a stage to
@@ -165,6 +252,25 @@ export interface StageContext {
    * recorded and attributable, instead of losing them with the return value.
    */
   recordOutput(artifact: ArtifactRef): void;
+  /**
+   * Register a produced file and record it as an output, in one call.
+   *
+   * The preferred path. {@link StageContext.recordOutput} requires a stage to have obtained an
+   * `ArtifactRef` from somewhere, which in practice means closing over a registry the stage
+   * cannot reach until the context exists — a loop every adopter has had to break for itself.
+   *
+   * The provenance §8.1 demands is supplied from the attempt rather than by the stage: the run,
+   * the stage, the code revision, and the configuration digest are all facts the runner already
+   * holds. A stage states only what it knows, so the mismatch §8.1 exists to prevent is
+   * unrepresentable rather than merely unlikely.
+   *
+   * The returned artifact is also recorded, so a stage never calls both for one file.
+   *
+   * @throws {AldusError} `ALDUS_ARTIFACT_RECORDER_UNAVAILABLE` when no recorder is wired. A
+   * refusal rather than a silent no-op: a stage that believed it registered an irreplaceable
+   * take and did not would discover it the day a cleanup removed the bytes.
+   */
+  registerOutput(registration: StageOutputRegistration): Promise<ArtifactRef>;
   /** Emit an operator-facing progress note. Recorded on the attempt's events (contract §20). */
   note(message: string, details?: Record<string, unknown>): void;
 }
