@@ -1,7 +1,7 @@
 /**
- * `@aldus/mcp` — the Production MCP tool surface (architecture contract §18, §18.1).
+ * `@aldus-runtime/mcp` — the Production MCP tool surface (architecture contract §18, §18.1).
  *
- * A capability-checked adapter over `@aldus/services`, sibling to `@aldus/cli`. §18 makes both
+ * A capability-checked adapter over `@aldus-runtime/services`, sibling to `@aldus-runtime/cli`. §18 makes both
  * adapters over one service layer, so nothing here decides whether an operation is safe,
  * interprets a gate, or reaches into a store — a decision made here is one the CLI would not
  * inherit, and two implementations of an approval path is the divergence §3.6 warns about.

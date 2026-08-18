@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildGateDecision } from "@aldus/testkit";
+import { buildGateDecision } from "@aldus-runtime/testkit";
 
 import {
   assertSubjectsCover,

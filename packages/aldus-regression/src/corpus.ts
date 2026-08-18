@@ -19,7 +19,7 @@
  * Zod is the single source of truth; TypeScript types are inferred (ADR-0002).
  */
 
-import { actorRefSchema, SCHEMA_VERSION } from "@aldus/core";
+import { actorRefSchema, SCHEMA_VERSION } from "@aldus-runtime/core";
 import { z } from "zod";
 
 import { RegressionErrorCodes, regressionError } from "./errors.js";

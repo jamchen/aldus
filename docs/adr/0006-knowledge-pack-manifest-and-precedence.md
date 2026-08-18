@@ -8,7 +8,7 @@
 ## Context
 
 §4.1 lists "Knowledge Pack discovery and precedence" among what Aldus Core owns, so the loader
-belongs in `@aldus/core`. §9.1 sketches a manifest and lists what a loaded pack should expose.
+belongs in `@aldus-runtime/core`. §9.1 sketches a manifest and lists what a loaded pack should expose.
 §9.2 gives a default precedence chain and one hard requirement: "Conflicts MUST be detectable.
 Silent last-write-wins behavior SHOULD be avoided for normative rules."
 

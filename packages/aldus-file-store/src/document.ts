@@ -18,7 +18,7 @@ import {
   type SchemaCompatibility,
   type SchemaTypeFor,
   type VersionedSchemaName,
-} from "@aldus/core";
+} from "@aldus-runtime/core";
 
 import { readFileOrUndefined, writeFileAtomic, type AtomicWriteOptions } from "./atomic.js";
 import { FileStoreErrorCodes, fileStoreError } from "./errors.js";

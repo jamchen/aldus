@@ -6,7 +6,7 @@
  * production trace (contract §20) stays uniform across packages.
  */
 
-import { AldusError, type ErrorCategory } from "@aldus/core";
+import { AldusError, type ErrorCategory } from "@aldus-runtime/core";
 
 /** Error codes raised by the Production MCP adapter. */
 export const McpErrorCodes = {

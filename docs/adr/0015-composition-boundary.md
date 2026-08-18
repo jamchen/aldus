@@ -9,10 +9,10 @@
 ## Context
 
 Contract §22's twelve work packages each produced a focused package, and each was correct in
-isolation. Assessing them against §24 surfaced a gap nobody's tests could see: `@aldus/services`
+isolation. Assessing them against §24 surfaced a gap nobody's tests could see: `@aldus-runtime/services`
 — the programmatic API §18 requires, and the layer the CLI and Production MCP adapt — reached
-only three of the packages built. `@aldus/artifact-registry`, `@aldus/tts-ledger`, and
-`@aldus/release` were unreachable from any operator surface. An operator could not execute a
+only three of the packages built. `@aldus-runtime/artifact-registry`, `@aldus-runtime/tts-ledger`, and
+`@aldus-runtime/release` were unreachable from any operator surface. An operator could not execute a
 release or record a synthesis take.
 
 Two readings of §4.3 were available, and they lead to very different products.
@@ -45,7 +45,7 @@ Concretely, the boundary is:
 
 Three consequences follow directly, and they are the operative content of this ADR:
 
-1. **`@aldus/services` reaches every package an operator needs.** A package that exists but is
+1. **`@aldus-runtime/services` reaches every package an operator needs.** A package that exists but is
    unreachable from the service layer is an unfinished package, not a library.
 2. **Injection points are Core's, and are typed.** `AldusContext` already takes a caller-supplied
    `GateRegistry` and `StageRegistry`; `ReleaseAdapter` and a synthesis adapter are the same
@@ -66,7 +66,7 @@ Aldus already knows, the wiring belongs here.
   services, release execution and reconciliation services, TTS ledger services with an injected
   synthesis boundary, the CLI and MCP surfaces for all three, and an end-to-end composed-stack
   test using fake adapters.
-- `@aldus/services` becomes the widest package in the workspace by dependency count. That is the
+- `@aldus-runtime/services` becomes the widest package in the workspace by dependency count. That is the
   intended shape: it is the composition root, and a composition root that depended on little
   would not be composing much.
 - Every new injection point is a new place policy can be bypassed if it is enforced on the wrong
@@ -86,7 +86,7 @@ Aldus already knows, the wiring belongs here.
   §13.2 and §17 refusal logic subtly wrong in a different way — the single most expensive class
   of error this runtime exists to prevent.
 - **Compose in a separate `aldus-app` package above services.** Rejected as a rename: it would
-  make `@aldus/services` a partial API and move the composition root one level up without
+  make `@aldus-runtime/services` a partial API and move the composition root one level up without
   changing who owns it. §18 names one programmatic API, not two.
 - **Import concrete adapters into Aldus behind feature flags.** Rejected outright — §4.2 forbids
   it, and a flag does not change what the dependency graph contains.

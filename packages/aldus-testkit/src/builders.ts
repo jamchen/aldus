@@ -46,7 +46,7 @@ import {
   SCHEMA_VERSION,
   formatEpisodeId,
   validate,
-} from "@aldus/core";
+} from "@aldus-runtime/core";
 
 import { createTestContext, testDigest, type TestContext } from "./clock.js";
 

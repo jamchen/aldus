@@ -1,4 +1,4 @@
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 import { describe, expect, it } from "vitest";
 
 import { compareRun } from "../src/metrics.js";

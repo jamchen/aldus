@@ -20,7 +20,7 @@
  * prose describing a blind spot, and this registry carries the part a policy can evaluate.
  */
 
-import { actorRefSchema } from "@aldus/core";
+import { actorRefSchema } from "@aldus-runtime/core";
 import { z } from "zod";
 
 import { findingCategory, scopeDimensions, severityLevel } from "./corpus.js";

@@ -1,5 +1,5 @@
 {
-  "name": "@aldus/tts-ledger",
+  "name": "@aldus-runtime/tts-ledger",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -22,14 +22,14 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus/core": "*",
-    "@aldus/file-store": "*",
-    "@aldus/gate-engine": "*",
+    "@aldus-runtime/core": "*",
+    "@aldus-runtime/file-store": "*",
+    "@aldus-runtime/gate-engine": "*",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@aldus/artifact-registry": "*",
-    "@aldus/testkit": "*",
+    "@aldus-runtime/artifact-registry": "*",
+    "@aldus-runtime/testkit": "*",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

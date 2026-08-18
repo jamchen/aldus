@@ -1,6 +1,6 @@
 # Fixture corpus
 
-The durable contract corpus for `@aldus/core`. Every file here is JSON on disk rather than an
+The durable contract corpus for `@aldus-runtime/core`. Every file here is JSON on disk rather than an
 object literal in a test, because two consumers cannot see a literal: a non-TypeScript validator
 checking the published JSON Schema (ADR-0002), and a future schema migration that must prove it
 can still read records written today (ADR-0003).

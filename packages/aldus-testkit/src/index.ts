@@ -1,5 +1,5 @@
 /**
- * `@aldus/testkit` — deterministic builders, fixtures, and test doubles for `@aldus/core`.
+ * `@aldus-runtime/testkit` — deterministic builders, fixtures, and test doubles for `@aldus-runtime/core`.
  *
  * This is the testkit half of architecture contract §22 **WP-01 Core schema and testkit**. It
  * exists so that tests — in Core, and later in the file store, artifact registry, and adopter

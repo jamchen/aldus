@@ -10,8 +10,8 @@
  * operator reading a total that is lower than reality will authorize more spend.
  */
 
-import type { CostRecord, Money } from "@aldus/core";
-import { addMoney, zeroMoney } from "@aldus/gate-engine";
+import type { CostRecord, Money } from "@aldus-runtime/core";
+import { addMoney, zeroMoney } from "@aldus-runtime/gate-engine";
 
 import type { CostSummary } from "./reports.js";
 

@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { SchemaName } from "@aldus/core";
+import type { SchemaName } from "@aldus-runtime/core";
 
 /**
  * Absolute path to the fixture directory.

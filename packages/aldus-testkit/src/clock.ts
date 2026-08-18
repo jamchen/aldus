@@ -14,7 +14,7 @@
  * reproducibility, and it must never back a real {@link IdFactory}.
  */
 
-import { createIdFactory, type IdFactory, type IdFactoryOptions } from "@aldus/core";
+import { createIdFactory, type IdFactory, type IdFactoryOptions } from "@aldus-runtime/core";
 
 /* -------------------------------------------------------------------------------------------
  * Clock

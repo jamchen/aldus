@@ -1,5 +1,5 @@
 /**
- * `@aldus/stage-runner` — stage definitions and the attempt lifecycle for the Aldus runtime.
+ * `@aldus-runtime/stage-runner` — stage definitions and the attempt lifecycle for the Aldus runtime.
  *
  * Implements architecture contract §22 **WP-04 Stage runner**: stage definition and registry,
  * lifecycle events, input/output validation, retry and idempotency policy, cancellation, and

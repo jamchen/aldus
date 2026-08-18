@@ -1,7 +1,7 @@
-# `@aldus/mcp` — Production MCP
+# `@aldus-runtime/mcp` — Production MCP
 
-A capability-checked tool surface over [`@aldus/services`](../aldus-services), sibling to
-[`@aldus/cli`](../aldus-cli). Architecture contract §18, §18.1.
+A capability-checked tool surface over [`@aldus-runtime/services`](../aldus-services), sibling to
+[`@aldus-runtime/cli`](../aldus-cli). Architecture contract §18, §18.1.
 
 This package decides nothing about production. It validates arguments, checks scoped authority,
 resolves who a mutation is recorded against, and calls a service. Every rule about gates, spend,
@@ -87,7 +87,7 @@ Holding `aldus:spend` does **not** authorize spend. §13.2 still requires a reco
 approval, and the gate engine still evaluates it. The capability only decides whether this
 session may attempt the operation at all.
 
-There is **no publishing tool**, because `@aldus/services` exposes no publishing mutation. The
+There is **no publishing tool**, because `@aldus-runtime/services` exposes no publishing mutation. The
 `aldus:publish` capability is defined for the day one exists; until then MCP is not a route to
 publishing at all.
 
@@ -101,7 +101,7 @@ already uses. §10.2 requires Aldus to stay operable if a particular interaction
 or disappears; a hard-wired transport would work against that.
 
 ```ts
-import { AldusToolSurface, CapabilityGrant, CAPABILITIES } from "@aldus/mcp";
+import { AldusToolSurface, CapabilityGrant, CAPABILITIES } from "@aldus-runtime/mcp";
 
 const surface = new AldusToolSurface({
   // Required and never inferred from the working directory (§19.2).

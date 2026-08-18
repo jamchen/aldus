@@ -32,3 +32,4 @@ Rules:
 | [0013](0013-release-bundles-and-reconciliation.md)     | Release bundles, adapter contract, and reconciliation               | Accepted | —                 |
 | [0014](0014-production-mcp-trust-boundary.md)          | Production MCP trust boundary                                       | Accepted | §25.8 (partial)   |
 | [0015](0015-composition-boundary.md)                   | Aldus composes its own packages; adopters supply adapters           | Accepted | —                 |
+| [0017](0017-npm-scope.md)                              | The published npm scope is `@aldus-runtime`                         | Accepted | §25.10 (partial)  |

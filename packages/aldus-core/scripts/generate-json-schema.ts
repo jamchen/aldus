@@ -47,7 +47,7 @@ if (checkOnly) {
   if (drifted.length > 0) {
     console.error(
       `JSON Schema artifacts are out of date:\n  ${drifted.join("\n  ")}\n\n` +
-        "Run `npm run schema:generate -w @aldus/core` and commit the result (ADR-0002).",
+        "Run `npm run schema:generate -w @aldus-runtime/core` and commit the result (ADR-0002).",
     );
     process.exit(1);
   }

@@ -5,7 +5,7 @@
  * service result to the right exit code, that its two output modes come from one service call,
  * and that it supplies an actor for anything that mutates state.
  *
- * Everything about *whether* an operation is allowed is tested in `@aldus/services`. Re-testing
+ * Everything about *whether* an operation is allowed is tested in `@aldus-runtime/services`. Re-testing
  * it here would be testing the service through a keyhole, and would quietly make it acceptable
  * for the CLI to hold policy of its own.
  */

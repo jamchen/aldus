@@ -15,7 +15,7 @@
  * see the current state without ceremony.
  */
 
-import { validate, type ActorRef } from "@aldus/core";
+import { validate, type ActorRef } from "@aldus-runtime/core";
 
 import { ServiceErrorCodes, serviceError } from "./errors.js";
 

@@ -12,7 +12,7 @@ import { access } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { CoreErrorCodes, AldusError } from "@aldus/core";
+import { CoreErrorCodes, AldusError } from "@aldus-runtime/core";
 
 import { ArtifactRegistryErrorCodes } from "../src/errors.js";
 import { isArchived, planCleanup, requiresArchiveBeforeCleanup } from "../src/cleanup.js";

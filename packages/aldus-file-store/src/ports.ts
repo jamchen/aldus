@@ -23,7 +23,7 @@ import type {
   GateDecision,
   ReleaseReceipt,
   RunManifest,
-} from "@aldus/core";
+} from "@aldus-runtime/core";
 
 /**
  * The durable content identity of a workspace (contract §6.1).

@@ -15,7 +15,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { AldusError, validate } from "@aldus/core";
+import { AldusError, validate } from "@aldus-runtime/core";
 
 import { digestConfiguration, sha256Bytes } from "../src/digest.js";
 import { ArtifactRegistryErrorCodes } from "../src/errors.js";

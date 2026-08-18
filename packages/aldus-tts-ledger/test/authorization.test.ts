@@ -11,7 +11,7 @@
  * was not, which is worse than no trace at all.
  */
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { TtsLedgerErrorCodes } from "../src/errors.js";

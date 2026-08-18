@@ -110,7 +110,7 @@ unusable rather than merely un-resumable.
 
 ### 6. Authority is consumed from the gate engine, never re-decided
 
-`@aldus/gate-engine` already models §13.4's separation of uploading from making public as two
+`@aldus-runtime/gate-engine` already models §13.4's separation of uploading from making public as two
 gates granting two operations, and derives staleness from bound digests (ADR-0009). This package
 asks it through a narrow `ReleaseAuthorizer` port and obeys the answer. It holds no opinion about
 what "approved" or "stale" means.

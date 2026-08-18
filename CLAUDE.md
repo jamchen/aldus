@@ -32,8 +32,8 @@ Test fixtures use obviously fictional placeholders (`example-show`, `example-hos
 ## Layout
 
 ```
-packages/aldus-core/      @aldus/core     domain types, schemas, validation, IDs, redaction
-packages/aldus-testkit/   @aldus/testkit  deterministic builders, fixtures, test doubles
+packages/aldus-core/      @aldus-runtime/core     domain types, schemas, validation, IDs, redaction
+packages/aldus-testkit/   @aldus-runtime/testkit  deterministic builders, fixtures, test doubles
 docs/adr/                                 architecture decision records
 ```
 

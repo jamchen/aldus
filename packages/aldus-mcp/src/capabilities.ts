@@ -28,7 +28,7 @@
  * the operation at all.
  */
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 
 import { McpErrorCodes } from "./errors.js";
 
@@ -81,7 +81,7 @@ export const CAPABILITIES = {
   /**
    * Attempt a publishing operation (contract §17, §18.1).
    *
-   * Defined and currently required by no tool, because `@aldus/services` exposes no publishing
+   * Defined and currently required by no tool, because `@aldus-runtime/services` exposes no publishing
    * mutation — `releaseStatus` is read-only. That absence is the reason MCP cannot be a
    * publishing bypass today, and it is asserted by a test rather than left to be noticed. A
    * publishing tool added later MUST require this capability.

@@ -1,5 +1,5 @@
 {
-  "name": "@aldus/stage-runner",
+  "name": "@aldus-runtime/stage-runner",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -22,12 +22,12 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus/core": "*",
-    "@aldus/file-store": "*",
+    "@aldus-runtime/core": "*",
+    "@aldus-runtime/file-store": "*",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@aldus/testkit": "*",
+    "@aldus-runtime/testkit": "*",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

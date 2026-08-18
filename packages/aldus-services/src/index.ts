@@ -1,8 +1,8 @@
 /**
- * `@aldus/services` — the programmatic application API of the Aldus runtime.
+ * `@aldus-runtime/services` — the programmatic application API of the Aldus runtime.
  *
  * Architecture contract §18: "Core behavior MUST be available through a programmatic API. CLI and
- * MCP are adapters over the same application services." This package is that API. `@aldus/cli`
+ * MCP are adapters over the same application services." This package is that API. `@aldus-runtime/cli`
  * adapts it to a terminal; the Production MCP (WP-11) adapts it to typed tool calls; neither owns
  * a decision the other lacks.
  *

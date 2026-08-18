@@ -11,14 +11,14 @@
  * wrongly turns a mutation into something that looks broadly grantable. A type cannot be set
  * wrongly in passing.
  *
- * Every tool is a thin call into `@aldus/services`. Nothing here decides whether an operation is
+ * Every tool is a thin call into `@aldus-runtime/services`. Nothing here decides whether an operation is
  * safe, interprets a gate, or reaches into a store — §18 makes the CLI and this package two
  * adapters over one service layer, and a decision made here is one the CLI would not inherit.
  */
 
 import { z } from "zod";
-import type { ActorRef } from "@aldus/core";
-import type { AldusServices, ServiceResult } from "@aldus/services";
+import type { ActorRef } from "@aldus-runtime/core";
+import type { AldusServices, ServiceResult } from "@aldus-runtime/services";
 
 import { CAPABILITIES, type Capability } from "./capabilities.js";
 

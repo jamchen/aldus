@@ -17,7 +17,7 @@ import {
   listSchemaNames,
   validate,
   type SchemaName,
-} from "@aldus/core";
+} from "@aldus-runtime/core";
 import { describe, expect, it } from "vitest";
 
 import {

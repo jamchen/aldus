@@ -18,17 +18,17 @@ import {
   toStructuredError,
   type ActorRef,
   type StructuredError,
-} from "@aldus/core";
-import { FileWorkspace } from "@aldus/file-store";
-import { GateRegistry, type GateDefinition } from "@aldus/gate-engine";
-import { StageRegistry } from "@aldus/stage-runner";
+} from "@aldus-runtime/core";
+import { FileWorkspace } from "@aldus-runtime/file-store";
+import { GateRegistry, type GateDefinition } from "@aldus-runtime/gate-engine";
+import { StageRegistry } from "@aldus-runtime/stage-runner";
 import {
   AldusContext,
   AldusServices,
   type Refusal,
   type ServiceResult,
   type SubjectsProvider,
-} from "@aldus/services";
+} from "@aldus-runtime/services";
 
 import { CapabilityGrant, type Capability } from "./capabilities.js";
 import { McpErrorCodes, mcpError } from "./errors.js";

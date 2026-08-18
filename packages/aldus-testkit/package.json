@@ -1,5 +1,5 @@
 {
-  "name": "@aldus/testkit",
+  "name": "@aldus-runtime/testkit",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -24,7 +24,7 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus/core": "*"
+    "@aldus-runtime/core": "*"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

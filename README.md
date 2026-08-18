@@ -13,23 +13,23 @@ reusable production knowledge.
 
 Contract §22 defines twelve work packages. Eleven are implemented. **WP-06 is adopter
 integration work and is not implemented here** — the production scripts and their wrappers live
-in the adopter's own repository depending on `@aldus/*` (§4.3, ADR-0015).
+in the adopter's own repository depending on `@aldus-runtime/*` (§4.3, ADR-0015).
 
-| WP      | Package                         | State                                   |
-| ------- | ------------------------------- | --------------------------------------- |
-| Phase 0 | —                               | workspace, toolchain, CI, ADRs          |
-| WP-01   | `@aldus/core`, `@aldus/testkit` | done                                    |
-| WP-02   | `@aldus/file-store`             | done                                    |
-| WP-03   | `@aldus/artifact-registry`      | done                                    |
-| WP-04   | `@aldus/stage-runner`           | done                                    |
-| WP-05   | `@aldus/gate-engine`            | done                                    |
-| WP-06   | —                               | **blocked: needs an adopter**           |
-| WP-07   | `@aldus/tts-ledger`             | generic half done; adoption needs WP-06 |
-| WP-08   | `@aldus/services`, `@aldus/cli` | done                                    |
-| WP-09   | `@aldus/core` (knowledge)       | done                                    |
-| WP-10   | `@aldus/regression`             | done                                    |
-| WP-11   | `@aldus/mcp`                    | done                                    |
-| WP-12   | `@aldus/release`                | done                                    |
+| WP      | Package                                         | State                                   |
+| ------- | ----------------------------------------------- | --------------------------------------- |
+| Phase 0 | —                                               | workspace, toolchain, CI, ADRs          |
+| WP-01   | `@aldus-runtime/core`, `@aldus-runtime/testkit` | done                                    |
+| WP-02   | `@aldus-runtime/file-store`                     | done                                    |
+| WP-03   | `@aldus-runtime/artifact-registry`              | done                                    |
+| WP-04   | `@aldus-runtime/stage-runner`                   | done                                    |
+| WP-05   | `@aldus-runtime/gate-engine`                    | done                                    |
+| WP-06   | —                                               | **blocked: needs an adopter**           |
+| WP-07   | `@aldus-runtime/tts-ledger`                     | generic half done; adoption needs WP-06 |
+| WP-08   | `@aldus-runtime/services`, `@aldus-runtime/cli` | done                                    |
+| WP-09   | `@aldus-runtime/core` (knowledge)               | done                                    |
+| WP-10   | `@aldus-runtime/regression`                     | done                                    |
+| WP-11   | `@aldus-runtime/mcp`                            | done                                    |
+| WP-12   | `@aldus-runtime/release`                        | done                                    |
 
 1425 tests. Fourteen ADRs record the decisions, including six that close open items from
 contract §25.
@@ -40,20 +40,20 @@ Ten of the twelve criteria are met. Two are not, and neither can be met by writi
 code:
 
 - _"the current production scripts run through stage wrappers"_ — needs an adopter (WP-06).
-- _"a representative defect corpus is executed during regression testing"_ — `@aldus/regression`
+- _"a representative defect corpus is executed during regression testing"_ — `@aldus-runtime/regression`
   runs a corpus; a _representative_ one is adopter content, and §19.2 forbids requiring private
   knowledge in Core's tests.
 
 One gap is open and is ours:
 [#27](https://github.com/jamchen/aldus/issues/27) — three packages are correct in isolation but
-unreachable from the CLI and MCP surface, because `@aldus/services` does not yet wire them.
+unreachable from the CLI and MCP surface, because `@aldus-runtime/services` does not yet wire them.
 
 ## Packages
 
-| Package                                    | Purpose                                                          |
-| ------------------------------------------ | ---------------------------------------------------------------- |
-| [`@aldus/core`](packages/aldus-core)       | Domain types, JSON schemas, validation, ID generation, redaction |
-| [`@aldus/testkit`](packages/aldus-testkit) | Deterministic builders, fixtures, and test doubles               |
+| Package                                            | Purpose                                                          |
+| -------------------------------------------------- | ---------------------------------------------------------------- |
+| [`@aldus-runtime/core`](packages/aldus-core)       | Domain types, JSON schemas, validation, ID generation, redaction |
+| [`@aldus-runtime/testkit`](packages/aldus-testkit) | Deterministic builders, fixtures, and test doubles               |
 
 ## Quick start
 

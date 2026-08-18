@@ -2,7 +2,7 @@
  * Ports the gate engine reads and writes through.
  *
  * Contract §7 requires core models to be independent of physical storage. This package therefore
- * depends on no store implementation: an adopter wires these to `@aldus/file-store`'s `RunStore`
+ * depends on no store implementation: an adopter wires these to `@aldus-runtime/file-store`'s `RunStore`
  * and `EventStore`, or to anything else that honours them. The in-memory implementations here are
  * for tests and for a caller evaluating gates without persisting anything.
  *
@@ -11,7 +11,7 @@
  * discovers at runtime that nothing honours it.
  */
 
-import type { AldusEvent, CostRecord, GateDecision } from "@aldus/core";
+import type { AldusEvent, CostRecord, GateDecision } from "@aldus-runtime/core";
 
 /**
  * Append-only storage for gate decisions (contract §7 `approvals.json`).

@@ -1,7 +1,7 @@
 /**
  * The Aldus CLI (architecture contract §18).
  *
- * A **thin adapter** over `@aldus/services`, and thin is the design requirement rather than an
+ * A **thin adapter** over `@aldus-runtime/services`, and thin is the design requirement rather than an
  * aspiration. §18 makes the CLI and the Production MCP two adapters over one service layer, so
  * anything decided here is a decision WP-11 would have to reimplement — and two implementations
  * of an approval path is the divergence §3.6 warns about.
@@ -17,18 +17,18 @@
 
 import { parseArgs } from "node:util";
 
-import type { ActorRef } from "@aldus/core";
-import { AldusError, toStructuredError } from "@aldus/core";
-import { FileWorkspace } from "@aldus/file-store";
-import { GateRegistry, type GateDefinition } from "@aldus/gate-engine";
-import { StageRegistry } from "@aldus/stage-runner";
+import type { ActorRef } from "@aldus-runtime/core";
+import { AldusError, toStructuredError } from "@aldus-runtime/core";
+import { FileWorkspace } from "@aldus-runtime/file-store";
+import { GateRegistry, type GateDefinition } from "@aldus-runtime/gate-engine";
+import { StageRegistry } from "@aldus-runtime/stage-runner";
 import {
   AldusContext,
   AldusServices,
   parseActor,
   type ServiceResult,
   type SubjectsProvider,
-} from "@aldus/services";
+} from "@aldus-runtime/services";
 
 import { ExitCodes, type ExitCode } from "./exit.js";
 import {

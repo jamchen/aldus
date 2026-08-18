@@ -1,6 +1,7 @@
 # ADR-0001: Package placement during incubation
 
 - Status: Accepted
+- Amended by: [ADR-0017](0017-npm-scope.md) — decision 4 only; the rest stands
 - Date: 2026-08-18
 - Closes: architecture contract §25 item 1 (partially — extraction timing stays open)
 - Relates to: §21 Repository and open-source boundary, §4 System boundary
@@ -28,6 +29,8 @@ to here, and WP-01 still needs a home that does not prejudge the extraction deci
    repository yet.
 4. The `@aldus/*` npm scope is a **working name**, not a claim on a public package name.
    §25 item 10 (public package names) stays open and is not decided here.
+   **Superseded by [ADR-0017](0017-npm-scope.md):** the `aldus-runtime` npm organization was
+   registered, and the published scope is now `@aldus-runtime/*`. The rest of this ADR stands.
 5. Directory names follow §21 verbatim (`aldus-core`, `aldus-testkit`) so a later move to the
    §21 layout — or into an adopter monorepo — is a directory move, not a rename.
 6. `integrations/` is **not** created. No adopter integration exists yet, and creating an empty

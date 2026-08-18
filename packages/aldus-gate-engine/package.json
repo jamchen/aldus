@@ -1,5 +1,5 @@
 {
-  "name": "@aldus/gate-engine",
+  "name": "@aldus-runtime/gate-engine",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -22,10 +22,10 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus/core": "*"
+    "@aldus-runtime/core": "*"
   },
   "devDependencies": {
-    "@aldus/testkit": "*",
+    "@aldus-runtime/testkit": "*",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

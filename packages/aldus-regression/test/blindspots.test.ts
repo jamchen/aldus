@@ -1,4 +1,4 @@
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 import { describe, expect, it } from "vitest";
 
 import { BlindSpotRegistry, blindSpotCoversCase } from "../src/blindspots.js";

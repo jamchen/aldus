@@ -1,5 +1,5 @@
 /**
- * `@aldus/release` — release bundles, resumable operations, and external-state reconciliation.
+ * `@aldus-runtime/release` — release bundles, resumable operations, and external-state reconciliation.
  *
  * Implements architecture contract §22 **WP-12 Release adapters** and §17.
  *

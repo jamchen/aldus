@@ -17,7 +17,7 @@
  * operator re-approving it.
  */
 
-import type { CostRecord, Money } from "@aldus/core";
+import type { CostRecord, Money } from "@aldus-runtime/core";
 
 import { digestSubjectValue } from "./binding.js";
 import {

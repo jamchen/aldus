@@ -6,7 +6,7 @@
  * the corpus talks about `example-show`, `example-host`, and `voice-a`.
  */
 
-import type { ActorRef } from "@aldus/core";
+import type { ActorRef } from "@aldus-runtime/core";
 
 import type { DefectCase, DefectCorpus, EvaluatorOutcome, EvaluatorRun } from "../src/corpus.js";
 import { defaultPromotionPolicy, type PromotionPolicy } from "../src/policy.js";

@@ -16,7 +16,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { newUlid } from "@aldus/core";
+import { newUlid } from "@aldus-runtime/core";
 
 import {
   createExclusive,

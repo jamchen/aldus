@@ -15,7 +15,7 @@
  * stopping at gates — are the runner's to enforce, and are covered in `runner.ts`.
  */
 
-import type { ArtifactRef, StructuredError } from "@aldus/core";
+import type { ArtifactRef, StructuredError } from "@aldus-runtime/core";
 
 /**
  * The minimum a validator must offer for the runner to use it.
@@ -137,7 +137,7 @@ export interface StageContext {
   /** 1-based ordinal of this attempt within the stage execution (contract §6.3). */
   readonly attempt: number;
   /** Who or what is performing this attempt (contract §19.2). */
-  readonly actor: import("@aldus/core").ActorRef;
+  readonly actor: import("@aldus-runtime/core").ActorRef;
   /**
    * The exact configuration this attempt runs under (contract §11, §20).
    *

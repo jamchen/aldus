@@ -12,9 +12,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { initWorkspace } from "@aldus/file-store";
-import { digestSubjectValue, type GateDefinition, type SubjectsByGate } from "@aldus/gate-engine";
-import { StageRegistry, type StageDefinition, type StageOutcome } from "@aldus/stage-runner";
+import { initWorkspace } from "@aldus-runtime/file-store";
+import {
+  digestSubjectValue,
+  type GateDefinition,
+  type SubjectsByGate,
+} from "@aldus-runtime/gate-engine";
+import {
+  StageRegistry,
+  type StageDefinition,
+  type StageOutcome,
+} from "@aldus-runtime/stage-runner";
 
 import { run, type CliEnvironment } from "../src/cli.js";
 import type { ExitCode } from "../src/exit.js";

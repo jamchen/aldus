@@ -33,8 +33,8 @@ import {
   type StageAttempt,
   type StageStatus,
   type StructuredError,
-} from "@aldus/core";
-import type { EventStore, LockManager, RunStore } from "@aldus/file-store";
+} from "@aldus-runtime/core";
+import type { EventStore, LockManager, RunStore } from "@aldus-runtime/file-store";
 
 import { assertCapabilities, type AgentBackend } from "./backend.js";
 import {

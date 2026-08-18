@@ -1,7 +1,7 @@
 /**
  * Wiring the gate engine's ports to file-backed storage.
  *
- * `@aldus/gate-engine` depends on no store implementation (contract §7), so something has to
+ * `@aldus-runtime/gate-engine` depends on no store implementation (contract §7), so something has to
  * join the two. This is that something, and it is deliberately the thinnest possible layer: each
  * adapter forwards one call and adds no behaviour, because behaviour added here would be
  * invisible to anyone reading either package.
@@ -33,9 +33,9 @@
  * the guard refuses — and buying a complete trace at the price of a deadlock is a bad trade.
  */
 
-import type { AldusEvent, CostRecord, GateDecision } from "@aldus/core";
-import type { EventStore, RunStore } from "@aldus/file-store";
-import type { CostReader, GateDecisionStore, GateEventSink } from "@aldus/gate-engine";
+import type { AldusEvent, CostRecord, GateDecision } from "@aldus-runtime/core";
+import type { EventStore, RunStore } from "@aldus-runtime/file-store";
+import type { CostReader, GateDecisionStore, GateEventSink } from "@aldus-runtime/gate-engine";
 
 /**
  * A {@link GateDecisionStore} backed by a Run's `approvals.json` (contract §7).

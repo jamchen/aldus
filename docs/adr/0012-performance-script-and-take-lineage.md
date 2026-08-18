@@ -39,7 +39,7 @@ records synthesis is the one best placed to accidentally cause it.
 ### 1. The package cannot perform synthesis, and that is enforced
 
 There is no method that calls anything. The package imports no network module, declares no
-dependency outside `zod` and the `@aldus/*` workspace, and exposes no hook that takes a
+dependency outside `zod` and the `@aldus-runtime/*` workspace, and exposes no hook that takes a
 caller-supplied performer and invokes it. A Worker supplied by an integration performs the call
 (§3.2, §4.3) and reports the outcome back.
 

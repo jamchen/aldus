@@ -11,11 +11,17 @@
  * two implementations of an approval path is exactly the divergence §3.6 warns about.
  */
 
-import type { ActorRef, ArtifactRef, EpisodeRef, RunManifest } from "@aldus/core";
-import { SCHEMA_VERSION, formatEpisodeId, isCanonicalId, newRunId, validate } from "@aldus/core";
-import { initWorkspace } from "@aldus/file-store";
-import type { GateStatus } from "@aldus/gate-engine";
-import type { StageRunResult, StoredStageExecution } from "@aldus/stage-runner";
+import type { ActorRef, ArtifactRef, EpisodeRef, RunManifest } from "@aldus-runtime/core";
+import {
+  SCHEMA_VERSION,
+  formatEpisodeId,
+  isCanonicalId,
+  newRunId,
+  validate,
+} from "@aldus-runtime/core";
+import { initWorkspace } from "@aldus-runtime/file-store";
+import type { GateStatus } from "@aldus-runtime/gate-engine";
+import type { StageRunResult, StoredStageExecution } from "@aldus-runtime/stage-runner";
 
 import { requireActor } from "./actor.js";
 import type { AldusContext } from "./context.js";

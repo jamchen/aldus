@@ -124,7 +124,7 @@ outright that Aldus does not guarantee a seed reproduces identical audio.
 
 ### 7. The storage ports stay in their packages for now
 
-WP-02 left `EpisodeStore`, `RunStore`, and `EventStore` in `@aldus/file-store` rather than Core,
+WP-02 left `EpisodeStore`, `RunStore`, and `EventStore` in `@aldus-runtime/file-store` rather than Core,
 reasoning that moving them would freeze member lists only one adapter had exercised. Adding
 `ArtifactStore` was the moment to revisit that, and the answer is **not yet** — with one
 distinction worth recording.

@@ -1,5 +1,5 @@
 /**
- * `@aldus/regression` — the regression harness (architecture contract §22 WP-10).
+ * `@aldus-runtime/regression` — the regression harness (architecture contract §22 WP-10).
  *
  * §12.1 permits an evaluator to become blocking "only after it is calibrated against
  * human-labeled examples". This package is what makes that an evidence-based decision instead of

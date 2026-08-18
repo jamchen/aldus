@@ -7,8 +7,8 @@
  * these ever migrate into `src/`, the package has started owning adopter process.
  */
 
-import type { ActorRef, CostRecord, Money } from "@aldus/core";
-import { SCHEMA_VERSION } from "@aldus/core";
+import type { ActorRef, CostRecord, Money } from "@aldus-runtime/core";
+import { SCHEMA_VERSION } from "@aldus-runtime/core";
 
 import { digestBytes, type GateSubject } from "../src/binding.js";
 import type { GateDefinition } from "../src/definition.js";

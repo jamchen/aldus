@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SCHEMA_FILE_NAMES, listSchemaNames, validate, type SchemaName } from "@aldus/core";
+import { SCHEMA_FILE_NAMES, listSchemaNames, validate, type SchemaName } from "@aldus-runtime/core";
 import ajv2020Import from "ajv/dist/2020.js";
 import addFormatsImport from "ajv-formats";
 import { describe, expect, it } from "vitest";

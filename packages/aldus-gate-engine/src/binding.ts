@@ -23,7 +23,7 @@
 
 import { createHash } from "node:crypto";
 
-import type { GateDecision } from "@aldus/core";
+import type { GateDecision } from "@aldus-runtime/core";
 
 import type { ResolvedGateDefinition } from "./definition.js";
 import { GateEngineErrorCodes, gateEngineError } from "./errors.js";

@@ -19,7 +19,7 @@ import {
   type RunManifest,
   type SchemaTypeFor,
   type VersionedSchemaName,
-} from "@aldus/core";
+} from "@aldus-runtime/core";
 
 import { appendLineSynced, isNotFound } from "./atomic.js";
 import { appendToCollection, readCollection } from "./collections.js";
