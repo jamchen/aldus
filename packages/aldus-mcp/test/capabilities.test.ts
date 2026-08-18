@@ -68,20 +68,77 @@ describe("the tool surface is split, not labelled", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  // §18.1 requires publishing to need explicit scoped authority. @aldus-runtime/services exposes no
-  // publishing mutation, so MCP cannot be a bypass today — and this test is what will fail if
-  // someone adds one without requiring the capability.
-  it("exposes no publishing tool, because there is no publishing service to adapt", () => {
-    const publishing = MUTATION_TOOLS.filter(
-      (tool) => /publish|release_(?!status)/i.test(tool.name) && !tool.name.endsWith("_status"),
-    );
-    for (const tool of publishing) {
+  // §18.1 requires publishing to need explicit scoped authority.
+  //
+  // This assertion previously read "there is no publishing tool", because @aldus-runtime/services
+  // exposed no publishing mutation and that absence was what kept MCP off the publishing path.
+  // Services now exposes one. The invariant it protected — *publishing is never reachable
+  // without aldus:publish* — is unchanged; only its shape is, from "no such tool exists" to
+  // "every such tool demands the capability". Deleting it would have retired the invariant
+  // along with the circumstance.
+  it("requires aldus:publish for every tool that reaches a release destination", () => {
+    const reachesDestination = MUTATION_TOOLS.filter((tool) => /release/i.test(tool.name));
+
+    // Guard against the filter silently matching nothing, which would make the loop vacuous.
+    expect(reachesDestination.map((tool) => tool.name).sort()).toEqual([
+      "aldus_execute_release",
+      "aldus_reconcile_release",
+    ]);
+
+    for (const tool of reachesDestination) {
       expect(
         tool.requiredCapabilities.includes(CAPABILITIES.publish),
-        `${tool.name} publishes but does not require ${CAPABILITIES.publish}`,
+        `${tool.name} reaches a release destination but does not require ${CAPABILITIES.publish}`,
       ).toBe(true);
     }
-    expect(publishing).toEqual([]);
+  });
+
+  // Reconciliation contacts destinations and rewrites the release record. It cannot publish, but
+  // a wrong repair makes the next execution skip an operation that never happened — so it sits
+  // in the publish trust domain rather than beside the read tools.
+  it("keeps a read-only route to release state that needs no publish authority", () => {
+    const readOnly = READ_TOOLS.filter((tool) => /release/i.test(tool.name)).map(
+      (tool) => tool.name,
+    );
+    expect(readOnly.sort()).toEqual(["aldus_release_bundle_status", "aldus_release_status"]);
+    for (const tool of READ_TOOLS) {
+      expect(tool.requiredCapabilities).toEqual([CAPABILITIES.read]);
+    }
+  });
+
+  // §13.2 and §18.1 name paid synthesis alongside publishing. The ledger's escape hatch for a
+  // charge that already happened is included deliberately: it spends nothing, but it writes a
+  // record asserting money was spent, and an agent should not be able to fabricate those freely.
+  it("requires aldus:spend for every tool in the spend domain", () => {
+    const spending = MUTATION_TOOLS.filter((tool) =>
+      /synthesise|unauthorized_charge/i.test(tool.name),
+    );
+    expect(spending.map((tool) => tool.name).sort()).toEqual([
+      "aldus_record_unauthorized_charge",
+      "aldus_synthesise_segment",
+    ]);
+    for (const tool of spending) {
+      expect(
+        tool.requiredCapabilities.includes(CAPABILITIES.spend),
+        `${tool.name} is in the spend domain but does not require ${CAPABILITIES.spend}`,
+      ).toBe(true);
+    }
+  });
+
+  // Recording a script or a plan spends nothing — a plan is what an operator approves, so
+  // recording one is what makes authorization possible. Requiring spend authority to draft would
+  // force a host to grant it to a session that only prepares work for judgement.
+  it("does not require spend authority merely to record planning material", () => {
+    const recording = MUTATION_TOOLS.filter((tool) =>
+      /record_(performance|synthesis)/.test(tool.name),
+    );
+    expect(recording.map((tool) => tool.name).sort()).toEqual([
+      "aldus_record_performance_script",
+      "aldus_record_synthesis_plan",
+    ]);
+    for (const tool of recording) {
+      expect(tool.requiredCapabilities).toEqual([CAPABILITIES.ttsRecord]);
+    }
   });
 });
 

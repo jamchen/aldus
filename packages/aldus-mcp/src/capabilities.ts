@@ -79,14 +79,44 @@ export const CAPABILITIES = {
    */
   spend: "aldus:spend",
   /**
-   * Attempt a publishing operation (contract §17, §18.1).
+   * Attempt an operation that reaches an external release destination (contract §17, §18.1).
    *
-   * Defined and currently required by no tool, because `@aldus-runtime/services` exposes no publishing
-   * mutation — `releaseStatus` is read-only. That absence is the reason MCP cannot be a
-   * publishing bypass today, and it is asserted by a test rather than left to be noticed. A
-   * publishing tool added later MUST require this capability.
+   * Required by every tool that executes or reconciles a release bundle. §18.1 names publishing
+   * alongside paid synthesis as needing "explicit scoped authority", and §10.1 forbids an agent
+   * from being *implicitly* authorized to publish — so this is granted in host configuration and
+   * is unreachable from a tool argument.
+   *
+   * Reconciliation requires it as well as execution. Reconciliation cannot publish, but it
+   * contacts external destinations and rewrites the release record, and a wrong repair makes the
+   * next execution skip an operation that never happened. The conservative side of that question
+   * is the correct one when the adjacent operation is publishing; an operator who only wants to
+   * *see* release state has `aldus_release_status` and `aldus_release_bundle_status`, neither of
+   * which touches an adapter.
+   *
+   * Holding it does not authorize a release. §13.4 still requires separate, hash-bound approvals
+   * for uploading and for making public, and the gate engine still evaluates them.
    */
   publish: "aldus:publish",
+  /**
+   * Take archival custody of irreplaceable artifacts (contract §8.1).
+   *
+   * §8.1 requires irreplaceable artifacts to be archived **before** disposable working files are
+   * cleaned, which makes archival the operation that decides whether a later cleanup is safe.
+   * Separate from the artifact reads beside it because it copies bytes into a durable store: a
+   * session that may inspect lineage is not thereby a session that may take custody.
+   */
+  artifactArchive: "aldus:artifact:archive",
+  /**
+   * Record performance and synthesis planning material (contract §14, §15).
+   *
+   * Covers recording a PerformanceScript and a synthesis request plan. Neither spends anything —
+   * a plan is the thing an operator approves, so recording one is what makes authorization
+   * possible rather than a substitute for it. Kept separate from {@link CAPABILITIES.spend} for
+   * exactly that reason: preparing work an operator will judge is a smaller authority than
+   * incurring cost, and collapsing them would force a host to grant spend authority to a session
+   * that only drafts.
+   */
+  ttsRecord: "aldus:tts:record",
 } as const;
 
 /** @see CAPABILITIES */

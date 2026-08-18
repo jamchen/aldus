@@ -43,6 +43,16 @@ the response; retrying in a loop is not.
 **`outcome: "unsuccessful"` means the work ran and stopped.** A stage that halted at a gate did
 exactly what it was supposed to. It is not an error and does not want a retry.
 
+**Two tools spend real money or publish to the outside world.** `aldus_synthesise_segment`
+incurs provider cost. `aldus_execute_release` publishes. Their descriptions say so in capitals.
+Do not call either to "see what happens", and do not call either without saying first, in plain
+words, what it will do. Everything else in this surface is recoverable; these two are not.
+
+**You cannot name who decided anything.** `aldus_decide_take` takes no `decidedBy` — the decider
+is you, unless the host attested a human confirmed the call. §13.3 keeps final performance
+approval human-owned, and a take recorded as decided by a person who never heard it would be
+undetectable to whoever reads the ledger later.
+
 ### Reading a result
 
 | Field            | Meaning                                                      |
@@ -63,33 +73,61 @@ exactly what it was supposed to. It is not an error and does not want a retry.
 
 Requires `aldus:read`, which a host can grant broadly (§18.1).
 
-| Tool                   | What it does                                   |
-| ---------------------- | ---------------------------------------------- |
-| `aldus_status`         | Current state and the next safe action (§24)   |
-| `aldus_inspect`        | Full detail for one Episode or Run             |
-| `aldus_artifacts`      | Artifacts a Run produced, by identity and hash |
-| `aldus_costs`          | Recorded and estimated cost                    |
-| `aldus_release_status` | Release receipts — this publishes nothing      |
+| Tool                          | What it does                                                      |
+| ----------------------------- | ----------------------------------------------------------------- |
+| `aldus_status`                | Current state and the next safe action (§24)                      |
+| `aldus_inspect`               | Full detail for one Episode or Run                                |
+| `aldus_artifacts`             | Artifacts a Run produced, with archival state                     |
+| `aldus_artifact_lineage`      | Where one artifact came from, and what came of it                 |
+| `aldus_plan_artifact_cleanup` | What a cleanup would remove, and what blocks it — removes nothing |
+| `aldus_costs`                 | Recorded and estimated cost                                       |
+| `aldus_release_status`        | Release receipts already recorded                                 |
+| `aldus_release_bundle_status` | A bundle's derived state — contacts no destination                |
+| `aldus_takes`                 | Synthesis takes, lineage, and what awaits a decision              |
+
+None of these contacts an external destination or a provider. If you want to know what a release
+has already done, `aldus_release_bundle_status` is the safe question; `aldus_reconcile_release`
+is not, and needs publish authority.
 
 ### Mutating — each needs authority
 
-| Tool                    | Capability                                                                                                                   |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `aldus_init`            | `aldus:workspace:init`                                                                                                       |
-| `aldus_start_run`       | `aldus:run:start`                                                                                                            |
-| `aldus_run_stage`       | `aldus:stage:run`, plus `aldus:spend` for a stage that can incur cost, plus `aldus:stage:force` to take over a claimed stage |
-| `aldus_retry_stage`     | same as `aldus_run_stage`                                                                                                    |
-| `aldus_approve_gate`    | `aldus:gate:decide`                                                                                                          |
-| `aldus_reject_gate`     | `aldus:gate:decide`                                                                                                          |
-| `aldus_request_changes` | `aldus:gate:decide`                                                                                                          |
+| Tool                               | Capability                                                                                                                   | Consequence                    |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `aldus_init`                       | `aldus:workspace:init`                                                                                                       | Creates workspace state        |
+| `aldus_start_run`                  | `aldus:run:start`                                                                                                            | Creates a Run                  |
+| `aldus_run_stage`                  | `aldus:stage:run`, plus `aldus:spend` for a stage that can incur cost, plus `aldus:stage:force` to take over a claimed stage | Runs adopter code              |
+| `aldus_retry_stage`                | same as `aldus_run_stage`                                                                                                    | Appends a new attempt          |
+| `aldus_approve_gate`               | `aldus:gate:decide`                                                                                                          | Records a decision             |
+| `aldus_reject_gate`                | `aldus:gate:decide`                                                                                                          | Records a decision             |
+| `aldus_request_changes`            | `aldus:gate:decide`                                                                                                          | Records a decision             |
+| `aldus_decide_take`                | `aldus:gate:decide`                                                                                                          | Records a judgement (§13.3)    |
+| `aldus_archive_irreplaceable`      | `aldus:artifact:archive`                                                                                                     | Copies bytes into the archive  |
+| `aldus_record_performance_script`  | `aldus:tts:record`                                                                                                           | Records intent. Spends nothing |
+| `aldus_record_synthesis_plan`      | `aldus:tts:record`                                                                                                           | Records a plan. Spends nothing |
+| `aldus_record_unauthorized_charge` | `aldus:spend`                                                                                                                | Records a charge already made  |
+| **`aldus_synthesise_segment`**     | **`aldus:spend`**                                                                                                            | **Costs money**                |
+| `aldus_reconcile_release`          | `aldus:publish`                                                                                                              | Contacts destinations          |
+| **`aldus_execute_release`**        | **`aldus:publish`**                                                                                                          | **Publishes**                  |
 
-Holding `aldus:spend` does **not** authorize spend. §13.2 still requires a recorded, hash-bound
-approval, and the gate engine still evaluates it. The capability only decides whether this
-session may attempt the operation at all.
+Holding `aldus:spend` does **not** authorize spend, and holding `aldus:publish` does **not**
+approve a release. §13.2 still requires a recorded, hash-bound approval for synthesis, and §13.4
+still keeps uploading and making public separate. The capability only decides whether this
+session may attempt the operation; the gate engine decides whether it may proceed.
 
-There is **no publishing tool**, because `@aldus-runtime/services` exposes no publishing mutation. The
-`aldus:publish` capability is defined for the day one exists; until then MCP is not a route to
-publishing at all.
+A few things that are easy to get wrong:
+
+- **Recording a plan is not authorizing it.** `aldus_record_synthesis_plan` costs nothing and
+  approves nothing — it creates the thing an operator can then approve.
+- **Reconciliation publishes nothing**, but it needs publish authority because it contacts
+  destinations and rewrites the release record. It exists because a receipt can be lost while the
+  remote operation succeeded, and retrying blindly would then publish twice. It always runs
+  before an execution and cannot be skipped.
+- **`aldus_record_unauthorized_charge` is an escape hatch, not a synthesis route.** It performs
+  no synthesis and cannot reach a provider. It exists so a charge that already happened can be
+  recorded rather than lost from the trace. Recording a charge is not permission to incur one.
+- **Archival comes before cleanup.** §8.1 requires irreplaceable artifacts to be archived before
+  disposable files are removed, so `aldus_plan_artifact_cleanup` will report unarchived
+  irreplaceable artifacts as blocking until `aldus_archive_irreplaceable` has run.
 
 ---
 
@@ -119,6 +157,14 @@ const surface = new AldusToolSurface({
   stages: hostStageRegistry,
   gates: hostGateDefinitions,
   subjects: hostSubjectsProvider,
+
+  // Adapters are the adopter's to supply (§4.3, ADR-0015). Aldus decides when one is called and
+  // refuses when policy is unmet; the adapter performs the call. With none wired, the release
+  // and synthesis tools fail rather than appearing to work.
+  releaseAdapters: hostReleaseAdapters,
+  synthesisAdapter: hostSynthesisAdapter,
+  spendGrants: hostSpendGrants,
+  archive: hostArtifactArchive,
 });
 
 // tools/list
