@@ -46,3 +46,4 @@ Rules:
 | [0027](0027-stage-artifact-registration.md)             | A stage registers artifacts through a port, and never states its own provenance            | Accepted | —                 |
 | [0028](0028-workflow-stage-ordering.md)                 | A workflow graph declares stage ordering, separately from gating                           | Accepted | #55               |
 | [0029](0029-config-sees-the-invocation.md)              | A config module is given the invocation it is configuring                                  | Accepted | —                 |
+| [0030](0030-diagnostic-distance.md)                     | Rank diagnostic work by distance from symptom to cause                                     | Accepted | —                 |
