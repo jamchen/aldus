@@ -3,6 +3,8 @@
  */
 
 import { describe, expect, it } from "vitest";
+
+import { SCHEMA_VERSION } from "../src/schema-version.js";
 import { z } from "zod";
 
 import { AldusError, CoreErrorCodes } from "../src/errors.js";
@@ -191,7 +193,7 @@ describe("validateRecord (ADR-0003)", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe(CoreErrorCodes.SCHEMA_VERSION_UNSUPPORTED);
-    expect(result.error.details).toMatchObject({ actual: "2.0", supported: "1.0" });
+    expect(result.error.details).toMatchObject({ actual: "2.0", supported: SCHEMA_VERSION });
   });
 
   it("reports the version before reporting field errors", () => {

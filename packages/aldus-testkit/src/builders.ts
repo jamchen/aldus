@@ -28,6 +28,7 @@
 
 import {
   type ActorRef,
+  type AldusEvent,
   type ArtifactRef,
   type CostRecord,
   type EpisodeRef,
@@ -381,11 +382,41 @@ export function buildReleaseReceipt(
  * Registry
  * ---------------------------------------------------------------------------------------- */
 
+/** Build an {@link AldusEvent} (contract §6.4). */
+export function buildAldusEvent(
+  overrides?: Partial<AldusEvent>,
+  context?: TestContext,
+): AldusEvent {
+  const ctx = resolveContext(context);
+  return applyOverrides<AldusEvent>(
+    {
+      schemaVersion: SCHEMA_VERSION,
+      eventId: ctx.ids.newEventId(),
+      occurredAt: ctx.clock.nowIso(),
+      episodeId: formatEpisodeId("example-show", "episode-a"),
+      runId: ctx.ids.newRunId(),
+      stageId: "stage-a",
+      attemptId: ctx.ids.newStageAttemptId(),
+      action: "stage.attempt.succeeded",
+      actor: buildActorRef(undefined, ctx),
+      previousState: "running",
+      resultingState: "succeeded",
+      inputRefs: [ctx.ids.newArtifactId()],
+      outputRefs: [ctx.ids.newArtifactId()],
+      idempotencyKey: "idempotency-a",
+      sequence: 1,
+      error: buildStructuredError(undefined, ctx),
+      details: { note: "example detail" },
+    },
+    overrides,
+  );
+}
+
 /**
  * Every builder, keyed by the schema name it produces.
  *
- * Exposed so a test can assert a property across all eleven types in a loop rather than eleven
- * near-identical assertions — the form that actually fails when a twelfth type is added and
+ * Exposed so a test can assert a property across all twelve types in a loop rather than twelve
+ * near-identical assertions — the form that actually fails when a thirteenth type is added and
  * forgotten.
  */
 export const builders = {
@@ -400,6 +431,7 @@ export const builders = {
   KnowledgePackRef: buildKnowledgePackRef,
   ActorRef: buildActorRef,
   StructuredError: buildStructuredError,
+  AldusEvent: buildAldusEvent,
 } as const satisfies {
   [N in SchemaName]: (overrides?: never, context?: TestContext) => SchemaTypeFor<N>;
 };

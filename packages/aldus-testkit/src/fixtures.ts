@@ -65,8 +65,14 @@ export interface InvalidFixtureEntry extends ValidFixtureEntry {
 
 /** The fixture manifest (`fixtures/manifest.json`). */
 export interface FixtureManifest {
-  /** Schema version every fixture in the corpus is pinned at. */
-  schemaVersion: string;
+  /**
+   * Oldest schema version represented in the corpus.
+   *
+   * Not "the version every fixture carries": a fixture carries the version of the release that
+   * introduced its type, so the corpus is deliberately mixed. What every fixture must satisfy
+   * is that it stays *readable* by the current build (ADR-0003 same-major rule).
+   */
+  baselineSchemaVersion: string;
   /** Why the corpus is frozen and what `jsonSchemaDetectable` means. */
   note: string;
   /** Fixtures expected to validate. */

@@ -1,6 +1,5 @@
 {
-  "schemaVersion": "1.0",
-  "note": "Fixtures are pinned at schemaVersion 1.0 and are FROZEN. A MAJOR schema bump revisits them deliberately (ADR-0003); they are never edited to make a failing test pass. `jsonSchemaDetectable: false` marks a defect that only the normative Zod schema catches, because the constraint is a cross-field refinement JSON Schema cannot express (ADR-0002).",
+  "note": "Fixtures are FROZEN: they are never edited to make a failing test pass. Each carries the schemaVersion of the release that introduced its type — the WP-01 corpus is pinned at 1.0 and AldusEvent at 1.1 — and every one of them must stay readable by the current build. That is the proof of ADR-0003's same-major rule, not an assertion of it: if a 1.0 fixture ever stops validating, the rule has been broken. A MAJOR bump revisits the whole corpus deliberately (ADR-0003). `jsonSchemaDetectable: false` marks a defect that only the normative Zod schema catches, because the constraint is a cross-field refinement JSON Schema cannot express (ADR-0002).",
   "valid": [
     {
       "schema": "ActorRef",
@@ -133,6 +132,18 @@
       "case": "full",
       "file": "valid/ReleaseReceipt.full.json",
       "description": "A failed operation carrying its remote identity and structured failure."
+    },
+    {
+      "schema": "AldusEvent",
+      "case": "minimal",
+      "file": "valid/AldusEvent.minimal.json",
+      "description": "Only the fields §6.4 requires unconditionally: identity, timing, scope, action, actor, and empty reference lists."
+    },
+    {
+      "schema": "AldusEvent",
+      "case": "full",
+      "file": "valid/AldusEvent.full.json",
+      "description": "Every optional field populated, including a state transition, an idempotency key, an explicit sequence ordinal, and a redacted error."
     }
   ],
   "invalid": [
@@ -335,6 +346,31 @@
       "description": "`status` outside the closed RELEASE_STATUSES enum (§17).",
       "expectedPath": "status",
       "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "AldusEvent",
+      "case": "missing-action",
+      "file": "invalid/AldusEvent.missing-action.json",
+      "description": "`action` absent, so the event records that something changed without recording what (§6.4).",
+      "expectedPath": "action",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "AldusEvent",
+      "case": "negative-sequence",
+      "file": "invalid/AldusEvent.negative-sequence.json",
+      "description": "`sequence` is negative, which cannot be a position in an append-only log.",
+      "expectedPath": "sequence",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "AldusEvent",
+      "case": "timestamp-without-offset",
+      "file": "invalid/AldusEvent.timestamp-without-offset.json",
+      "description": "`occurredAt` carries no UTC offset, so the instant is ambiguous across machines.",
+      "expectedPath": "occurredAt",
+      "jsonSchemaDetectable": true
     }
-  ]
+  ],
+  "baselineSchemaVersion": "1.0"
 }

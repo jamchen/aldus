@@ -12,6 +12,7 @@ import { structuredErrorSchema } from "../errors.js";
 import { actorRefSchema, knowledgePackRefSchema } from "./common.js";
 import { artifactRefSchema } from "./artifact.js";
 import { costRecordSchema } from "./cost.js";
+import { aldusEventSchema } from "./event.js";
 import { episodeRefSchema } from "./episode.js";
 import { gateDecisionSchema } from "./gate.js";
 import { releaseReceiptSchema } from "./release.js";
@@ -22,13 +23,14 @@ export * from "./common.js";
 export * from "./artifact.js";
 export * from "./cost.js";
 export * from "./episode.js";
+export * from "./event.js";
 export * from "./gate.js";
 export * from "./release.js";
 export * from "./run.js";
 export * from "./stage.js";
 
 /**
- * The eleven core domain types (architecture contract §6.1, §6.2, §6.3, §8, §9.1, §13, §17,
+ * The twelve core domain types (architecture contract §6.1, §6.2, §6.3, §8, §9.1, §13, §17,
  * §19.1, §19.2, §19.3).
  *
  * Order is the contract's own narrative order — identity, then execution, then artifacts, then
@@ -46,6 +48,7 @@ export const coreSchemas = {
   KnowledgePackRef: knowledgePackRefSchema,
   ActorRef: actorRefSchema,
   StructuredError: structuredErrorSchema,
+  AldusEvent: aldusEventSchema,
 } as const;
 
 /** Name of a registered core schema. */
@@ -69,6 +72,7 @@ export const VERSIONED_SCHEMA_NAMES = [
   "GateDecision",
   "CostRecord",
   "ReleaseReceipt",
+  "AldusEvent",
 ] as const;
 
 /** @see VERSIONED_SCHEMA_NAMES */

@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.1:AldusEvent",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "episodeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "stageId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "attemptId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "actor": {
+      "$ref": "#/$defs/ActorRef"
+    },
+    "previousState": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "resultingState": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "inputRefs": {
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "outputRefs": {
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "error": {
+      "$ref": "#/$defs/StructuredError"
+    },
+    "details": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "occurredAt",
+    "episodeId",
+    "runId",
+    "action",
+    "actor",
+    "inputRefs",
+    "outputRefs"
+  ],
+  "title": "AldusEvent",
+  "description": "One immutable record of a state mutation (architecture contract §6.4, which requires every state mutation to emit one). Append-only: an event is never edited, and §6.3's materialized manifests exist for mutable summaries. `action` is an open string because workflows belong to adopters, not to Core (§4.2). `sequence` is optional because a store may or may not need an explicit per-run ordinal beyond the time-ordered `eventId` (ADR-0004). `error` and `details` are required to be redacted by the emitter, because an event is durable and a secret written here once is leaked permanently (§19.2).",
+  "$defs": {
+    "ActorRef": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent",
+            "worker",
+            "system"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "backendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "sessionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "ActorRef",
+      "description": "Identity of the party that performed an action (architecture contract §6.4, §19.2). Every mutating action records one. `backendId` and `sessionRef` are traceability metadata; contract §3.4 forbids treating an agent session as authoritative state."
+    },
+    "StructuredError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "validation",
+            "policy",
+            "not_found",
+            "conflict",
+            "provider",
+            "io",
+            "timeout",
+            "cancelled",
+            "internal"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "causes": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StructuredError"
+          }
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "code",
+        "category",
+        "message",
+        "retryable"
+      ],
+      "title": "StructuredError",
+      "description": "A redacted, safe-to-persist failure record (architecture contract §19.1). `message` and `details` are already redacted by the producer. Cause chains are bounded to 4 levels at construction time, a constraint JSON Schema cannot express."
+    }
+  }
+}

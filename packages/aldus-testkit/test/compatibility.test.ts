@@ -37,11 +37,28 @@ function withVersion(record: unknown, version: string): unknown {
 }
 
 describe("the frozen corpus", () => {
-  it("is pinned at schema version 1.0", () => {
+  // Every fixture is pinned at the version of the release that introduced its type, and is
+  // never restamped. The WP-01 corpus staying at 1.0 while SCHEMA_VERSION advances is the whole
+  // point: it is what keeps proving ADR-0003's same-major rule instead of merely asserting it.
+  const INTRODUCED_AT: Partial<Record<string, string>> = { AldusEvent: "1.1" };
+  const WP01_BASELINE = "1.0";
+
+  it("pins each fixture at the version that introduced its type", () => {
     for (const fixture of versionedFixtures) {
       const declared = (fixture.record as { schemaVersion?: unknown }).schemaVersion;
-      expect(declared, `${fixtureId(fixture.entry)} is not pinned`).toBe("1.0");
+      const expected = INTRODUCED_AT[fixture.entry.schema] ?? WP01_BASELINE;
+      expect(declared, `${fixtureId(fixture.entry)} is not pinned`).toBe(expected);
     }
+  });
+
+  it("still contains fixtures older than the current build", () => {
+    // If every fixture ever got restamped to SCHEMA_VERSION, the compatibility suite below
+    // would pass vacuously while testing nothing about older records.
+    const versions = versionedFixtures.map(
+      (fixture) => (fixture.record as { schemaVersion?: unknown }).schemaVersion,
+    );
+    expect(versions).toContain(WP01_BASELINE);
+    expect(WP01_BASELINE).not.toBe(SCHEMA_VERSION);
   });
 
   it("still validates against the current build", () => {
@@ -64,7 +81,7 @@ describe("the frozen corpus", () => {
 describe("schemaVersion placement (ADR-0003)", () => {
   // Asserted against the registry AND the corpus, so the policy and the fixtures cannot drift
   // apart. Checking only one of them would let a fixture silently disagree with the rule.
-  it("declares exactly seven standalone document types", () => {
+  it("declares exactly eight standalone document types", () => {
     expect([...VERSIONED_SCHEMA_NAMES].sort()).toEqual(
       [
         "ArtifactRef",
@@ -74,6 +91,7 @@ describe("schemaVersion placement (ADR-0003)", () => {
         "ReleaseReceipt",
         "RunManifest",
         "StageExecution",
+        "AldusEvent",
       ].sort(),
     );
   });
@@ -206,8 +224,8 @@ describe("malformed version strings", () => {
 });
 
 describe("registry completeness", () => {
-  it("registers eleven core schemas", () => {
-    expect(listSchemaNames()).toHaveLength(11);
+  it("registers twelve core schemas", () => {
+    expect(listSchemaNames()).toHaveLength(12);
   });
 
   it("has a fixture for every registered schema", () => {
