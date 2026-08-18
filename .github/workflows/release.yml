@@ -1,0 +1,154 @@
+# Nothing here runs `npm publish` until a human approves the `npm-publish` environment.
+# See docs/RELEASING.md for the procedure this workflow implements.
+name: Release
+
+# Tag-triggered only. Never on pull_request, never on a fork: a workflow that can publish must
+# not be reachable from a branch anyone can open (issue #29 item 5, ADR-0022).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Verify and pack, then stop before publishing"
+        type: boolean
+        default: true
+
+# Least privilege at the top; the publish job adds id-token below.
+permissions:
+  contents: read
+
+# One release at a time. Two runs publishing the same version race, and the loser reports a
+# confusing 403 rather than the duplicate it actually is.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  # Everything that can fail, fails here — before any credential is minted.
+  # ---------------------------------------------------------------------------------------------
+  verify:
+    name: verify and pack
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.readiness.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: npm ci
+
+      - name: Full verification
+        run: npm run verify
+
+      - name: Release readiness
+        id: readiness
+        run: |
+          set -euo pipefail
+          node scripts/publish-set.mjs --strict
+          version="$(node -p "require('./packages/aldus-core/package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${version}"
+
+      - name: Tag matches the manifests
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          version="${{ steps.readiness.outputs.version }}"
+          if [ "${tag}" != "${version}" ]; then
+            echo "::error::tag v${tag} does not match the manifest version ${version}"
+            exit 1
+          fi
+          echo "Tag v${tag} matches the manifests."
+
+      - name: Clean-consumer gate
+        run: node scripts/clean-consumer.mjs
+
+      - name: Pack for inspection
+        run: |
+          set -euo pipefail
+          node scripts/pack.mjs --out "${RUNNER_TEMP}/tarballs"
+          ls -la "${RUNNER_TEMP}/tarballs"
+
+      - name: Upload tarballs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarballs-${{ steps.readiness.outputs.version }}
+          path: ${{ runner.temp }}/tarballs/*.tgz
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------------------------
+  # Publishing. Gated by a GitHub Environment, so the owner's approval is enforced by the
+  # platform rather than by anyone remembering to withhold a tag.
+  # ---------------------------------------------------------------------------------------------
+  publish:
+    name: publish to npm (next)
+    needs: verify
+    if: github.event_name == 'push' || inputs.dry_run == false
+    runs-on: ubuntu-latest
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/org/aldus-runtime
+    permissions:
+      contents: read
+      # The OIDC token npm exchanges for short-lived publish rights. This is what removes the
+      # need for a long-lived automation token in repository secrets (ADR-0022).
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Re-checked on this job rather than trusted from `verify`: the environment approval may
+      # have been granted hours later, and this is the last point before an irreversible act.
+      - name: Release readiness
+        run: node scripts/publish-set.mjs --strict
+
+      - name: Ensure npm is new enough for trusted publishing
+        run: |
+          set -euo pipefail
+          npm install -g npm@latest
+          npm --version
+
+      # --tag next, never latest. Nothing becomes the default install until the owner promotes it
+      # after adopter smoke tests (ADR-0020, ADR-0022).
+      - name: Publish
+        run: |
+          set -euo pipefail
+          node scripts/publish-dirs.mjs > "${RUNNER_TEMP}/publish-dirs.txt"
+          while IFS= read -r dir; do
+            [ -n "${dir}" ] || continue
+            echo "::group::publish ${dir}"
+            ( cd "${dir}" && npm publish --tag next --access public --provenance )
+            echo "::endgroup::"
+          done < "${RUNNER_TEMP}/publish-dirs.txt"
+
+      - name: Summary
+        run: |
+          set -euo pipefail
+          {
+            echo "### Published ${{ needs.verify.outputs.version }} to \`next\`"
+            echo
+            echo "Nothing was assigned to \`latest\`. Promote only after adopter smoke tests"
+            echo "and the owner's approval — see docs/RELEASING.md."
+          } >> "$GITHUB_STEP_SUMMARY"

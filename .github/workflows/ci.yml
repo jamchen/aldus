@@ -45,6 +45,33 @@ jobs:
       - name: Test
         run: npm test
 
+  # The release gate (issue #29 item 4, ADR-0022).
+  #
+  # npm workspaces symlink every package into the root node_modules, so the `verify` job above
+  # can pass while a published tarball is broken. This job installs what a consumer installs.
+  clean-consumer:
+    name: clean consumer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Report the publish set
+        run: node scripts/publish-set.mjs
+
+      - name: Clean-consumer gate
+        run: node scripts/clean-consumer.mjs
+
   boundary:
     name: core boundary
     runs-on: ubuntu-latest
