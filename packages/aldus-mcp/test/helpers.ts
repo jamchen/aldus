@@ -9,9 +9,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { initWorkspace } from "@aldus/file-store";
-import type { GateDefinition } from "@aldus/gate-engine";
-import { StageRegistry, type StageDefinition } from "@aldus/stage-runner";
+import { initWorkspace } from "@aldus-runtime/file-store";
+import type { GateDefinition } from "@aldus-runtime/gate-engine";
+import { StageRegistry, type StageDefinition } from "@aldus-runtime/stage-runner";
 
 import { CapabilityGrant, type Capability } from "../src/capabilities.js";
 import type { CallerIdentity } from "../src/identity.js";

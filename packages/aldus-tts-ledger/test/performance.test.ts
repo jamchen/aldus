@@ -7,7 +7,7 @@
  * representation has proven stable". So derivation is the expected path, not a fallback.
  */
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 import { describe, expect, it } from "vitest";
 
 import { digestText } from "../src/common.js";

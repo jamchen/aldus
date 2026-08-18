@@ -140,7 +140,7 @@ describe("the log is sufficient (ADR-0008)", () => {
           calls += 1;
           context.recordOutput(anArtifact({ artifactId: `art_${calls}` }) as never);
           if (calls < 3) {
-            const { AldusError } = await import("@aldus/core");
+            const { AldusError } = await import("@aldus-runtime/core");
             throw new AldusError("ALDUS_EXAMPLE_STAGE_FAILURE", "transient", {
               category: "provider",
               retryable: true,

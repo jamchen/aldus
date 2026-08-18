@@ -1,5 +1,5 @@
 {
-  "name": "@aldus/services",
+  "name": "@aldus-runtime/services",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -22,13 +22,13 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus/core": "*",
-    "@aldus/file-store": "*",
-    "@aldus/gate-engine": "*",
-    "@aldus/stage-runner": "*"
+    "@aldus-runtime/core": "*",
+    "@aldus-runtime/file-store": "*",
+    "@aldus-runtime/gate-engine": "*",
+    "@aldus-runtime/stage-runner": "*"
   },
   "devDependencies": {
-    "@aldus/testkit": "*",
+    "@aldus-runtime/testkit": "*",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

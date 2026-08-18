@@ -11,9 +11,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ActorRef, ArtifactRef, RunManifest } from "@aldus/core";
-import { openWorkspace, type FileWorkspace } from "@aldus/file-store";
-import { builders, createTestContext, type TestContext } from "@aldus/testkit";
+import type { ActorRef, ArtifactRef, RunManifest } from "@aldus-runtime/core";
+import { openWorkspace, type FileWorkspace } from "@aldus-runtime/file-store";
+import { builders, createTestContext, type TestContext } from "@aldus-runtime/testkit";
 import { z } from "zod";
 
 import type { AgentBackend, AgentCapabilities } from "../src/backend.js";

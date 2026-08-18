@@ -1,5 +1,5 @@
 /**
- * `@aldus/tts-ledger` — performance scripts, synthesis request and take lineage, the
+ * `@aldus-runtime/tts-ledger` — performance scripts, synthesis request and take lineage, the
  * pronunciation lexicon, and repair scoping for the Aldus runtime.
  *
  * Implements architecture contract §22 **WP-07** (generic half), covering §14 (the Performance
@@ -15,7 +15,7 @@
  *   that guarantee is a component with no way to make a request. A Worker supplied by an
  *   integration performs the call (§3.2, §4.3) and reports back.
  * - **It cannot authorize.** §13.2 makes paid synthesis conditional on a human gate decision, and
- *   `@aldus/gate-engine` owns it. This package asks, records the answer, and refuses to record a
+ *   `@aldus-runtime/gate-engine` owns it. This package asks, records the answer, and refuses to record a
  *   charge that answer did not permit.
  * - **It cannot forget.** §15.1 requires rejected paid takes to be retained with unique identity,
  *   so nothing deletes a take and the store port has no delete to call. A rejected take is

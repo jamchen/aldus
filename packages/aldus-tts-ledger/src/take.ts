@@ -14,7 +14,7 @@
  * same shape the artifact registry uses for the same reason.
  */
 
-import { actorRefSchema } from "@aldus/core";
+import { actorRefSchema } from "@aldus-runtime/core";
 import { z } from "zod";
 
 import { iso8601, nonEmptyString, schemaVersionPattern, sha256Hex } from "./common.js";

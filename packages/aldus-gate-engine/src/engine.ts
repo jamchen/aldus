@@ -16,8 +16,8 @@
  * in. Adding a dependency edge invalidates downstream approvals immediately, with no migration.
  */
 
-import type { ActorRef, AldusEvent, CostRecord, GateDecision } from "@aldus/core";
-import { SCHEMA_VERSION, newEventId, newGateDecisionId, validate } from "@aldus/core";
+import type { ActorRef, AldusEvent, CostRecord, GateDecision } from "@aldus-runtime/core";
+import { SCHEMA_VERSION, newEventId, newGateDecisionId, validate } from "@aldus-runtime/core";
 
 import {
   assertSubjectsCover,

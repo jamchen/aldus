@@ -32,7 +32,7 @@
  * confirms per call has to say so deliberately.
  */
 
-import { validate, type ActorRef } from "@aldus/core";
+import { validate, type ActorRef } from "@aldus-runtime/core";
 
 import { McpErrorCodes, mcpError } from "./errors.js";
 

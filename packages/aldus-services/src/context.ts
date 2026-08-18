@@ -7,15 +7,15 @@
  * other lacks.
  */
 
-import type { ActorRef } from "@aldus/core";
-import type { FileWorkspace } from "@aldus/file-store";
-import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus/gate-engine";
+import type { ActorRef } from "@aldus-runtime/core";
+import type { FileWorkspace } from "@aldus-runtime/file-store";
+import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   StageRegistry,
   StageRunner,
   createStageRunner,
   type AgentBackend,
-} from "@aldus/stage-runner";
+} from "@aldus-runtime/stage-runner";
 
 import {
   EventStoreGateEventSink,

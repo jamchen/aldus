@@ -11,14 +11,14 @@
  *   form of that guarantee is a component that has no way to make a request in the first place.
  *   A Worker supplied by an integration performs the call (§3.2, §4.3) and reports back here.
  * - **It cannot authorize.** §13.2 makes paid synthesis conditional on a human gate decision, and
- *   `@aldus/gate-engine` owns that. The ledger asks a {@link SpendAuthorizer}, records the answer,
+ *   `@aldus-runtime/gate-engine` owns that. The ledger asks a {@link SpendAuthorizer}, records the answer,
  *   and refuses to record a charge that answer did not permit.
  * - **It cannot forget.** §15.1 requires rejected paid takes to be retained with unique identity.
  *   Nothing here deletes a take, and the store port has no delete to call.
  */
 
-import type { ActorRef, AldusEvent } from "@aldus/core";
-import { SCHEMA_VERSION, newEventId, newId, redact } from "@aldus/core";
+import type { ActorRef, AldusEvent } from "@aldus-runtime/core";
+import { SCHEMA_VERSION, newEventId, newId, redact } from "@aldus-runtime/core";
 
 import { digestText } from "./common.js";
 import { TtsLedgerErrorCodes, ttsLedgerError } from "./errors.js";

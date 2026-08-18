@@ -12,7 +12,7 @@
  * policy and cost authorization."
  */
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { aStage, makeTempRun, type TempRun } from "./helpers.js";

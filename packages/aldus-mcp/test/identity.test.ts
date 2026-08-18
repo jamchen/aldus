@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 
 import { McpErrorCodes } from "../src/errors.js";
 import { assertCallerIdentity, resolveActor } from "../src/identity.js";

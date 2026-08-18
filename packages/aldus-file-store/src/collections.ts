@@ -14,7 +14,7 @@ import {
   fromStructuredError,
   type SchemaTypeFor,
   type VersionedSchemaName,
-} from "@aldus/core";
+} from "@aldus-runtime/core";
 
 import { readFileOrUndefined, type AtomicWriteOptions } from "./atomic.js";
 import { writeDocument } from "./document.js";

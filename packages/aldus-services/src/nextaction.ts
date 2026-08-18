@@ -22,7 +22,7 @@
  * asserted directly rather than inferred from an integration test.
  */
 
-import type { GateStatus } from "@aldus/gate-engine";
+import type { GateStatus } from "@aldus-runtime/gate-engine";
 
 /** Terminal and in-flight states a stage can be in (contract §6.3). */
 export type StageSummaryStatus =

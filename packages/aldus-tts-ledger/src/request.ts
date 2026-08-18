@@ -285,7 +285,7 @@ export const PERFORMANCE_FREEZE_SUBJECT_KEYS = {
  * every individual segment is untouched.
  */
 export function planSpokenTextDigest(plan: TtsRequestPlan): string {
-  return digestText(plan.segments.map((segment) => segment.text.raw).join(" "));
+  return digestText(plan.segments.map((segment) => segment.text.raw).join("\u0000"));
 }
 
 /**

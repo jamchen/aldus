@@ -6,19 +6,19 @@
  * actually implements and tests — an aspirational method is worse than an absent one, because a
  * second adapter gets written against it and only discovers at runtime that nothing honours it.
  *
- * Persistence reuses `@aldus/file-store` rather than reimplementing it: `writeFileAtomic` for the
+ * Persistence reuses `@aldus-runtime/file-store` rather than reimplementing it: `writeFileAtomic` for the
  * durability sequence, `preserveUnknown` for ADR-0004 decision 3, and the workspace's
  * `LockManager` so an artifact registration and a Run update contend properly instead of
  * interleaving.
  */
 
-import { SCHEMA_VERSION, assertSchemaVersionReadable } from "@aldus/core";
+import { SCHEMA_VERSION, assertSchemaVersionReadable } from "@aldus-runtime/core";
 import {
   preserveUnknown,
   readFileOrUndefined,
   writeDocument,
   type LockManager,
-} from "@aldus/file-store";
+} from "@aldus-runtime/file-store";
 
 import { ArtifactRegistryErrorCodes, artifactRegistryError } from "./errors.js";
 import { ARTIFACT_INDEX_LOCK_RESOURCE, ArtifactLayout } from "./paths.js";

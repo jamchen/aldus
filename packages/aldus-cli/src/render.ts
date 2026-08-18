@@ -21,8 +21,8 @@ import type {
   RunReport,
   StageRunReport,
   StatusReport,
-} from "@aldus/services";
-import type { ArtifactReport, InitReport, StartRunReport } from "@aldus/services";
+} from "@aldus-runtime/services";
+import type { ArtifactReport, InitReport, StartRunReport } from "@aldus-runtime/services";
 
 /** Render `init`. */
 export function renderInit(report: InitReport): string {

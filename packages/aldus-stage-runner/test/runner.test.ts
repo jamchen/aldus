@@ -8,7 +8,7 @@
 
 import { readFile, rm } from "node:fs/promises";
 
-import { assertValid, type AldusError } from "@aldus/core";
+import { assertValid, type AldusError } from "@aldus-runtime/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 

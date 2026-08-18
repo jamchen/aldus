@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 
 import { ServiceErrorCodes } from "../src/errors.js";
 import type { AldusServices } from "../src/services.js";

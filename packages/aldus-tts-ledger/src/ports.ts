@@ -12,7 +12,7 @@
  * insufficient. Moving them is a decision for whenever a second real adapter exists.
  */
 
-import type { AldusEvent } from "@aldus/core";
+import type { AldusEvent } from "@aldus-runtime/core";
 
 import type { LexiconEntry } from "./lexicon.js";
 import type { PerformanceScript } from "./performance.js";
@@ -63,7 +63,7 @@ export interface LexiconStore {
  * §6.4 requires **every** state mutation to emit an immutable event, so recording a take and
  * emitting its event are one operation from a caller's point of view.
  *
- * A caller wiring this to `@aldus/file-store`'s `FileEventStore` must not already hold the Run
+ * A caller wiring this to `@aldus-runtime/file-store`'s `FileEventStore` must not already hold the Run
  * lock: `append` takes that lock to assign a sequence (ADR-0005), and locks are not re-entrant —
  * `acquire` refuses with `ALDUS_LOCK_REENTRANT` rather than deadlocking. Give any enclosing
  * operation its own lock resource, as the stage runner does for its cache.
@@ -76,7 +76,7 @@ export interface LedgerEventSink {
  * Decides whether a paid request may proceed (contract §13.2, §19.3).
  *
  * **This package never grants authorization.** §13.2 makes that a human gate decision, and
- * `@aldus/gate-engine` owns it — `GateEngine.authorizeSpend` satisfies this port directly. The
+ * `@aldus-runtime/gate-engine` owns it — `GateEngine.authorizeSpend` satisfies this port directly. The
  * ledger asks, records the answer, and refuses to record a charge the answer did not permit.
  *
  * A narrow port rather than a dependency on the engine class, so a caller can wire whatever

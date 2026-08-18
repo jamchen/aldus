@@ -1,5 +1,5 @@
 /**
- * `@aldus/file-store` — file-backed state and event storage for the Aldus runtime.
+ * `@aldus-runtime/file-store` — file-backed state and event storage for the Aldus runtime.
  *
  * Implements architecture contract §22 **WP-02 File state and event store**: atomic manifest
  * writes, an append-only JSONL event log, file locking, materialized current state, and recovery

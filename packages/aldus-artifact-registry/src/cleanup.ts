@@ -18,7 +18,7 @@
  * reports what retention *would* permit, and a caller decides.
  */
 
-import type { Reconstructability } from "@aldus/core";
+import type { Reconstructability } from "@aldus-runtime/core";
 
 import type { ArtifactRecord } from "./record.js";
 

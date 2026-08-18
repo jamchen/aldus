@@ -5,8 +5,8 @@
 import { readFile, writeFile, truncate, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { AldusError, SCHEMA_VERSION, type AldusEvent } from "@aldus/core";
-import { builders } from "@aldus/testkit";
+import { AldusError, SCHEMA_VERSION, type AldusEvent } from "@aldus-runtime/core";
+import { builders } from "@aldus-runtime/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FileStoreErrorCodes } from "../src/errors.js";

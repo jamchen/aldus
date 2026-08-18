@@ -13,7 +13,7 @@
  * capability names stay open strings.
  */
 
-import type { ActorRef } from "@aldus/core";
+import type { ActorRef } from "@aldus-runtime/core";
 
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
 
@@ -66,7 +66,7 @@ export interface AgentResult {
   /** Session to resume from, when the backend supports resumption. */
   session?: AgentSessionRef;
   /** Failure detail, already redacted (contract §19.2). */
-  error?: import("@aldus/core").StructuredError;
+  error?: import("@aldus-runtime/core").StructuredError;
 }
 
 /**

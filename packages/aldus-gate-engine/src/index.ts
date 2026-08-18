@@ -1,5 +1,5 @@
 /**
- * `@aldus/gate-engine` — hash-bound human gates, cascading invalidation, and spend authorization.
+ * `@aldus-runtime/gate-engine` — hash-bound human gates, cascading invalidation, and spend authorization.
  *
  * Implements architecture contract §22 **WP-05**, covering §12 (quality levels), §13 (human gates
  * and freezes), and §19.3 (cost governance).

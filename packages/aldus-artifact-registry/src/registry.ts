@@ -20,8 +20,8 @@ import {
   newArtifactId,
   type ArtifactRef,
   type Reconstructability,
-} from "@aldus/core";
-import { WorkspaceLayout, type LockManager } from "@aldus/file-store";
+} from "@aldus-runtime/core";
+import { WorkspaceLayout, type LockManager } from "@aldus-runtime/file-store";
 
 import { LocalDirectoryArchive, localPathFromUri, type ArtifactArchive } from "./archive.js";
 import { planCleanup, type CleanupPlan } from "./cleanup.js";

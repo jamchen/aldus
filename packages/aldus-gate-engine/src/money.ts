@@ -11,7 +11,7 @@
  * ten-thousandth-of-a-cent charges is exact rather than approximately exact.
  */
 
-import type { Money } from "@aldus/core";
+import type { Money } from "@aldus-runtime/core";
 
 import { GateEngineErrorCodes, gateEngineError } from "./errors.js";
 

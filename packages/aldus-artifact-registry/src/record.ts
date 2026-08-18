@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 
-import { artifactRefSchema, SCHEMA_VERSION } from "@aldus/core";
+import { artifactRefSchema, SCHEMA_VERSION } from "@aldus-runtime/core";
 
 /**
  * How an artifact came to exist (contract §8.1, §20).

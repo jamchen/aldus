@@ -21,7 +21,7 @@ import {
   validateRecord,
   type SchemaName,
   type VersionedSchemaName,
-} from "@aldus/core";
+} from "@aldus-runtime/core";
 import { describe, expect, it } from "vitest";
 
 import { fixtureId, loadValidFixtures } from "../src/fixtures.js";

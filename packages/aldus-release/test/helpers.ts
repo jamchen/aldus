@@ -6,7 +6,7 @@
  * for exactly that.
  */
 
-import type { ActorRef } from "@aldus/core";
+import type { ActorRef } from "@aldus-runtime/core";
 
 import {
   AdapterRegistry,

@@ -11,8 +11,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createTestContext, builders, omit, type TestContext } from "@aldus/testkit";
-import type { AldusEvent, EpisodeRef, RunManifest } from "@aldus/core";
+import { createTestContext, builders, omit, type TestContext } from "@aldus-runtime/testkit";
+import type { AldusEvent, EpisodeRef, RunManifest } from "@aldus-runtime/core";
 
 /** A temp workspace root, plus its cleanup. */
 export interface TempWorkspace {

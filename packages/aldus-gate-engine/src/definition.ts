@@ -14,7 +14,7 @@
  * because the engine knows their names.
  */
 
-import type { ActorKind } from "@aldus/core";
+import type { ActorKind } from "@aldus-runtime/core";
 
 import { GateEngineErrorCodes, gateEngineError } from "./errors.js";
 

@@ -7,8 +7,8 @@
 
 import { join } from "node:path";
 
-import type { ActorRef } from "@aldus/core";
-import type { FileWorkspace } from "@aldus/file-store";
+import type { ActorRef } from "@aldus-runtime/core";
+import type { FileWorkspace } from "@aldus-runtime/file-store";
 
 import type { AgentBackend } from "./backend.js";
 import type { StageRegistry } from "./registry.js";

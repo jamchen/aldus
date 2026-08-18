@@ -7,8 +7,8 @@
  * written against it and only discovers at runtime that nothing honours it.
  */
 
-import type { AldusEvent, ReleaseReceipt } from "@aldus/core";
-import type { EventStore, RunStore } from "@aldus/file-store";
+import type { AldusEvent, ReleaseReceipt } from "@aldus-runtime/core";
+import type { EventStore, RunStore } from "@aldus-runtime/file-store";
 
 /**
  * Storage for release receipts (contract §7 `release.json`).
@@ -86,7 +86,7 @@ export class MemoryReleaseEventSink implements ReleaseEventSink {
 }
 
 /**
- * A {@link ReleaseReceiptStore} backed by `@aldus/file-store`'s per-Run `release.json` (§7).
+ * A {@link ReleaseReceiptStore} backed by `@aldus-runtime/file-store`'s per-Run `release.json` (§7).
  *
  * `RunStore.addRecord` takes the Run lock itself, so this must not be called from inside code
  * that already holds it — file locks are not re-entrant and the acquisition is refused outright
@@ -100,7 +100,7 @@ export function runStoreReceipts(runs: RunStore): ReleaseReceiptStore {
 }
 
 /**
- * A {@link ReleaseEventSink} backed by `@aldus/file-store`'s event log (§6.4).
+ * A {@link ReleaseEventSink} backed by `@aldus-runtime/file-store`'s event log (§6.4).
  *
  * Carries the same caution as {@link runStoreReceipts}: `EventStore.append` takes the Run lock to
  * assign a sequence (ADR-0005).

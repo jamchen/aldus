@@ -7,8 +7,8 @@
  * this package is ever allowed to contain.
  */
 
-import type { ActorRef } from "@aldus/core";
-import { SCHEMA_VERSION } from "@aldus/core";
+import type { ActorRef } from "@aldus-runtime/core";
+import { SCHEMA_VERSION } from "@aldus-runtime/core";
 
 import { digestText } from "../src/common.js";
 import type { PerformanceScript } from "../src/performance.js";

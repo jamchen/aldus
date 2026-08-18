@@ -6,7 +6,7 @@
  * shape as every other package's, so production trace (contract §20) stays uniform.
  */
 
-import { AldusError, type ErrorCategory } from "@aldus/core";
+import { AldusError, type ErrorCategory } from "@aldus-runtime/core";
 
 /** Error codes raised by the TTS ledger. */
 export const TtsLedgerErrorCodes = {

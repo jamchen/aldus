@@ -4,7 +4,7 @@
  * `builders` is a registry keyed by schema name, and its `satisfies` clause already fails to
  * compile if a schema has no builder. What it does not catch is a builder that exists, is
  * registered, and is simply never re-exported from `index.ts` — `builders.AldusEvent(...)` keeps
- * working while `import { buildAldusEvent } from "@aldus/testkit"` fails.
+ * working while `import { buildAldusEvent } from "@aldus-runtime/testkit"` fails.
  *
  * That is exactly what happened when AldusEvent was added, and nothing noticed until a consumer
  * tried the named import. This closes it.

@@ -1,7 +1,7 @@
 /**
  * Release authorization (architecture contract §13.4, §17, §18.1).
  *
- * This package does **not** decide whether a release is approved. `@aldus/gate-engine` already
+ * This package does **not** decide whether a release is approved. `@aldus-runtime/gate-engine` already
  * models §13.4's separation of uploading from making public as two gates granting two
  * operations, and derives staleness from bound digests (ADR-0009). Re-deciding any of that here
  * would produce a second approval path — and §3.6 exists because a second path is how an
@@ -11,7 +11,7 @@
  * wires that port to the real engine.
  */
 
-import type { GateEngine, SubjectsByGate } from "@aldus/gate-engine";
+import type { GateEngine, SubjectsByGate } from "@aldus-runtime/gate-engine";
 
 /** A verdict on one operation's authority. */
 export interface AuthorityVerdict {

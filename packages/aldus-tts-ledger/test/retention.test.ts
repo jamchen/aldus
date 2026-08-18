@@ -11,7 +11,7 @@
  * would throw away the reason the working one was reachable.
  */
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { TtsLedgerErrorCodes } from "../src/errors.js";

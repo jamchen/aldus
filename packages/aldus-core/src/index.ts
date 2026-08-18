@@ -1,5 +1,5 @@
 /**
- * `@aldus/core` — the generic contracts of the Aldus production runtime.
+ * `@aldus-runtime/core` — the generic contracts of the Aldus production runtime.
  *
  * This package implements architecture contract §22 **WP-01 Core schema and testkit**: the
  * domain types, their JSON schemas and validators, identifier generation, schema-version

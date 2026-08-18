@@ -11,7 +11,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { FileLockManager, WorkspaceLayout, type LockManager } from "@aldus/file-store";
+import { FileLockManager, WorkspaceLayout, type LockManager } from "@aldus-runtime/file-store";
 
 import { ArtifactRegistry, type ArtifactRegistryOptions } from "../src/registry.js";
 import type { RegisterArtifactInput } from "../src/registry.js";

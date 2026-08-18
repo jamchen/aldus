@@ -68,7 +68,7 @@ describe("the tool surface is split, not labelled", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  // §18.1 requires publishing to need explicit scoped authority. @aldus/services exposes no
+  // §18.1 requires publishing to need explicit scoped authority. @aldus-runtime/services exposes no
   // publishing mutation, so MCP cannot be a bypass today — and this test is what will fail if
   // someone adds one without requiring the capability.
   it("exposes no publishing tool, because there is no publishing service to adapt", () => {

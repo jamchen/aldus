@@ -1,10 +1,10 @@
 /**
- * `@aldus/cli` — a thin adapter over `@aldus/services` (architecture contract §18).
+ * `@aldus-runtime/cli` — a thin adapter over `@aldus-runtime/services` (architecture contract §18).
  *
  * §18 makes the CLI and the Production MCP two adapters over one application-service layer. This
  * package parses argv, renders results, and chooses an exit code. Every decision — what is safe
  * to do next, whether a gate authorizes an operation, whether a stage may run — lives in
- * `@aldus/services`, so WP-11 inherits it rather than reimplementing it.
+ * `@aldus-runtime/services`, so WP-11 inherits it rather than reimplementing it.
  *
  * @packageDocumentation
  */

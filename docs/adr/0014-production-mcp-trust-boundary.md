@@ -157,7 +157,7 @@ argument is a mistake the agent should hear about at once, not a field from the 
   agent. That is correct and it is also visible: production trace will show agent-decided gates,
   which is the honest picture of how the work happened. An adopter that wants human-attributed
   approvals has to build per-call confirmation, and that is the right price.
-- The `aldus:publish` capability exists and no tool requires it, because `@aldus/services`
+- The `aldus:publish` capability exists and no tool requires it, because `@aldus-runtime/services`
   exposes no publishing mutation. That absence is why MCP cannot be a publishing bypass today,
   and a test asserts it rather than leaving it to be noticed.
 - Adding a service method does not automatically expose it. A tool has to be declared, with a
@@ -189,6 +189,6 @@ multi-operator workspace, needs a follow-up ADR before it is built.
 - **Depend on the MCP SDK.** Rejected on weight, not availability. The tool contract is the
   deliverable and the SDK wires in a few lines on the host side.
 - **Let a tool name the workspace.** Rejected: that is the ambient binding §19.2 rules out.
-- **Expose the release and TTS packages as tools.** Rejected: `@aldus/services` exposes no such
+- **Expose the release and TTS packages as tools.** Rejected: `@aldus-runtime/services` exposes no such
   mutations, and adding them here would put decisions in the MCP adapter that the CLI would not
   inherit — the divergence ADR-0011 exists to prevent.

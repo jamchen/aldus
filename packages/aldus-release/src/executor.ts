@@ -23,8 +23,8 @@
  * the work it describes did not.
  */
 
-import type { ActorRef, AldusEvent, ReleaseReceipt } from "@aldus/core";
-import { SCHEMA_VERSION, newEventId, newReleaseId } from "@aldus/core";
+import type { ActorRef, AldusEvent, ReleaseReceipt } from "@aldus-runtime/core";
+import { SCHEMA_VERSION, newEventId, newReleaseId } from "@aldus-runtime/core";
 
 import type { AdapterRegistry, AdapterOutcome, ReleaseRequest } from "./adapter.js";
 import { assertBundleValid, deriveIdempotencyKey, type ReleaseBundle } from "./bundle.js";

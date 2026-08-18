@@ -31,7 +31,7 @@ memory.
 
 ### 1. Two packages, with the CLI as the thin one
 
-`@aldus/services` holds every decision. `@aldus/cli` parses argv, resolves the actor and
+`@aldus-runtime/services` holds every decision. `@aldus-runtime/cli` parses argv, resolves the actor and
 workspace, calls **one** service method, renders or serialises the result, and returns an exit
 code. WP-11 builds the same context and calls the same methods.
 
@@ -148,7 +148,7 @@ refuses — and buying a complete trace at the price of a deadlock is a bad trad
   test file, so a future disagreement about what an operator should be told next is a change to a
   reviewable policy rather than an archaeology exercise across command handlers.
 - Four exit codes are more than most CLIs use, and callers who only check `!== 0` still work.
-- The services take no dependency on `@aldus/artifact-registry`: `artifacts` reads the Run's
+- The services take no dependency on `@aldus-runtime/artifact-registry`: `artifacts` reads the Run's
   `artifacts.json` collection (§7). Richer lineage queries are a registry concern and would be an
   additive service method.
 - Gate subjects are supplied by the caller through a `SubjectsProvider`. The services cannot

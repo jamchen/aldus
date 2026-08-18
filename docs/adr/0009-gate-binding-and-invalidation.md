@@ -146,7 +146,7 @@ this runtime holds, and a guessed rate misstates a ceiling an operator authorise
   needs guaranteed attribution, the honest change is to bind `key + value` digests and accept
   losing artifact cross-referencing — a trade this ADR declines today.
 - The engine holds no store dependency; it defines ports (§7) an adopter wires to
-  `@aldus/file-store`. Whether these ports move to Core is left open, consistent with WP-02 and
+  `@aldus-runtime/file-store`. Whether these ports move to Core is left open, consistent with WP-02 and
   WP-03 deferring the same question until a second adapter exists.
 - Nothing here runs a check. §12's evaluators, §12.1's calibration metrics (WP-10), the TTS ledger
   (WP-07), and release adapters (WP-12) sit outside. This package models decisions; it does not

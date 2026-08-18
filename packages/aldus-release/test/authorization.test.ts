@@ -6,13 +6,13 @@
  * §18.1 requires mutating production operations to validate approvals and publishing to require
  * explicit scoped authority.
  *
- * This package decides none of that. `@aldus/gate-engine` does, and the tests at the bottom wire
+ * This package decides none of that. `@aldus-runtime/gate-engine` does, and the tests at the bottom wire
  * the real engine to prove the executor consumes its verdict rather than re-deriving one.
  */
 
 import { describe, expect, it } from "vitest";
 
-import { SCHEMA_VERSION } from "@aldus/core";
+import { SCHEMA_VERSION } from "@aldus-runtime/core";
 import {
   GateEngine,
   GateRegistry,
@@ -22,7 +22,7 @@ import {
   toSubjectHashes,
   type GateDefinition,
   type GateSubject,
-} from "@aldus/gate-engine";
+} from "@aldus-runtime/gate-engine";
 
 import { gateEngineAuthorizer } from "../src/authorization.js";
 import { ReleaseErrorCodes } from "../src/errors.js";

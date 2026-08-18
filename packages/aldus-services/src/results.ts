@@ -23,7 +23,7 @@
  * because a caller cannot tell a policy answer from a bug.
  */
 
-import type { StructuredError } from "@aldus/core";
+import type { StructuredError } from "@aldus-runtime/core";
 
 /** Why an operation was refused (contract §13, §18.1, §19.3). */
 export interface Refusal {

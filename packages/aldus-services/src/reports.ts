@@ -14,8 +14,8 @@ import type {
   ReleaseReceipt,
   RunManifest,
   StructuredError,
-} from "@aldus/core";
-import type { GateStatus } from "@aldus/gate-engine";
+} from "@aldus-runtime/core";
+import type { GateStatus } from "@aldus-runtime/gate-engine";
 
 import type { ActionPlan, StageSnapshot } from "./nextaction.js";
 

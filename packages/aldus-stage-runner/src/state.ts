@@ -32,8 +32,8 @@ import {
   type StageExecution,
   type StageStatus,
   SCHEMA_VERSION,
-} from "@aldus/core";
-import { readFileOrUndefined, writeDocument, type EventStore } from "@aldus/file-store";
+} from "@aldus-runtime/core";
+import { readFileOrUndefined, writeDocument, type EventStore } from "@aldus-runtime/file-store";
 import { z } from "zod";
 
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";

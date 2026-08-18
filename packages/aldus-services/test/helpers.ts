@@ -10,17 +10,21 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ActorRef, CostRecord, Money } from "@aldus/core";
-import { AldusError, SCHEMA_VERSION, newCostId } from "@aldus/core";
-import { FileWorkspace, initWorkspace } from "@aldus/file-store";
+import type { ActorRef, CostRecord, Money } from "@aldus-runtime/core";
+import { AldusError, SCHEMA_VERSION, newCostId } from "@aldus-runtime/core";
+import { FileWorkspace, initWorkspace } from "@aldus-runtime/file-store";
 import {
   GateRegistry,
   digestSubjectValue,
   type GateDefinition,
   type GateStatus,
   type SubjectsByGate,
-} from "@aldus/gate-engine";
-import { StageRegistry, type StageDefinition, type StageOutcome } from "@aldus/stage-runner";
+} from "@aldus-runtime/gate-engine";
+import {
+  StageRegistry,
+  type StageDefinition,
+  type StageOutcome,
+} from "@aldus-runtime/stage-runner";
 
 import { AldusContext, AldusServices } from "../src/index.js";
 

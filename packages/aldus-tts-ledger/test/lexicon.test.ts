@@ -7,7 +7,7 @@
  * to have one silently chosen and baked into paid audio.
  */
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 import { describe, expect, it } from "vitest";
 
 import { TtsLedgerErrorCodes } from "../src/errors.js";

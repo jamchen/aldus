@@ -10,7 +10,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { AldusError, SCHEMA_VERSION } from "@aldus/core";
+import { AldusError, SCHEMA_VERSION } from "@aldus-runtime/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { mergeForWrite, preserveUnknown, readDocument, writeDocument } from "../src/document.js";

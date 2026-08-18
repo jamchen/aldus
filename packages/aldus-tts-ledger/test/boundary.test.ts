@@ -66,7 +66,7 @@ describe("the package cannot perform synthesis (§15.1)", () => {
     // appearing here would be the boundary breaking (§4.2) and the "cannot synthesise" property
     // failing at the same time.
     for (const name of Object.keys(manifest.dependencies ?? {})) {
-      expect(name === "zod" || name.startsWith("@aldus/"), name).toBe(true);
+      expect(name === "zod" || name.startsWith("@aldus-runtime/"), name).toBe(true);
     }
   });
 

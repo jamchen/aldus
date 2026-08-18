@@ -15,8 +15,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { openWorkspace, type FileWorkspace } from "@aldus/file-store";
-import { buildRunManifest, createTestContext } from "@aldus/testkit";
+import { openWorkspace, type FileWorkspace } from "@aldus-runtime/file-store";
+import { buildRunManifest, createTestContext } from "@aldus-runtime/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AdapterRegistry, RecordingReleaseAdapter } from "../src/adapter.js";

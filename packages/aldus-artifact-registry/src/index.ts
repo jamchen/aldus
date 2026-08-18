@@ -1,5 +1,5 @@
 /**
- * `@aldus/artifact-registry` — artifact identity, provenance, lineage, archival, and cleanup
+ * `@aldus-runtime/artifact-registry` — artifact identity, provenance, lineage, archival, and cleanup
  * policy for the Aldus runtime.
  *
  * Implements architecture contract §22 **WP-03 Artifact registry**: SHA-256 and metadata

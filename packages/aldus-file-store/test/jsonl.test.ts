@@ -8,7 +8,7 @@
 import { truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { AldusError } from "@aldus/core";
+import { AldusError } from "@aldus-runtime/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FileStoreErrorCodes } from "../src/errors.js";
