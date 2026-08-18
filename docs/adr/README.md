@@ -24,4 +24,5 @@ Rules:
 | [0005](0005-file-store-locking-and-event-ordering.md)  | File-store locking and event ordering                               | Accepted | §25.3             |
 | [0006](0006-knowledge-pack-manifest-and-precedence.md) | Knowledge Pack manifest, precedence, and conflict model             | Accepted | —                 |
 | [0007](0007-artifact-archive-and-collision-safety.md)  | Artifact archive target, collision safety, and provenance placement | Accepted | §25.4             |
+| [0009](0009-gate-binding-and-invalidation.md)          | Gate binding, cascading invalidation, and spend grants              | Accepted | —                 |
 | [0010](0010-evaluator-promotion-evidence.md)           | Evaluator promotion evidence                                        | Accepted | §25.9             |
