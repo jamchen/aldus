@@ -1,7 +1,6 @@
 {
   "name": "@aldus-runtime/artifact-registry",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Aldus Artifact Registry \u2014 content-addressed artifact identity, provenance, lineage, archival, and cleanup policy.",
   "license": "Apache-2.0",
@@ -33,14 +32,18 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "*",
-    "@aldus-runtime/file-store": "*",
+    "@aldus-runtime/core": "0.1.0",
+    "@aldus-runtime/file-store": "0.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "*",
+    "@aldus-runtime/testkit": "0.1.0",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   }
 }

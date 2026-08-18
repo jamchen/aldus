@@ -1,7 +1,6 @@
 {
   "name": "@aldus-runtime/tts-ledger",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Aldus TTS Ledger \u2014 performance scripts, synthesis request and take lineage, pronunciation lexicon, and repair scoping. Records synthesis; never performs it.",
   "license": "Apache-2.0",
@@ -33,16 +32,20 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "*",
-    "@aldus-runtime/file-store": "*",
-    "@aldus-runtime/gate-engine": "*",
+    "@aldus-runtime/core": "0.1.0",
+    "@aldus-runtime/file-store": "0.1.0",
+    "@aldus-runtime/gate-engine": "0.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@aldus-runtime/artifact-registry": "*",
-    "@aldus-runtime/testkit": "*",
+    "@aldus-runtime/artifact-registry": "0.1.0",
+    "@aldus-runtime/testkit": "0.1.0",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   }
 }

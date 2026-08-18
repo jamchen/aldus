@@ -1,7 +1,6 @@
 {
   "name": "@aldus-runtime/file-store",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Aldus File Store \u2014 file-backed Episode, Run, and Event stores with atomic writes and crash recovery.",
   "license": "Apache-2.0",
@@ -33,12 +32,16 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "*"
+    "@aldus-runtime/core": "0.1.0"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "*",
+    "@aldus-runtime/testkit": "0.1.0",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   }
 }
