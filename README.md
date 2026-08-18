@@ -11,8 +11,9 @@ reusable production knowledge.
 
 ## Status
 
-Contract §22 defines twelve work packages. Eleven are implemented; **WP-06 requires a real
-adopter integration** and is blocked ([#14](https://github.com/jamchen/aldus/issues/14)).
+Contract §22 defines twelve work packages. Eleven are implemented. **WP-06 is adopter
+integration work and is not implemented here** — the production scripts and their wrappers live
+in the adopter's own repository depending on `@aldus/*` (§4.3, ADR-0015).
 
 | WP      | Package                         | State                                   |
 | ------- | ------------------------------- | --------------------------------------- |
