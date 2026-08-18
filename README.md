@@ -71,6 +71,8 @@ Packs, integrations, workflows, and content assets may remain privately licensed
 architecture contract §4.2 and §4.3 already keep them outside this repository, and the license
 boundary follows the same line (ADR-0018).
 
+Copyright 2026 Jam Chen. See [`NOTICE`](NOTICE).
+
 Third-party dependency licenses are recorded in
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). No third-party code is bundled into any
 published package.

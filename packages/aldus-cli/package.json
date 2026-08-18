@@ -22,7 +22,8 @@
   },
   "files": [
     "dist",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "bin": {
     "aldus": "./dist/bin.js"

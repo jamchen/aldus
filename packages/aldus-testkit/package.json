@@ -24,7 +24,8 @@
   "files": [
     "dist",
     "fixtures",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc -b",

@@ -1,0 +1,21 @@
+Aldus
+Copyright 2026 Jam Chen
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this software except in compliance with the License. You may obtain a copy of
+the License in the LICENSE file distributed with this software, or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Aldus is currently owned as personal work and has not been assigned to a
+separate legal entity. If ownership is transferred, this file and the related
+copyright statements will be updated at that time.
+
+No third-party code is bundled, inlined, or vendored into any published Aldus
+package. Dependencies are resolved at install time and reach the consumer under
+their own licenses, from their own publishers. The dependency audit is recorded
+in THIRD-PARTY-NOTICES.md.
+
+This NOTICE file exists by the project's choice rather than by obligation:
+Apache-2.0 section 4(d) governs the preservation of a NOTICE file when the work
+already carries one, and does not itself require that one be created.

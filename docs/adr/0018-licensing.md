@@ -1,6 +1,7 @@
 # ADR-0018: Apache-2.0 for the runtime; adopter content stays privately licensed
 
 - Status: Accepted
+- Updated: 2026-08-18 — copyright holder confirmed; `NOTICE` added (decision unchanged)
 - Date: 2026-08-18
 - Closes: the license and visibility decisions on issue #29
 - Relates to: §4.2 Aldus Core does not own, §4.3 Integration owns, §19.2 Security, §21
@@ -53,8 +54,10 @@ leaving patent grants implicit.
   workspace package's npm tarball, so each package carries its own byte-identical copy listed in
   `files`. A test asserts both, because a package that silently ships without its license looks
   no different from one that does.
-- **§4(d): a `NOTICE` file must be propagated if the work has one.** Deliberately **not created
-  yet** — see below.
+- **§4(d) governs _preserving_ a `NOTICE`, not creating one.** The section obliges a
+  redistributor to carry forward a NOTICE the work already has; it does not require a project to
+  have one. Creating one is therefore this project's choice — and having made it, the
+  propagation obligation becomes real for anyone redistributing Aldus.
 
 ### Third-party material
 
@@ -73,11 +76,20 @@ forbidding provider, platform, cloud, and storage dependencies.
 - Publishing is still gated. Every package remains `private: true` at `0.0.0`; the license was
   one blocker on issue #29 and the owner's final pre-publish approval is another. This ADR
   settles the license, not the release.
-- **The copyright holder is not recorded, and no `NOTICE` file exists.** Naming a legal entity is
-  the owner's to state, not an implementation detail to infer from a git config. Until it is
-  confirmed, the `LICENSE` appendix keeps its canonical `[yyyy] [name of copyright owner]`
-  placeholders — which is the verbatim apache.org text and is legally unobjectionable, since the
-  appendix is instructions for applying the license rather than part of the grant.
+- **The copyright holder was not recorded when this ADR was accepted, and no `NOTICE` existed.**
+  Naming a legal entity is the owner's to state, not an implementation detail to infer from a git
+  config. Until confirmed, the `LICENSE` appendix kept its canonical
+  `[yyyy] [name of copyright owner]` placeholders — the verbatim apache.org text, and legally
+  unobjectionable, since the appendix is instructions for applying the license rather than part
+  of the grant.
+
+  **Update, 2026-08-18:** the owner confirmed the holder as **Jam Chen**, held as personal work
+  and not assigned to a separate legal entity. `NOTICE` now exists carrying
+  `Copyright 2026 Jam Chen`, is copied into every package and listed in `files`, and is covered
+  by the same test as `LICENSE`. The `LICENSE` appendix placeholders remain as canonical text.
+  If ownership transfers, `NOTICE` and the related statements are updated then; nothing else in
+  this ADR changes.
+
 - Contributions are inbound under Apache-2.0 §5 by default. Whether a separate CLA or DCO is
   required is not decided here.
 
