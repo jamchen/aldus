@@ -100,6 +100,19 @@ read after a torn-tail recovery still assigns a value strictly greater than anyt
 
 ## Consequences
 
+- **Locks are not re-entrant, and that is now enforced rather than merely true.** Because
+  `append` takes the Run lock to assign a sequence, a caller that holds the Run lock and then
+  emits an event waits on itself. This was found while building WP-04, where it presented as
+  every test timing out. `acquire` now refuses immediately with `ALDUS_LOCK_REENTRANT` when the
+  current async scope already holds the resource through the same manager, instead of spinning
+  to the acquisition deadline and reporting "held by another session" — a message that sends the
+  reader looking for a concurrent process that does not exist.
+
+  The check is scoped by async context _and_ by manager instance, which is what keeps it from
+  refusing legitimate work: two sibling tasks contending for one lock must still queue, and two
+  managers in one process stand for two independent holders. The remedy for a genuine nesting is
+  to give the inner operation its own lock resource, as the stage runner does for its cache.
+
 - Two sessions may work on different Runs concurrently without contending at all.
 - A crashed session's lock is reclaimed within 30 seconds, or immediately if it died on this
   host.

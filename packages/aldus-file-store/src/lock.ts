@@ -11,6 +11,7 @@
  * {@link FileLockManager} without any caller changing. Decisions are recorded in ADR-0005.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -112,11 +113,36 @@ export interface FileLockManagerOptions {
  * racing cannot both believe they won. Everything else — TTLs, liveness probes, reclaim — exists
  * only to stop a dead holder from blocking the workspace forever.
  */
+/**
+ * Resources held by the current async scope.
+ *
+ * Tracked per async context rather than per manager, and that distinction is the whole point.
+ * Two independent tasks in one process contending for the same lock is legitimate — one waits,
+ * the other releases, both proceed. Re-acquiring a lock *inside the scope that already holds
+ * it* is not: file locks are not re-entrant, so the acquirer is waiting on itself and will spin
+ * until the acquisition deadline before failing with a misleading "held by another session".
+ *
+ * `AsyncLocalStorage` distinguishes the two exactly: a nested call inherits the scope, a sibling
+ * task does not.
+ *
+ * Entries are keyed by manager **instance** as well as resource. Two managers in one process
+ * stand for two independent holders — that is how a test simulates another machine stealing a
+ * lease — and refusing one because the other holds the resource would be wrong.
+ */
+const heldByScope = new AsyncLocalStorage<ReadonlySet<string>>();
+
+/** Scope key for one manager's hold on one resource. */
+function scopeKey(manager: FileLockManager, resource: string): string {
+  return `${manager.instanceId}\u0000${resource}`;
+}
+
 export class FileLockManager implements LockManager {
   readonly #directory: string;
   readonly #now: () => number;
   readonly #retryMs: number;
   readonly #host = hostname();
+  /** Distinguishes this manager from another in the same process. @see scopeKey */
+  readonly instanceId: string = newUlid();
 
   constructor(lockDirectory: string, options: FileLockManagerOptions = {}) {
     this.#directory = lockDirectory;
@@ -136,6 +162,22 @@ export class FileLockManager implements LockManager {
     const timeoutMs = options.timeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
     const ttlMs = options.ttlMs ?? DEFAULT_LOCK_TTL_MS;
     const path = this.pathFor(resource);
+
+    // Fail immediately rather than deadlocking. `FileEventStore.append` takes the Run lock to
+    // assign a sequence (ADR-0005), so a caller that holds the Run lock and then emits an event
+    // waits on itself — which without this check surfaces after a multi-second timeout as
+    // "held by another session", pointing the reader at concurrency rather than at their own
+    // call stack.
+    if (heldByScope.getStore()?.has(scopeKey(this, resource)) === true) {
+      throw fileStoreError(
+        FileStoreErrorCodes.LOCK_REENTRANT,
+        `The lock on "${resource}" is already held by this scope, and file locks are not ` +
+          "re-entrant, so acquiring it again can never succeed. Either release the outer lock " +
+          "before this call, or give the inner operation its own lock resource.",
+        { category: "conflict", retryable: false, details: { resource } },
+      );
+    }
+
     // Real time, not `#now`: this bounds how long we actually sleep, and the retry loop below
     // sleeps in real milliseconds regardless of what clock the caller injected.
     const deadline = Date.now() + timeoutMs;
@@ -191,9 +233,11 @@ export class FileLockManager implements LockManager {
     options: AcquireOptions = {},
   ): Promise<T> {
     const lease = await this.acquire(resource, options);
+    const scope = new Set(heldByScope.getStore() ?? []);
+    scope.add(scopeKey(this, resource));
     let result: T;
     try {
-      result = await body(lease);
+      result = await heldByScope.run(scope, () => body(lease));
     } catch (error) {
       // Release without masking the body's failure: the original error is the useful one.
       await lease.release().catch(() => undefined);
