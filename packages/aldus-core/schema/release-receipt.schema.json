@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.0:ReleaseReceipt",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "releaseId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "destination": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "operation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "failed",
+        "pending",
+        "skipped"
+      ]
+    },
+    "remoteId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "remoteUrl": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "inputHashes": {
+      "maxItems": 4096,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "error": {
+      "$ref": "#/$defs/StructuredError"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "releaseId",
+    "runId",
+    "destination",
+    "operation",
+    "idempotencyKey",
+    "status",
+    "inputHashes"
+  ],
+  "title": "ReleaseReceipt",
+  "description": "The result of ONE release operation against one destination (architecture contract §17) — not a whole publish; contract §17 states publishing is a domain, not a single command. `idempotencyKey` is required so a partially failed release can be resumed rather than blindly re-run. `status: pending` exists so an operation with an unconfirmed outcome can be reconciled against the destination instead of retried. `destination` and `operation` are open strings because contract §1.2 rules out prescribing release targets.",
+  "$defs": {
+    "StructuredError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "validation",
+            "policy",
+            "not_found",
+            "conflict",
+            "provider",
+            "io",
+            "timeout",
+            "cancelled",
+            "internal"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "causes": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StructuredError"
+          }
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "code",
+        "category",
+        "message",
+        "retryable"
+      ],
+      "title": "StructuredError",
+      "description": "A redacted, safe-to-persist failure record (architecture contract §19.1). `message` and `details` are already redacted by the producer. Cause chains are bounded to 4 levels at construction time, a constraint JSON Schema cannot express."
+    }
+  }
+}

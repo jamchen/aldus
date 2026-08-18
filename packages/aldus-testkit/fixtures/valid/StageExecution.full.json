@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "run-a",
+  "stageId": "stage-a",
+  "stageVersion": "1.0.0",
+  "status": "succeeded",
+  "attempts": [
+    {
+      "attemptId": "att_01JQXK0000000000000000001",
+      "stageId": "stage-a",
+      "attempt": 1,
+      "status": "queued",
+      "actor": {
+        "kind": "human",
+        "id": "operator-a"
+      },
+      "inputArtifacts": [],
+      "outputArtifacts": []
+    },
+    {
+      "attemptId": "att_01JQXK0000000000000000003",
+      "stageId": "stage-a",
+      "attempt": 2,
+      "status": "succeeded",
+      "actor": {
+        "kind": "human",
+        "id": "operator-a"
+      },
+      "inputArtifacts": [],
+      "outputArtifacts": [],
+      "startedAt": "2026-01-01T00:00:00.000Z",
+      "finishedAt": "2026-01-01T00:05:00.000Z"
+    }
+  ],
+  "startedAt": "2026-01-01T00:00:00.000Z",
+  "finishedAt": "2026-01-01T00:05:00.000Z"
+}

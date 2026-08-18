@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0",
+  "releaseId": "rel-a",
+  "runId": "run-a",
+  "destination": "destination-a",
+  "operation": "media-upload",
+  "status": "pending",
+  "inputHashes": []
+}

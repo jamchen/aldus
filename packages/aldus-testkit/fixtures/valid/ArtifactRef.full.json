@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "artifactId": "art_01JQXK0000000000000000002",
+  "kind": "ApprovedAudio",
+  "uri": "file:///workspace/artifacts/approved-audio.wav",
+  "sha256": "b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801a2",
+  "mediaType": "audio/wav",
+  "producerRunId": "run-a",
+  "producerStageId": "stage-a",
+  "inputHashes": [
+    "a1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801",
+    "c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801a2b3"
+  ],
+  "reconstructability": "irreplaceable",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "sizeBytes": 5242880
+}

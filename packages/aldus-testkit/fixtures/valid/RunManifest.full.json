@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "run_01JQXK0000000000000000002",
+  "episode": {
+    "schemaVersion": "1.0",
+    "episodeId": "show:example-show:episode:episode-a",
+    "showId": "example-show",
+    "title": "Example Episode A",
+    "legacyRef": "legacy/example-show/2026-01/episode-a"
+  },
+  "workflowId": "workflow-a",
+  "workflowVersion": "1.0.0",
+  "status": "waiting",
+  "currentStage": "stage-a",
+  "codeRevision": "revision-a",
+  "knowledgePacks": [
+    {
+      "packId": "example-show-editorial",
+      "version": "1",
+      "authority": "normative",
+      "scope": {
+        "show": "example-show",
+        "host": "example-host"
+      },
+      "precedence": 20,
+      "sourceRevision": "revision-a",
+      "contentHash": "c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801a2b3"
+    }
+  ],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:05:00.000Z"
+}

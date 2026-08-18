@@ -1,0 +1,12 @@
+{
+  "attemptId": "att_01JQXK0000000000000000001",
+  "stageId": "stage-a",
+  "attempt": 0,
+  "status": "queued",
+  "actor": {
+    "kind": "human",
+    "id": "operator-a"
+  },
+  "inputArtifacts": [],
+  "outputArtifacts": []
+}

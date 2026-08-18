@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0",
+  "artifactId": "art_01JQXK0000000000000000001",
+  "kind": "EpisodeBrief",
+  "uri": "file:///workspace/artifacts/episode-brief.json",
+  "sha256": "A1B2C3D4E5F60718293A4B5C6D7E8F901A2B3C4D5E6F708192A3B4C5D6E7F801",
+  "mediaType": "application/json",
+  "producerRunId": "run-a",
+  "producerStageId": "stage-a",
+  "inputHashes": [],
+  "reconstructability": "source",
+  "createdAt": "2026-01-01T00:00:00.000Z"
+}

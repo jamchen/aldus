@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.0:CostRecord",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "costId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "stageId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "attemptId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "operation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "quantity": {
+      "$ref": "#/$defs/CostQuantity"
+    },
+    "estimated": {
+      "$ref": "#/$defs/Money"
+    },
+    "actual": {
+      "$ref": "#/$defs/Money"
+    },
+    "billingStatus": {
+      "type": "string",
+      "enum": [
+        "estimated",
+        "charged",
+        "free",
+        "unknown",
+        "voided"
+      ]
+    },
+    "authorizationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "providerRequestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "costId",
+    "runId",
+    "provider",
+    "operation",
+    "billingStatus",
+    "recordedAt"
+  ],
+  "title": "CostRecord",
+  "description": "A recorded or projected cost attributable to a Run (architecture contract §19.3, §15). ADDITIONAL CONSTRAINT NOT EXPRESSIBLE IN JSON SCHEMA: at least one of `estimated` or `actual` must be present — a cost record that states neither carries no information and would silently under-report spend against a budget. Validators generated from this schema will NOT enforce that; the normative Zod schema does. `provider` and `operation` are open strings because Core names no provider (§4.2). `billingStatus: unknown` exists so an unconfirmed billing outcome is representable rather than guessed (§19.3).",
+  "$defs": {
+    "CostQuantity": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "unit",
+        "amount"
+      ],
+      "title": "CostQuantity",
+      "description": "A unit of consumption underlying a cost (architecture contract §19.3). `unit` is an open string because what a provider bills by belongs to the provider, not to Core (§4.2)."
+    },
+    "Money": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "string",
+          "pattern": "^-?(0|[1-9]\\d*)(\\.\\d+)?$"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "title": "Money",
+      "description": "A monetary value (architecture contract §19.3). `amount` is a decimal STRING, not a number: costs are fractional-cent and IEEE-754 accumulation would silently corrupt the totals an operator authorises spend against."
+    }
+  }
+}

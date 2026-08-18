@@ -1,0 +1,217 @@
+/**
+ * Schema compatibility (ADR-0003).
+ *
+ * This is the WP-01 deliverable "schema compatibility tests". It checks the policy holds in
+ * both directions that matter in practice: an old record read by this build, and a record from
+ * a newer build read by this one. Architecture contract §5.1 notes long pauses between stages
+ * are normal, so both are routine rather than hypothetical.
+ *
+ * The corpus is pinned at `"1.0"` and frozen. If a test here fails after a schema change, the
+ * question is whether the change was actually compatible — not whether the fixture should be
+ * edited.
+ */
+
+import {
+  SCHEMA_VERSION,
+  VERSIONED_SCHEMA_NAMES,
+  checkSchemaVersion,
+  isVersionedSchemaName,
+  listSchemaNames,
+  validate,
+  validateRecord,
+  type SchemaName,
+  type VersionedSchemaName,
+} from "@aldus/core";
+import { describe, expect, it } from "vitest";
+
+import { fixtureId, loadValidFixtures } from "../src/fixtures.js";
+
+const validFixtures = loadValidFixtures();
+const versionedFixtures = validFixtures.filter((fixture) =>
+  isVersionedSchemaName(fixture.entry.schema),
+);
+
+/** Re-stamp a fixture record with a different schema version. */
+function withVersion(record: unknown, version: string): unknown {
+  return { ...(record as Record<string, unknown>), schemaVersion: version };
+}
+
+describe("the frozen corpus", () => {
+  it("is pinned at schema version 1.0", () => {
+    for (const fixture of versionedFixtures) {
+      const declared = (fixture.record as { schemaVersion?: unknown }).schemaVersion;
+      expect(declared, `${fixtureId(fixture.entry)} is not pinned`).toBe("1.0");
+    }
+  });
+
+  it("still validates against the current build", () => {
+    for (const fixture of validFixtures) {
+      const result = validate(fixture.entry.schema, fixture.record);
+      expect(result.ok, `${fixtureId(fixture.entry)} no longer validates`).toBe(true);
+    }
+  });
+
+  it("reads as compatible, not merely as parseable", () => {
+    for (const fixture of versionedFixtures) {
+      const name = fixture.entry.schema as VersionedSchemaName;
+      const result = validateRecord(name, fixture.record);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.compatibility).toBe("compatible");
+    }
+  });
+});
+
+describe("schemaVersion placement (ADR-0003)", () => {
+  // Asserted against the registry AND the corpus, so the policy and the fixtures cannot drift
+  // apart. Checking only one of them would let a fixture silently disagree with the rule.
+  it("declares exactly seven standalone document types", () => {
+    expect([...VERSIONED_SCHEMA_NAMES].sort()).toEqual(
+      [
+        "ArtifactRef",
+        "CostRecord",
+        "EpisodeRef",
+        "GateDecision",
+        "ReleaseReceipt",
+        "RunManifest",
+        "StageExecution",
+      ].sort(),
+    );
+  });
+
+  it("leaves the four embedded value objects unversioned", () => {
+    const embedded = listSchemaNames().filter((name) => !isVersionedSchemaName(name));
+    expect(embedded.sort()).toEqual(
+      ["ActorRef", "KnowledgePackRef", "StageAttempt", "StructuredError"].sort(),
+    );
+  });
+
+  it.each(validFixtures.map((fixture) => [fixtureId(fixture.entry), fixture] as const))(
+    "%s carries schemaVersion if and only if its type is a standalone document",
+    (_id, fixture) => {
+      const hasVersion = Object.hasOwn(fixture.record as object, "schemaVersion");
+      expect(hasVersion).toBe(isVersionedSchemaName(fixture.entry.schema));
+    },
+  );
+
+  it("rejects a version on an embedded value object as an unknown property, not an error", () => {
+    // Embedded objects have no version field, but adding one must not make them unreadable —
+    // that is the same forward-compatibility rule, applied to a field this build does not know.
+    const actor = validFixtures.find((fixture) => fixtureId(fixture.entry) === "ActorRef.minimal");
+    expect(actor).toBeDefined();
+    const stamped = { ...(actor?.record as object), schemaVersion: "1.0" };
+    expect(validate("ActorRef", stamped).ok).toBe(true);
+  });
+});
+
+describe("forward compatibility", () => {
+  it("accepts a current record carrying unknown properties", () => {
+    for (const fixture of validFixtures) {
+      const extended = {
+        ...(fixture.record as Record<string, unknown>),
+        // A field a future minor version might add. It must be ignored, not rejected: otherwise
+        // every additive schema change would break every older reader (ADR-0003).
+        fieldFromAFutureMinorVersion: { nested: ["value"] },
+      };
+      const result = validate(fixture.entry.schema, extended);
+      expect(result.ok, `${fixtureId(fixture.entry)} rejected an unknown property`).toBe(true);
+    }
+  });
+
+  it("classifies a newer minor version as forward and still reads it", () => {
+    for (const fixture of versionedFixtures) {
+      const name = fixture.entry.schema as VersionedSchemaName;
+      const result = validateRecord(name, withVersion(fixture.record, "1.9"));
+      expect(result.ok, `${name} could not read a 1.9 record`).toBe(true);
+      if (result.ok) expect(result.compatibility).toBe("forward");
+    }
+  });
+
+  it("classifies an older minor version as compatible", () => {
+    expect(checkSchemaVersion("1.0", "1.7")).toBe("compatible");
+    expect(checkSchemaVersion("1.7", "1.7")).toBe("compatible");
+    expect(checkSchemaVersion("1.8", "1.7")).toBe("forward");
+  });
+});
+
+describe("major version incompatibility", () => {
+  it("refuses a differing major with ALDUS_SCHEMA_VERSION_UNSUPPORTED", () => {
+    for (const fixture of versionedFixtures) {
+      const name = fixture.entry.schema as VersionedSchemaName;
+      const result = validateRecord(name, withVersion(fixture.record, "2.0"));
+      expect(result.ok, `${name} accepted a major-2 record`).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe("ALDUS_SCHEMA_VERSION_UNSUPPORTED");
+        expect(result.error.retryable).toBe(false);
+        expect(result.error.details).toMatchObject({ actual: "2.0", supported: SCHEMA_VERSION });
+      }
+    }
+  });
+
+  it("refuses an older major too — incompatibility is not only about the future", () => {
+    const fixture = versionedFixtures[0];
+    expect(fixture).toBeDefined();
+    if (fixture === undefined) return;
+    const result = validateRecord(
+      fixture.entry.schema as VersionedSchemaName,
+      withVersion(fixture.record, "0.9"),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  // The version error must arrive instead of a pile of field errors: a reader that sees twelve
+  // "unrecognised field" issues learns the symptom, not the cause.
+  it("reports the version failure alone, not alongside field errors", () => {
+    const fixture = versionedFixtures.find(
+      (candidate) => fixtureId(candidate.entry) === "RunManifest.full",
+    );
+    expect(fixture).toBeDefined();
+    if (fixture === undefined) return;
+
+    const damaged = {
+      ...(fixture.record as Record<string, unknown>),
+      schemaVersion: "2.0",
+      status: "a-status-that-does-not-exist",
+    };
+    const result = validateRecord("RunManifest", damaged);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("ALDUS_SCHEMA_VERSION_UNSUPPORTED");
+      expect(result.error.details?.issues).toBeUndefined();
+    }
+  });
+});
+
+describe("malformed version strings", () => {
+  it.each(["1", "1.0.0", "v1.0", "01.0", "", "one.zero"])(
+    "reports %s as a field error, not a version error",
+    (version) => {
+      const fixture = versionedFixtures[0];
+      expect(fixture).toBeDefined();
+      if (fixture === undefined) return;
+
+      const result = validateRecord(
+        fixture.entry.schema as VersionedSchemaName,
+        withVersion(fixture.record, version),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        // A malformed version is a bad field, not an unreadable document: the schema names the
+        // field precisely, which is more useful than a vaguer version verdict.
+        expect(result.error.code).toBe("ALDUS_SCHEMA_VALIDATION_FAILED");
+        const issues = (result.error.details?.issues ?? []) as Array<{ path: string }>;
+        expect(issues.map((issue) => issue.path)).toContain("schemaVersion");
+      }
+    },
+  );
+});
+
+describe("registry completeness", () => {
+  it("registers eleven core schemas", () => {
+    expect(listSchemaNames()).toHaveLength(11);
+  });
+
+  it("has a fixture for every registered schema", () => {
+    const covered = new Set<SchemaName>(validFixtures.map((fixture) => fixture.entry.schema));
+    expect([...covered].sort()).toEqual(listSchemaNames().sort());
+  });
+});

@@ -1,0 +1,30 @@
+{
+  "name": "aldus",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aldus AI production runtime \u2014 monorepo root",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty",
+    "test": "npm run test --workspaces --if-present",
+    "schema:generate": "npm run schema:generate -w @aldus/core",
+    "schema:check": "npm run schema:check -w @aldus/core",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "npm run format:check && npm run build && npm run typecheck:test && npm run schema:check && npm run test",
+    "typecheck:test": "npm run typecheck:test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

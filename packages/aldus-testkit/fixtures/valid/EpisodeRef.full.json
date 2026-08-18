@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1.0",
+  "episodeId": "show:example-show:episode:episode-a",
+  "showId": "example-show",
+  "title": "Example Episode A",
+  "legacyRef": "legacy/example-show/2026-01/episode-a"
+}

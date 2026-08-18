@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.0:StructuredError",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "validation",
+        "policy",
+        "not_found",
+        "conflict",
+        "provider",
+        "io",
+        "timeout",
+        "cancelled",
+        "internal"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "details": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "causes": {
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "$ref": "#"
+      }
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "code",
+    "category",
+    "message",
+    "retryable"
+  ],
+  "title": "StructuredError",
+  "description": "A redacted, safe-to-persist failure record (architecture contract §19.1). `message` and `details` are already redacted by the producer. Cause chains are bounded to 4 levels at construction time, a constraint JSON Schema cannot express."
+}

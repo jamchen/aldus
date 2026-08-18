@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0",
+  "releaseId": "rel-a",
+  "runId": "run-a",
+  "destination": "destination-a",
+  "operation": "media-upload",
+  "idempotencyKey": "run-a:destination-a:media-upload",
+  "status": "queued",
+  "inputHashes": []
+}

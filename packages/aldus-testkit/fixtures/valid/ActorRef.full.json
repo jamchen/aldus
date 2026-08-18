@@ -1,0 +1,7 @@
+{
+  "kind": "agent",
+  "id": "agent-a",
+  "displayName": "Agent A",
+  "backendId": "backend-a",
+  "sessionRef": "session-a"
+}

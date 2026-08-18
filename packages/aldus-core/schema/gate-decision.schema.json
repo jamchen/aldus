@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.0:GateDecision",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "decisionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "gateId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "rejected",
+        "changes_requested",
+        "waived"
+      ]
+    },
+    "subjectHashes": {
+      "maxItems": 4096,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "decidedBy": {
+      "$ref": "#/$defs/ActorRef"
+    },
+    "decidedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "comment": {
+      "type": "string",
+      "maxLength": 8000
+    },
+    "expiresOnChange": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "decisionId",
+    "gateId",
+    "runId",
+    "decision",
+    "subjectHashes",
+    "decidedBy",
+    "decidedAt",
+    "expiresOnChange"
+  ],
+  "title": "GateDecision",
+  "description": "A durable human decision bound to exact inputs (architecture contract §13). Contract §3.6 requires that human review produce one of these — a chat message saying 'looks good' is not a decision. `subjectHashes` binds the decision to specific content so that any content-changing edit invalidates it (§13.1) rather than carrying a stale approval forward. `waived` is deliberately distinct from `approved`: it records that a check was bypassed, not that it passed.",
+  "$defs": {
+    "ActorRef": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent",
+            "worker",
+            "system"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "backendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "sessionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "ActorRef",
+      "description": "Identity of the party that performed an action (architecture contract §6.4, §19.2). Every mutating action records one. `backendId` and `sessionRef` are traceability metadata; contract §3.4 forbids treating an agent session as authoritative state."
+    }
+  }
+}

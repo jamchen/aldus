@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "run-a",
+  "stageId": "stage-a",
+  "status": "queued",
+  "attempts": []
+}
