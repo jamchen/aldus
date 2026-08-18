@@ -1,17 +1,44 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/aldus-core" },
-    { "path": "./packages/aldus-testkit" },
-    { "path": "./packages/aldus-file-store" },
-    { "path": "./packages/aldus-artifact-registry" },
-    { "path": "./packages/aldus-stage-runner" },
-    { "path": "./packages/aldus-gate-engine" },
-    { "path": "./packages/aldus-tts-ledger" },
-    { "path": "./packages/aldus-release" },
-    { "path": "./packages/aldus-regression" },
-    { "path": "./packages/aldus-services" },
-    { "path": "./packages/aldus-cli" },
-    { "path": "./packages/aldus-mcp" }
+    {
+      "path": "./packages/aldus-core"
+    },
+    {
+      "path": "./packages/aldus-testkit"
+    },
+    {
+      "path": "./packages/aldus-file-store"
+    },
+    {
+      "path": "./packages/aldus-artifact-registry"
+    },
+    {
+      "path": "./packages/aldus-stage-runner"
+    },
+    {
+      "path": "./packages/aldus-gate-engine"
+    },
+    {
+      "path": "./packages/aldus-tts-ledger"
+    },
+    {
+      "path": "./packages/aldus-release"
+    },
+    {
+      "path": "./packages/aldus-regression"
+    },
+    {
+      "path": "./packages/aldus-services"
+    },
+    {
+      "path": "./packages/aldus-cli"
+    },
+    {
+      "path": "./packages/aldus-mcp"
+    },
+    {
+      "path": "./packages/aldus-e2e"
+    }
   ]
 }
