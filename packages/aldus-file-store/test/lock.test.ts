@@ -3,6 +3,7 @@
  */
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 
@@ -232,9 +233,12 @@ describe("withLock", () => {
       await manager.withLock(
         "run-a",
         async () => {
-          // Simulate a stall long enough for a contender to reclaim the lock.
+          // Simulate a stall long enough for a contender to reclaim the lock. The thief is a
+          // separate manager because it stands for a separate process — the same manager
+          // re-acquiring inside its own scope is the re-entrancy bug, not a theft.
           advance(5_000);
-          const thief = await manager.acquire("run-a", { timeoutMs: 50 });
+          const contender = new FileLockManager(lockDirectory, { retryMs: 1 });
+          const thief = await contender.acquire("run-a", { timeoutMs: 50 });
           await thief.release();
           return "written without exclusivity";
         },
@@ -244,5 +248,74 @@ describe("withLock", () => {
     } catch (error) {
       expect((error as AldusError).code).toBe(FileStoreErrorCodes.LOCK_LOST);
     }
+  });
+});
+
+describe("re-entrancy (ADR-0005)", () => {
+  // The failure this detection exists to prevent, found while building the stage runner:
+  // FileEventStore.append takes the Run lock to assign a sequence, so a caller holding that
+  // lock which then emits an event waits on itself. Without detection it spins to the
+  // acquisition deadline and reports "held by another session", which sends the reader looking
+  // for a concurrent process that does not exist.
+  it("refuses immediately instead of deadlocking on itself", async () => {
+    const manager = new FileLockManager(lockDirectory, { retryMs: 1 });
+    const started = Date.now();
+
+    await expect(
+      manager.withLock("run:run-a", async () => {
+        await manager.withLock("run:run-a", async () => "unreachable");
+      }),
+    ).rejects.toMatchObject({ code: FileStoreErrorCodes.LOCK_REENTRANT });
+
+    // The point is that it fails fast. A timeout-based failure would take seconds.
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("marks the refusal non-retryable, because retrying cannot help", async () => {
+    const manager = new FileLockManager(lockDirectory, { retryMs: 1 });
+    let captured: unknown;
+    await manager
+      .withLock("run:run-a", async () => manager.withLock("run:run-a", async () => undefined))
+      .catch((error: unknown) => {
+        captured = error;
+      });
+    expect((captured as AldusError).retryable).toBe(false);
+  });
+
+  it("still allows a different resource inside a held lock", async () => {
+    const manager = new FileLockManager(lockDirectory, { retryMs: 1 });
+    const result = await manager.withLock("run:run-a", async () =>
+      manager.withLock("stage-state:run-a", async () => "nested ok"),
+    );
+    expect(result).toBe("nested ok");
+  });
+
+  it("releases the scope, so the same lock can be taken again afterwards", async () => {
+    const manager = new FileLockManager(lockDirectory, { retryMs: 1 });
+    await manager.withLock("run:run-a", async () => undefined);
+    await expect(manager.withLock("run:run-a", async () => "second")).resolves.toBe("second");
+  });
+
+  // The case a naive "this manager already holds it" check would have broken: two independent
+  // tasks contending for one resource is legitimate concurrency, and one must wait rather than
+  // be refused.
+  it("does not refuse a sibling task waiting for the same lock", async () => {
+    const manager = new FileLockManager(lockDirectory, { retryMs: 1 });
+    const order: string[] = [];
+
+    const first = manager.withLock("run:run-a", async () => {
+      order.push("first-in");
+      await delay(30);
+      order.push("first-out");
+    });
+    const second = (async () => {
+      await delay(5);
+      return manager.withLock("run:run-a", async () => {
+        order.push("second-in");
+      });
+    })();
+
+    await Promise.all([first, second]);
+    expect(order).toEqual(["first-in", "first-out", "second-in"]);
   });
 });

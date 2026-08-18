@@ -39,6 +39,15 @@ export const FileStoreErrorCodes = {
   LOCK_TIMEOUT: "ALDUS_LOCK_TIMEOUT",
   /** A lock was released or renewed by something that no longer holds it. */
   LOCK_LOST: "ALDUS_LOCK_LOST",
+  /**
+   * A lock was re-acquired inside a scope that already holds it.
+   *
+   * File locks are not re-entrant, so this can never succeed: the acquirer is waiting on itself
+   * and would spin until the acquisition deadline. Distinct from {@link LOCK_TIMEOUT}, which
+   * means another session genuinely holds the lock — this one means the caller's own design is
+   * wrong, and no amount of retrying will fix it.
+   */
+  LOCK_REENTRANT: "ALDUS_LOCK_REENTRANT",
   /** A write was attempted against a record whose identity does not match its location. */
   RECORD_IDENTITY_MISMATCH: "ALDUS_RECORD_IDENTITY_MISMATCH",
 } as const;
