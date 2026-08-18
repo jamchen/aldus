@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.1:ReleaseReceipt",
+  "$id": "urn:aldus:schema:1.2:ReleaseReceipt",
   "type": "object",
   "properties": {
     "schemaVersion": {

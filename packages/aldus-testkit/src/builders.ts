@@ -30,6 +30,7 @@ import {
   type ActorRef,
   type AldusEvent,
   type ArtifactRef,
+  type KnowledgePackManifest,
   type CostRecord,
   type EpisodeRef,
   type GateDecision,
@@ -412,11 +413,38 @@ export function buildAldusEvent(
   );
 }
 
+/** Build a {@link KnowledgePackManifest} (contract §9.1, §9.3). */
+export function buildKnowledgePackManifest(
+  overrides?: Partial<KnowledgePackManifest>,
+  context?: TestContext,
+): KnowledgePackManifest {
+  void resolveContext(context);
+  return applyOverrides<KnowledgePackManifest>(
+    {
+      schemaVersion: SCHEMA_VERSION,
+      packId: "example-show-editorial",
+      version: "1",
+      authority: "normative",
+      description: "Editorial standards for the example show.",
+      scope: { show: "example-show" },
+      precedence: 100,
+      dependencies: [{ packId: "example-global-style", version: "1" }],
+      provides: ["editorial.structure", "editorial.tone"],
+      includes: ["SOP.md", "writing-style.md"],
+      tests: ["tests/example-show-editorial.test.ts"],
+      negativeKnowledge: ["known-failures.md"],
+      sourceRevision: "revision-a",
+      contentHash: testDigest("pack:example-show-editorial"),
+    },
+    overrides,
+  );
+}
+
 /**
  * Every builder, keyed by the schema name it produces.
  *
- * Exposed so a test can assert a property across all twelve types in a loop rather than twelve
- * near-identical assertions — the form that actually fails when a thirteenth type is added and
+ * Exposed so a test can assert a property across all thirteen types in a loop rather than thirteen
+ * near-identical assertions — the form that actually fails when a fourteenth type is added and
  * forgotten.
  */
 export const builders = {
@@ -432,6 +460,7 @@ export const builders = {
   ActorRef: buildActorRef,
   StructuredError: buildStructuredError,
   AldusEvent: buildAldusEvent,
+  KnowledgePackManifest: buildKnowledgePackManifest,
 } as const satisfies {
   [N in SchemaName]: (overrides?: never, context?: TestContext) => SchemaTypeFor<N>;
 };

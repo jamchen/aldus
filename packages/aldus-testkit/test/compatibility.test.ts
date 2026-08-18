@@ -40,7 +40,10 @@ describe("the frozen corpus", () => {
   // Every fixture is pinned at the version of the release that introduced its type, and is
   // never restamped. The WP-01 corpus staying at 1.0 while SCHEMA_VERSION advances is the whole
   // point: it is what keeps proving ADR-0003's same-major rule instead of merely asserting it.
-  const INTRODUCED_AT: Partial<Record<string, string>> = { AldusEvent: "1.1" };
+  const INTRODUCED_AT: Partial<Record<string, string>> = {
+    AldusEvent: "1.1",
+    KnowledgePackManifest: "1.2",
+  };
   const WP01_BASELINE = "1.0";
 
   it("pins each fixture at the version that introduced its type", () => {
@@ -81,7 +84,7 @@ describe("the frozen corpus", () => {
 describe("schemaVersion placement (ADR-0003)", () => {
   // Asserted against the registry AND the corpus, so the policy and the fixtures cannot drift
   // apart. Checking only one of them would let a fixture silently disagree with the rule.
-  it("declares exactly eight standalone document types", () => {
+  it("declares exactly nine standalone document types", () => {
     expect([...VERSIONED_SCHEMA_NAMES].sort()).toEqual(
       [
         "ArtifactRef",
@@ -92,6 +95,7 @@ describe("schemaVersion placement (ADR-0003)", () => {
         "RunManifest",
         "StageExecution",
         "AldusEvent",
+        "KnowledgePackManifest",
       ].sort(),
     );
   });
@@ -224,8 +228,8 @@ describe("malformed version strings", () => {
 });
 
 describe("registry completeness", () => {
-  it("registers twelve core schemas", () => {
-    expect(listSchemaNames()).toHaveLength(12);
+  it("registers thirteen core schemas", () => {
+    expect(listSchemaNames()).toHaveLength(13);
   });
 
   it("has a fixture for every registered schema", () => {
