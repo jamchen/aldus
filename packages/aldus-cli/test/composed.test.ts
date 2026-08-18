@@ -23,11 +23,15 @@ import {
   aPlan,
   aScript,
   DESTINATION_A,
+  gateDefinition,
   invoke,
   makeTempWorkspace,
+  passthroughStage,
   RecordingSynthesisAdapter,
+  registryOf,
   writeDocument,
   type CliOptions,
+  type Invocation,
   type TempWorkspace,
 } from "./helpers.js";
 
@@ -501,5 +505,222 @@ describe("workspace state", () => {
     await invoke(base, "artifacts", "cleanup-plan", "--run", runId);
     const episode = await readFile(join(temp.root, ".aldus", "episode.json"), "utf8");
     expect(episode).toContain("example-show");
+  });
+});
+
+describe("workflow graph from the config module (#46, contract §11, ADR-0021)", () => {
+  /**
+   * A config module exporting only a workflow graph, written as plain JavaScript.
+   *
+   * Nothing is imported: a graph is data, and writing one from scratch proves the config field
+   * is a genuine contract rather than a way to hand Aldus back a value it constructed itself.
+   */
+  async function writeWorkflowConfig(name: string, body: string): Promise<string> {
+    const path = join(temp.root, name);
+    await writeFile(path, body, "utf8");
+    return path;
+  }
+
+  /** A Run with two stages and one unsatisfied blocking gate. */
+  async function seedGated(): Promise<{ runId: string; options: CliOptions }> {
+    const options: CliOptions = {
+      ...base,
+      stages: registryOf(passthroughStage("stage-a"), passthroughStage("stage-b")),
+      gates: [gateDefinition("gate-a")],
+      // No subjects supplied, so `gate-a` reads as pending rather than satisfied (§13.2).
+      subjects: {},
+    };
+    const { runId } = await seed(options);
+    return { runId, options };
+  }
+
+  /** Stage ids the plan currently offers as next actions. */
+  function offeredStages(result: Invocation): string[] {
+    const parsed = result.json() as {
+      data: { focused?: { plan: { next: { stageId?: string }[] } } };
+    };
+    return (parsed.data.focused?.plan.next ?? [])
+      .map((action) => action.stageId)
+      .filter((id): id is string => id !== undefined);
+  }
+
+  it("reaches the context and changes what status offers", async () => {
+    // The end-to-end point of #46: everything ADR-0021 enables was available programmatically
+    // and unreachable from the binary.
+    const { runId, options } = await seedGated();
+
+    const withoutGraph = await invoke(options, "status", "--run", runId, "--json");
+    expect(withoutGraph.code).toBe(ExitCodes.success);
+    // Conservative fallback: nothing is declared, so an unsatisfied gate blocks every stage.
+    expect(offeredStages(withoutGraph)).toEqual([]);
+
+    const configPath = await writeWorkflowConfig(
+      "workflow.config.mjs",
+      [
+        "export default {",
+        "  workflow: {",
+        '    workflowId: "workflow-a",',
+        "    stages: [",
+        '      { stageId: "stage-a", requiredGates: ["gate-a"] },',
+        '      { stageId: "stage-b", requiredGates: [] },',
+        "    ],",
+        "  },",
+        "};",
+      ].join("\n"),
+    );
+
+    const withGraph = await invoke(
+      options,
+      "status",
+      "--run",
+      runId,
+      "--config",
+      configPath,
+      "--json",
+    );
+
+    expect(withGraph.code).toBe(ExitCodes.success);
+    // stage-b declares it needs no gate, so the pending gate no longer suppresses it. stage-a
+    // still requires gate-a and stays blocked.
+    expect(offeredStages(withGraph)).toContain("stage-b");
+    expect(offeredStages(withGraph)).not.toContain("stage-a");
+  });
+
+  it("leaves behaviour unchanged when a config supplies no graph", async () => {
+    const { runId, options } = await seedGated();
+    const configPath = await writeWorkflowConfig(
+      "empty.config.mjs",
+      "export default { gates: [] };\n",
+    );
+
+    const withConfig = await invoke(
+      options,
+      "status",
+      "--run",
+      runId,
+      "--config",
+      configPath,
+      "--json",
+    );
+    const withoutConfig = await invoke(options, "status", "--run", runId, "--json");
+
+    expect(withConfig.code).toBe(withoutConfig.code);
+    expect(offeredStages(withConfig)).toEqual(offeredStages(withoutConfig));
+  });
+
+  it("refuses a config key it does not recognise, naming the key", async () => {
+    // The expensive half of #46: `workflow` used to load cleanly and be dropped, so the symptom
+    // appeared as a wrong next action rather than as a wiring error.
+    await seed();
+    const configPath = await writeWorkflowConfig(
+      "typo.config.mjs",
+      "export default { wrokflow: { stages: [] } };\n",
+    );
+
+    const result = await invoke(base, "status", "--config", configPath);
+
+    expect(result.code).toBe(ExitCodes.error);
+    expect(result.stderr).toContain("ALDUS_CONFIG_UNKNOWN_KEY");
+    expect(result.stderr).toContain("wrokflow");
+    // And it says what is accepted, so the fix does not need the source.
+    expect(result.stderr).toContain("workflow");
+  });
+
+  it("names the offending stage when the graph is malformed", async () => {
+    await seed();
+    const configPath = await writeWorkflowConfig(
+      "malformed.config.mjs",
+      [
+        "export default {",
+        "  workflow: {",
+        "    stages: [",
+        '      { stageId: "stage-a" },',
+        '      { stageId: "stage-b", requiredGates: "gate-a" },',
+        "    ],",
+        "  },",
+        "};",
+      ].join("\n"),
+    );
+
+    const result = await invoke(base, "status", "--config", configPath);
+
+    expect(result.code).toBe(ExitCodes.error);
+    expect(result.stderr).toContain("ALDUS_CONFIG_INVALID");
+    expect(result.stderr).toContain("stage-b");
+    expect(result.stderr).toContain("requiredGates");
+  });
+
+  it("refuses a stage declared twice, rather than silently taking the first", async () => {
+    await seed();
+    const configPath = await writeWorkflowConfig(
+      "duplicate.config.mjs",
+      [
+        "export default {",
+        "  workflow: {",
+        "    stages: [",
+        '      { stageId: "stage-a", requiredGates: ["gate-a"] },',
+        '      { stageId: "stage-a", requiredGates: [] },',
+        "    ],",
+        "  },",
+        "};",
+      ].join("\n"),
+    );
+
+    const result = await invoke(base, "status", "--config", configPath);
+
+    expect(result.code).toBe(ExitCodes.error);
+    expect(result.stderr).toContain("stage-a");
+  });
+});
+
+describe("init flag grouping (#46 follow-on)", () => {
+  it("refuses --episode-id without --show, naming what is missing", async () => {
+    // Previously this created the workspace and quietly no Episode: `InitRequest.episode`
+    // requires a showId, so every other Episode flag was dropped.
+    const result = await invoke(base, "init", "--episode-id", "show:example-show:episode:a");
+
+    expect(result.code).toBe(ExitCodes.error);
+    expect(result.stderr).toContain("--episode-id");
+    expect(result.stderr).toContain("--show");
+  });
+
+  it("names every Episode flag supplied without --show", async () => {
+    const result = await invoke(base, "init", "--slug", "episode-a", "--title", "An Episode");
+
+    expect(result.code).toBe(ExitCodes.error);
+    expect(result.stderr).toContain("--slug");
+    expect(result.stderr).toContain("--title");
+  });
+
+  it("still initialises the workspace alone when no Episode flag is given", async () => {
+    const result = await invoke(base, "init");
+
+    expect(result.code).toBe(ExitCodes.success);
+    // Stated, not implied by an absent line — the two outcomes must not look alike.
+    expect(result.stdout).toContain("No Episode created");
+  });
+
+  it("creates the Episode and says so when --show is given", async () => {
+    const result = await invoke(base, "init", "--show", "example-show", "--slug", "episode-a");
+
+    expect(result.code).toBe(ExitCodes.success);
+    expect(result.stdout).toContain("Episode:");
+    expect(result.stdout).not.toContain("No Episode created");
+  });
+
+  it("accepts --episode-id alongside --show", async () => {
+    const result = await invoke(
+      base,
+      "init",
+      "--show",
+      "example-show",
+      "--episode-id",
+      "show:example-show:episode:episode-a",
+      "--json",
+    );
+
+    expect(result.code).toBe(ExitCodes.success);
+    const parsed = result.json() as { data: { episode?: { episodeId: string } } };
+    expect(parsed.data.episode?.episodeId).toBe("show:example-show:episode:episode-a");
   });
 });

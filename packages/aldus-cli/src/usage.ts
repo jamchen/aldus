@@ -55,7 +55,10 @@ Common options
   --help                    This text.
 
 Command options
-  init          --show <id> --slug <slug> | --episode-id <id>
+  init          --show <id>                 required to create an Episode; without it only
+                                            the workspace is created
+                --slug <slug>               with --show: derives the Episode id
+                --episode-id <id>           with --show: sets the Episode id instead
                 --title <text> --legacy-ref <ref> --force
   start         --workflow <id> --workflow-version <version> --code-revision <rev>
   run           --stage-version <version> --input <json> --force

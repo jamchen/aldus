@@ -32,6 +32,7 @@ import {
   type SpendGrantProvider,
   type SubjectsProvider,
   type SynthesisAdapter,
+  type WorkflowGraph,
 } from "@aldus-runtime/services";
 import { StageRegistry } from "@aldus-runtime/stage-runner";
 import type {
@@ -105,6 +106,13 @@ export interface CliEnvironment {
   spendGrants?: SpendGrantProvider;
   /** Where irreplaceable artifact bytes are kept (contract §8.1). */
   archive?: ArtifactArchive;
+  /**
+   * Which gates gate which stages, for this workflow (contract §11, ADR-0021).
+   *
+   * Supplied by the host, or by the operator's config module in the `aldus` binary. Without it
+   * a stage's own `requiredGates` still applies and behaviour is unchanged.
+   */
+  workflow?: WorkflowGraph;
   /** Clock, injectable for deterministic tests. */
   now?: () => Date;
 }
@@ -184,6 +192,9 @@ async function withConfig(environment: CliEnvironment): Promise<CliEnvironment> 
       : {}),
     ...(environment.archive === undefined && config.archive !== undefined
       ? { archive: config.archive }
+      : {}),
+    ...(environment.workflow === undefined && config.workflow !== undefined
+      ? { workflow: config.workflow }
       : {}),
   };
 }
@@ -291,6 +302,7 @@ function servicesFor(options: CommonOptions, environment: CliEnvironment): Aldus
       : {}),
     ...(environment.spendGrants !== undefined ? { spendGrants: environment.spendGrants } : {}),
     ...(environment.archive !== undefined ? { archive: environment.archive } : {}),
+    ...(environment.workflow !== undefined ? { workflow: environment.workflow } : {}),
     ...(environment.now !== undefined ? { now: environment.now } : {}),
   });
   return new AldusServices(context);
@@ -364,6 +376,14 @@ function requireRunId(options: CommonOptions, command: string): string {
 // Commands
 // -------------------------------------------------------------------------------------------
 
+/**
+ * Flags that describe an Episode rather than the workspace.
+ *
+ * Every one of them is meaningless without `--show`, because `InitRequest.episode` requires a
+ * `showId`. Listed here so the refusal can name exactly which of them the operator supplied.
+ */
+const EPISODE_FLAGS = ["episode-id", "slug", "title", "legacy-ref"] as const;
+
 async function runInit(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
   const { options, values } = parseCommon(argv, environment, {
     show: { type: "string" },
@@ -375,6 +395,23 @@ async function runInit(argv: readonly string[], environment: CliEnvironment): Pr
   });
   const services = servicesFor(options, environment);
   const show = typeof values["show"] === "string" ? values["show"] : undefined;
+
+  // `InitRequest.episode` requires a `showId`, so without `--show` every other Episode flag is
+  // dropped. Creating the workspace and quietly no Episode is the failure this refuses: the two
+  // outcomes previously differed only by an absent line of output.
+  if (show === undefined) {
+    const supplied = EPISODE_FLAGS.filter((flag) => typeof values[flag] === "string");
+    if (supplied.length > 0) {
+      throw new AldusError(
+        "ALDUS_INVALID_REQUEST",
+        `${supplied.map((flag) => `--${flag}`).join(", ")} ${
+          supplied.length === 1 ? "describes" : "describe"
+        } an Episode, and an Episode needs --show <id>. ` +
+          "Add --show to create one, or drop these flags to initialise the workspace alone.",
+        { category: "validation", retryable: false, details: { supplied } },
+      );
+    }
+  }
 
   const result = await services.init({
     ...(show !== undefined

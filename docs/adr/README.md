@@ -40,3 +40,4 @@ Rules:
 | [0021](0021-stage-gate-association.md)                  | A workflow declares which gates gate which stages                                          | Accepted | #38               |
 | [0022](0022-release-pipeline-and-trusted-publishing.md) | Release pipeline, the clean-consumer gate, and trusted publishing                          | Accepted | #29 items 4–6     |
 | [0023](0023-bootstrap-release-exception.md)             | The bootstrap release carries `latest`; later unvalidated releases use prerelease versions | Accepted | —                 |
+| [0025](0025-config-strictness.md)                       | An operator's config module rejects keys Aldus does not recognise                          | Accepted | #46 (strictness)  |
