@@ -38,6 +38,20 @@ export interface StageSnapshot {
   retryable?: boolean;
   /** Ordinal of the latest attempt, absent when the stage has never run. */
   attempt?: number;
+  /**
+   * Gates that gate this stage (contract §11, ADR-0021).
+   *
+   * Three distinct values, and the difference matters:
+   *
+   * - **absent** — nothing declared which gates gate this stage. Treated conservatively: any
+   *   blocking gate blocks it, and the reason says the stage is undeclared.
+   * - **`[]`** — declared to require no gate. Runnable whatever else is pending.
+   * - **a list** — blocked only by those gates.
+   *
+   * Resolved by the caller from the workflow graph and the stage definition, so this module stays
+   * a pure function of state (see `workflow.ts`).
+   */
+  requiredGates?: readonly string[];
 }
 
 /** What the policy needs to know about a Run. */
@@ -137,6 +151,11 @@ function isBlocking(gate: GateStatus): boolean {
  *
  * A gate in `blocked_upstream` is never offered: deciding it would record an approval that
  * §13.1's cascade immediately voids, which teaches an operator that approvals do not stick.
+ *
+ * Which gates block which stages comes from {@link StageSnapshot.requiredGates}, resolved by the
+ * caller from the workflow graph and the stage definitions (ADR-0021). When nothing declares an
+ * association, every blocking gate blocks every unrun stage — the behaviour before ADR-0021, kept
+ * so that a workflow declaring nothing is unaffected.
  */
 export function decideActions(input: ActionPolicyInput): ActionPlan {
   const { run, stages, gates } = input;
@@ -152,6 +171,11 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
   }
 
   const gateById = new Map(gates.map((gate) => [gate.gateId, gate]));
+
+  // Whether *any* source declared a stage↔gate association for this workflow. Derived from the
+  // snapshots rather than passed as a flag, so there is one place the answer can come from and no
+  // way for a flag to disagree with the data (ADR-0021).
+  const associationDeclared = stages.some((stage) => stage.requiredGates !== undefined);
 
   // 1. Stale approvals, blocking or not. An advisory gate that drifted is not stopping work, so
   //    it is reported as blocked-with-reason rather than urged — but it is never silently dropped.
@@ -265,16 +289,14 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
     }
     if (stage.status !== "never_run" && stage.status !== "queued") continue;
 
-    const blocker = blockingGateFor(gates);
+    const blocker = blockerFor(stage, gates, gateById, associationDeclared);
     if (blocker !== undefined) {
       blocked.push({
         kind: "run-stage",
         summary: `Run "${stage.stageId}"`,
-        reason:
-          `Gate "${blocker.gateId}" is ${blocker.state} and is blocking (contract §13). ` +
-          "Decide it first.",
+        reason: blocker.reason,
         stageId: stage.stageId,
-        gateId: blocker.gateId,
+        ...(blocker.gateId !== undefined ? { gateId: blocker.gateId } : {}),
       });
       continue;
     }
@@ -308,9 +330,69 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
   return { next, blocked, summary: summarise(run, next, blocked, stages) };
 }
 
-/** The first blocking gate that is not satisfied, if any. */
-function blockingGateFor(gates: readonly GateStatus[]): GateStatus | undefined {
-  return gates.find((gate) => isBlocking(gate));
+/** Why a stage may not run, when something stops it. */
+interface StageBlocker {
+  reason: string;
+  gateId?: string;
+}
+
+/**
+ * Decide whether a gate stops this particular stage (contract §11, §13, ADR-0021).
+ *
+ * Three paths, and each exists for a stated reason:
+ *
+ * 1. **No association declared anywhere** — fall back to the original behaviour: any blocking gate
+ *    blocks every unrun stage. Over-blocking, but safe, and it keeps a workflow that declares
+ *    nothing behaving exactly as it did before ADR-0021.
+ * 2. **This stage is undeclared while others are declared** — the same conservative fallback, but
+ *    the reason says the stage is missing from the graph. Silently treating an unlisted stage as
+ *    unblocked would let an omission quietly unblock work, which is the worse failure; saying so
+ *    out loud makes the omission fixable instead of invisible.
+ * 3. **This stage declares its gates** — blocked only by those, and the offending gate is named.
+ */
+function blockerFor(
+  stage: StageSnapshot,
+  gates: readonly GateStatus[],
+  gateById: ReadonlyMap<string, GateStatus>,
+  associationDeclared: boolean,
+): StageBlocker | undefined {
+  const required = stage.requiredGates;
+
+  if (required === undefined) {
+    const blocker = gates.find((gate) => isBlocking(gate));
+    if (blocker === undefined) return undefined;
+    return {
+      gateId: blocker.gateId,
+      reason: associationDeclared
+        ? `Gate "${blocker.gateId}" is ${blocker.state} and is blocking (contract §13). ` +
+          `Stage "${stage.stageId}" is not declared in the workflow graph, so every blocking ` +
+          "gate is assumed to gate it. Declare its required gates to narrow this."
+        : `Gate "${blocker.gateId}" is ${blocker.state} and is blocking (contract §13). ` +
+          "Decide it first.",
+    };
+  }
+
+  for (const gateId of required) {
+    const gate = gateById.get(gateId);
+    if (gate === undefined) {
+      return {
+        gateId,
+        reason:
+          `Stage "${stage.stageId}" requires gate "${gateId}", which is not registered, so it ` +
+          "cannot be satisfied. Register the gate, or remove it from the stage's requirements.",
+      };
+    }
+    if (isBlocking(gate)) {
+      return {
+        gateId,
+        reason:
+          `Gate "${gateId}" is ${gate.state} and is blocking (contract §13). Stage ` +
+          `"${stage.stageId}" requires it. Decide it first.`,
+      };
+    }
+  }
+
+  return undefined;
 }
 
 /** Join ids as prose, so a reason reads as a sentence rather than a serialised array. */

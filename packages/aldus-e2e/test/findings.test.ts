@@ -1,14 +1,17 @@
 /**
  * Behaviours only composition exposes, pinned deliberately.
  *
- * Everything here is **current behaviour, not endorsed behaviour**. Each case exists because
- * driving the whole stack surfaced something a per-package suite could not, and pinning it means
- * a future change to any of these is a deliberate decision with a failing test attached rather
- * than an accident nobody notices.
+ * Each case exists because driving the whole stack surfaced something a per-package suite could
+ * not, and pinning it means a future change is a deliberate decision with a failing test attached
+ * rather than an accident nobody notices.
  *
- * Where a case describes something I think is wrong, the comment says so plainly. A test that
- * quietly encodes a bug as an expectation is worse than no test, because it makes the bug load
- * bearing.
+ * Two kinds of case live here, and each says which it is:
+ *
+ * - **Fixed** — the first block. Issue #38 was found here, decided in ADR-0021, and these now
+ *   assert the corrected behaviour rather than the defect.
+ * - **Current behaviour, not endorsed** — the rest. Where a case describes something I think is
+ *   wrong, the comment says so plainly, because a test that quietly encodes a bug as an
+ *   expectation is worse than no test: it makes the bug load bearing.
  */
 
 import type { GateDefinition } from "@aldus-runtime/gate-engine";
@@ -26,6 +29,7 @@ import {
   aPlan,
   journeyGates,
   journeySubjects,
+  journeyWorkflow,
   makeStack,
   producingStage,
   type Stack,
@@ -71,25 +75,19 @@ async function runWith(gates: readonly GateDefinition[]): Promise<Stack> {
   return stack;
 }
 
-describe("an unsatisfied gate blocks every unrun stage, related or not", () => {
+describe("only the gates a stage requires block it (§11, ADR-0021)", () => {
   /*
-   * FINDING — worth a decision, and in my view a defect.
+   * WAS A FINDING, NOW FIXED (issue #38, ADR-0021).
    *
-   * `decideActions` picks a blocker with `gates.find((gate) => gate.blocking)` and uses it to
-   * block *every* stage that has never run. There is no association between a gate and the stages
-   * it actually gates, so an unrelated pending gate suppresses unrelated work.
+   * `decideActions` used to pick a blocker with `gates.find((gate) => gate.blocking)` and apply it
+   * to *every* stage that had never run, because nothing in the model said which gates gate which
+   * stages. An unrelated pending release gate therefore suppressed unrelated narration work, and
+   * §24's promise degraded to "here is why you cannot act" from the first moment of a Run.
    *
-   * It does not show up in `@aldus-runtime/services`' own tests because those register only the
-   * gates a scenario needs. It appears here because a realistic workflow declares its gates up
-   * front — which is what an adopter would do, and what §11 describes when it calls a workflow "a
-   * versioned graph of stages and gates".
-   *
-   * The consequence is that §24's promise degrades: from the first moment of a Run, `next` is
-   * empty and an operator is told only why they cannot act. The `blocked` reasons are accurate and
-   * legible, so nothing is *wrong* — it is just much less useful than the design intends.
-   *
-   * Fixing it needs a stage↔gate association the model does not currently have, which is why I
-   * have reported rather than attempted it.
+   * A workflow now declares its stage↔gate graph, and these cases hold the fixed behaviour: the
+   * conservative fallback when nothing is declared, and the narrowed blocking when something is.
+   * Both halves matter — the fix is opt-in, so the fallback is as much part of the contract as the
+   * improvement.
    */
   it("offers the first stage when no gate is declared", async () => {
     await runWith([]);
@@ -98,21 +96,66 @@ describe("an unsatisfied gate blocks every unrun stage, related or not", () => {
     expect(status.data.focused?.plan.next.map((a) => a.stageId)).toContain(NARRATION_STAGE);
   });
 
-  it("offers nothing once an unrelated release gate is declared", async () => {
+  it("still blocks conservatively when gates exist but no graph declares what they gate", async () => {
     await runWith(journeyGates(PLAN));
     const status = await stack.services.status(RUN_ID);
     if (status.outcome !== "ok") return;
 
-    // The stage has nothing to do with the release gates, and is suppressed by them anyway.
+    // No workflow graph and no stage declaring its gates, so *nothing* is declared and every
+    // blocking gate is assumed to gate every stage. Unchanged from before ADR-0021 — an adopter
+    // who declares nothing loses nothing.
     expect(status.data.focused?.plan.next).toEqual([]);
     const blocked = status.data.focused?.plan.blocked.find((e) => e.stageId === NARRATION_STAGE);
-    expect(blocked).toBeDefined();
-    // The reason is at least legible, which is what keeps this a usability defect rather than a
-    // correctness one.
-    expect(blocked?.reason).toMatch(/blocking/i);
+    expect(blocked?.reason).toMatch(/is blocking/i);
+    // The graph hint belongs only where a graph exists and this stage was left out of it.
+    // Suggesting one when the adopter has declared nothing at all would be noise.
+    expect(blocked?.reason).not.toMatch(/not declared in the workflow graph/i);
   });
 
-  it("offers the stage again once every declared gate is satisfied", async () => {
+  it("offers narration despite pending release gates, once the graph says they are unrelated", async () => {
+    // The regression, fixed. Narration requires no gate; the release gates are pending and
+    // blocking; narration is offered anyway because the graph says they do not gate it.
+    stack = await makeStack({
+      gates: journeyGates(PLAN),
+      workflow: journeyWorkflow(),
+      stages: (registry, workingRoot) => [
+        producingStage(NARRATION_STAGE, {
+          workingRoot,
+          relativePath: "narration.txt",
+          contents: "The first line.\n",
+          kind: "ApprovedNarration",
+          mediaType: "text/plain",
+          reconstructability: "source",
+          registry,
+        }),
+      ],
+    });
+    stack.state.subjects = journeySubjects({
+      content: "content-a",
+      render: "render-a",
+      plan: PLAN,
+      grant: aGrant(),
+    });
+    await stack.services.init({ episode: { showId: SHOW_ID, slug: "episode-a" }, actor: OPERATOR });
+    await stack.services.startRun({
+      workflowId: "workflow-a",
+      workflowVersion: "1",
+      runId: RUN_ID,
+      actor: OPERATOR,
+    });
+
+    const status = await stack.services.status(RUN_ID);
+    if (status.outcome !== "ok") return;
+    expect(status.data.focused?.plan.next.map((a) => a.stageId)).toContain(NARRATION_STAGE);
+
+    // The release gates are still reported as blocking what they authorize — narrowing which
+    // stages they gate must not hide that publishing is unavailable.
+    expect(status.data.focused?.plan.blocked.some((entry) => entry.gateId === UPLOAD_GATE)).toBe(
+      true,
+    );
+  });
+
+  it("offers the stage once every declared gate is satisfied, graph or not", async () => {
     await runWith(journeyGates(PLAN));
     for (const gateId of [CONTENT_FREEZE_GATE, PERFORMANCE_FREEZE_GATE, UPLOAD_GATE]) {
       await stack.services.approve({ runId: RUN_ID, gateId, actor: OPERATOR });

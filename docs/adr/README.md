@@ -37,3 +37,4 @@ Rules:
 | [0018](0018-licensing.md)                              | Apache-2.0 for the runtime; adopter content stays privately licensed | Accepted | #29 (license)     |
 | [0019](0019-cli-configuration-and-verbs.md)            | How the CLI receives adapters, and how its verb list grew            | Accepted | —                 |
 | [0020](0020-versioning-and-release-policy.md)          | Lockstep versioning, exact internal pins, and `next` before `latest` | Accepted | #29 (item 3)      |
+| [0021](0021-stage-gate-association.md)                 | A workflow declares which gates gate which stages                    | Accepted | #38               |

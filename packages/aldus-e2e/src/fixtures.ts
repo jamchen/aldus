@@ -17,6 +17,7 @@ import {
   type SubjectsByGate,
 } from "@aldus-runtime/gate-engine";
 import { bestEffortOperation, requiredOperation, type ReleaseBundle } from "@aldus-runtime/release";
+import type { WorkflowGraph } from "@aldus-runtime/services";
 import {
   planSubjectDigests,
   type PerformanceScript,
@@ -106,6 +107,26 @@ export function aGrant(overrides: Partial<SpendGrant> = {}): SpendGrant {
     decisionId: "decision-a",
     maxTotal: { amount: "10.00", currency: "USD" } satisfies Money,
     ...overrides,
+  };
+}
+
+/**
+ * The journey's stage↔gate graph (contract §11, ADR-0021).
+ *
+ * This is what §11 means by "a versioned graph of stages and gates", and declaring it is what
+ * stops an unrelated release gate from suppressing narration work. Narration requires nothing —
+ * it produces the content the content freeze later approves, so gating it on that freeze would be
+ * circular.
+ */
+export function journeyWorkflow(): WorkflowGraph {
+  return {
+    workflowId: "workflow-a",
+    workflowVersion: "1",
+    stages: [
+      { stageId: NARRATION_STAGE, requiredGates: [] },
+      { stageId: REVIEW_STAGE, requiredGates: [] },
+      { stageId: RENDER_STAGE, requiredGates: [CONTENT_FREEZE_GATE] },
+    ],
   };
 }
 

@@ -45,6 +45,7 @@ export {
   aPlan,
   aScript,
   journeyGates,
+  journeyWorkflow,
   journeySubjects,
   type JourneySubjects,
 } from "./fixtures.js";

@@ -24,6 +24,13 @@ export {
 export { AldusContext, type AldusContextOptions, type SubjectsProvider } from "./context.js";
 
 export {
+  resolveRequiredGates,
+  type RequiredGatesResolution,
+  type WorkflowGraph,
+  type WorkflowStageNode,
+} from "./workflow.js";
+
+export {
   FileLexiconStore,
   FilePlanStore,
   FileScriptStore,
