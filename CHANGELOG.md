@@ -26,6 +26,13 @@ workflow whose gates are unsatisfied early by design — a synthesis stage gated
 freeze, a release stage gated on its upload gate — will present as a wall of refusals.** That is
 the fix working, not a regression, but it is worth telling operators before they meet it.
 
+_A modelling error this will surface:_ **if a stage is gated on approval of something it
+produces, that used to work and now deadlocks.** The gate cannot be decided until the artifact
+exists; the artifact does not exist until the stage runs. Previously `status` reported the stage
+blocked and `run` executed it anyway, papering over the mistake. A gate approving a stage's output
+belongs on the stage that _consumes_ it. The first adopter found three of these in their own
+workflows within an hour of looking.
+
 _What has not changed:_ a stage that declares nothing keeps running as it did. Enforcement
 applies only to gates a stage actually declares. `status` output is byte-identical apart from a
 new `enforcement` field, so anything parsing it keeps working.

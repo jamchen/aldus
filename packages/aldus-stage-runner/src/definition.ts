@@ -304,11 +304,24 @@ export interface StageDefinition<I = unknown, O = unknown> {
    * Gates that must be satisfied before this stage should be offered (contract §11 "stop at
    * required gates", §13).
    *
-   * **Declarative, not enforcement.** The runner cannot evaluate a gate — gate state belongs to
-   * `@aldus-runtime/gate-engine`, which this package deliberately does not depend on — so this
-   * field does not stop `run()`. It tells the next-action policy which gates actually gate this
-   * stage, so that an unrelated pending gate no longer suppresses unrelated work (ADR-0021).
-   * Enforcement of what a gate authorizes stays with the gate engine, where §13 puts it.
+   * **Declarative here; enforced one layer up.** The runner cannot evaluate a gate — gate state
+   * belongs to `@aldus-runtime/gate-engine`, which this package deliberately does not depend on —
+   * so this field does not stop `run()` *within this package*. It tells the next-action policy
+   * which gates actually gate this stage, so an unrelated pending gate no longer suppresses
+   * unrelated work (ADR-0021).
+   *
+   * `@aldus-runtime/services` **does** refuse a stage whose declared gate is unsatisfied
+   * (ADR-0024), because it holds both the gate engine and the subjects provider and so is the
+   * layer where §11's "stop at required gates" can actually be honoured. Read in isolation this
+   * field looks advisory; through the services it is not.
+   *
+   * **Do not gate a stage on a gate that binds that stage's own output.** The gate cannot be
+   * decided until the artifact exists, the artifact does not exist until the stage runs, and the
+   * stage will not run until the gate is decided — a deadlock with no action that clears it. It
+   * is not detectable here: what a gate binds is adopter process supplied through a
+   * `SubjectsProvider` (§4.2), so nothing relates a subject to the stage that produces it. A gate
+   * approving a stage's output belongs on the stage that **consumes** that output. The first
+   * adopter had three of these, harmless until gate enforcement landed and made them fatal.
    *
    * Absent means "not declared", which is not the same as "requires nothing": see ADR-0021 for
    * why an undeclared stage falls back to the conservative reading rather than being treated as
