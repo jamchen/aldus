@@ -24,8 +24,10 @@ import { AldusError, CoreErrorCodes } from "./errors.js";
  * - `1.1` — adds `AldusEvent` (§6.4). Additive: no existing record's shape changed, so every
  *   `1.0` record stays readable, which is what the same-major rule promises (ADR-0004).
  * - `1.2` — adds `KnowledgePackManifest` (§9.1). Additive for the same reason (ADR-0006).
+ * - `1.3` — adds `RunManifest.goalStages` and `RunManifest.cancellation` (§6.2, §19.1).
+ *   Additive: both are optional, so every `1.2` record stays readable and reads as `forward`.
  */
-export const SCHEMA_VERSION = "1.2";
+export const SCHEMA_VERSION = "1.3";
 
 /** Parsed form of a `MAJOR.MINOR` schema version. */
 export interface SchemaVersion {

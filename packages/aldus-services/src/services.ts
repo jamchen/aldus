@@ -17,6 +17,7 @@ import {
   SCHEMA_VERSION,
   formatEpisodeId,
   isCanonicalId,
+  newEventId,
   newRunId,
   validate,
 } from "@aldus-runtime/core";
@@ -76,6 +77,7 @@ import type {
   TakeReport,
 } from "./reports.js";
 import { ok, refused, unsuccessful, type ServiceResult } from "./results.js";
+import { deriveRunState, type RunState } from "./runstate.js";
 
 /** What `init` needs. */
 export interface InitRequest {
@@ -100,6 +102,22 @@ export interface StartRunRequest {
   /** Supplied for deterministic tests; defaults to a fresh ULID-based id. */
   runId?: string;
   codeRevision?: string;
+  /**
+   * The stages this Run intends to reach (contract §11, ADR-0026).
+   *
+   * Defaults to every stage the workflow graph names. Declare it when this Run will deliberately
+   * stop short — a conditional stage that this edition skips, or a run that never publishes —
+   * because a graph says what a workflow *can* do and cannot say what one Run set out to do.
+   */
+  goalStages?: readonly string[];
+  actor?: ActorRef;
+}
+
+/** What `cancelRun` needs (contract §19.1, §19.2). */
+export interface CancelRunRequest {
+  runId: string;
+  /** Why the Run was abandoned. Optional, and worth supplying: §20 asks trace what happened. */
+  reason?: string;
   actor?: ActorRef;
 }
 
@@ -241,6 +259,8 @@ export class AldusServices {
       );
     }
 
+    const goalStages = this.#resolveGoalStages(request.goalStages);
+
     const timestamp = this.#context.now().toISOString();
     const manifest: RunManifest = {
       schemaVersion: SCHEMA_VERSION,
@@ -250,6 +270,7 @@ export class AldusServices {
       workflowVersion: request.workflowVersion,
       status: "created",
       ...(request.codeRevision !== undefined ? { codeRevision: request.codeRevision } : {}),
+      ...(goalStages !== undefined ? { goalStages: [...goalStages] } : {}),
       knowledgePacks: [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -265,6 +286,101 @@ export class AldusServices {
 
     await this.#context.workspace.runs.create(validated.value);
     return ok({ run: validated.value });
+  }
+
+  /**
+   * Abandon a Run (contract §19.1, §19.2).
+   *
+   * The one Run state that cannot be derived. §5.1 makes long pauses ordinary, so silence in an
+   * append-only log says nothing about intent — a Run someone gave up on and one they are still
+   * thinking about look identical. Abandonment is a decision, so it is recorded as one, with the
+   * actor who made it.
+   *
+   * Distinct from `RunStageOptions.signal`, which aborts an in-flight attempt: that stops the
+   * work, this retires the Run.
+   */
+  async cancelRun(request: CancelRunRequest): Promise<ServiceResult<RunReport>> {
+    const actor = requireActor(request.actor ?? this.#context.actor, "cancel");
+    const manifest = await this.#requireRun(request.runId);
+
+    if (manifest.cancellation !== undefined) {
+      return refused({
+        reason: "run_already_cancelled",
+        explanation:
+          `Run "${request.runId}" was already cancelled at ${manifest.cancellation.cancelledAt}. ` +
+          "Cancelling again would overwrite the record of who abandoned it and when, which §20's " +
+          "production trace depends on.",
+        details: { runId: request.runId, cancelledAt: manifest.cancellation.cancelledAt },
+      });
+    }
+
+    const at = this.#context.now().toISOString();
+    await this.#context.workspace.runs.update(request.runId, (current) => ({
+      ...current,
+      cancellation: {
+        cancelledAt: at,
+        cancelledBy: actor,
+        ...(request.reason !== undefined ? { reason: request.reason } : {}),
+      },
+      updatedAt: at,
+    }));
+
+    // Sequential, never nested: `runs.update` and `events.append` each take the Run lock, and
+    // ADR-0005's guard refuses a re-entrant acquisition rather than deadlocking on it.
+    await this.#context.workspace.events.append(request.runId, {
+      schemaVersion: SCHEMA_VERSION,
+      eventId: newEventId(),
+      occurredAt: at,
+      episodeId: manifest.episode.episodeId,
+      runId: request.runId,
+      action: "run.cancelled",
+      actor,
+      previousState: "running",
+      resultingState: "cancelled",
+      inputRefs: [],
+      outputRefs: [],
+      ...(request.reason !== undefined ? { details: { reason: request.reason } } : {}),
+    });
+
+    return ok(await this.#runReport(request.runId));
+  }
+
+  /**
+   * Settle what a Run is trying to reach, refusing a goal the graph does not contain.
+   *
+   * Validated only when a graph is present: without one there is nothing to check against, and
+   * refusing a goal we cannot verify would block the very adopters who have not adopted graphs.
+   *
+   * A typo is refused here rather than discovered later, because the alternative is a Run that
+   * silently never completes — the same shape as a config key that loads and is dropped, where
+   * the symptom appears nowhere near the cause.
+   */
+  #resolveGoalStages(requested: readonly string[] | undefined): readonly string[] | undefined {
+    const graph = this.#context.workflow;
+
+    if (requested === undefined) {
+      if (graph === undefined) return undefined;
+      return graph.stages.map((node) => node.stageId);
+    }
+
+    if (graph !== undefined) {
+      const known = new Set(graph.stages.map((node) => node.stageId));
+      const unknown = requested.filter((stageId) => !known.has(stageId));
+      if (unknown.length > 0) {
+        throw serviceError(
+          ServiceErrorCodes.INVALID_REQUEST,
+          `The workflow graph contains no stage named ${unknown.map((id) => `"${id}"`).join(", ")}. ` +
+            "A goal the graph does not contain can never be reached, so the Run would never " +
+            "complete and nothing would say why.",
+          {
+            category: "validation",
+            details: { unknownGoalStages: unknown, knownStages: [...known] },
+          },
+        );
+      }
+    }
+
+    return requested;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -283,9 +399,14 @@ export class AldusServices {
     const runIds = await this.#context.workspace.runs.list();
     const summaries: RunSummary[] = [];
 
+    // Derived per Run rather than read off the manifest. Costs one stage-state read each, which
+    // is what makes a list of Runs answer "which of these is finished" at all (ADR-0026).
+    const runner = this.#context.runnerFor(this.#actorOrSystem());
     for (const id of runIds) {
       const manifest = await this.#context.workspace.runs.get(id);
-      if (manifest !== undefined) summaries.push(toSummary(manifest));
+      if (manifest === undefined) continue;
+      const state = await this.#runState(id, manifest, runner);
+      summaries.push(toSummary(manifest, state));
     }
 
     const focusId = runId ?? (summaries.length === 1 ? summaries[0]?.runId : undefined);
@@ -922,6 +1043,20 @@ export class AldusServices {
     }
   }
 
+  /** The actor to attribute reads to, when none was configured. */
+  #actorOrSystem(): ActorRef {
+    return this.#context.actor ?? { kind: "system", id: "aldus-services" };
+  }
+
+  /** Derive one Run's state from its stage executions (ADR-0026). */
+  async #runState(runId: string, manifest: RunManifest, runner: StageRunner): Promise<RunState> {
+    const state = await runner.stageState(runId);
+    const stages = this.#stageReports(state.stages).map((report) =>
+      toSnapshot(report, this.#context.requiredGatesFor(report.stageId)),
+    );
+    return deriveRunState(manifest, stages, this.#context.workflow);
+  }
+
   /** Load a Run or fail with a clear cause. */
   async #requireRun(runId: string): Promise<RunManifest> {
     const manifest = await this.#context.workspace.runs.get(runId);
@@ -958,7 +1093,12 @@ export class AldusServices {
     const state = await runner.stageState(runId);
     const stages = this.#stageReports(state.stages);
     return {
-      run: { runId: manifest.runId, status: manifest.status },
+      // The derived status, not the stored one. `decideActions` already knows what to say about
+      // a cancelled or completed Run; before ADR-0026 it simply never received either.
+      run: {
+        runId: manifest.runId,
+        status: deriveRunState(manifest, stages, this.#context.workflow).status,
+      },
       // Required gates are resolved here rather than inside the policy, so `decideActions` stays
       // a pure function of state and the workflow graph stays a caller concern (ADR-0021).
       stages: stages.map((report) =>
@@ -982,6 +1122,7 @@ export class AldusServices {
 
     return {
       run: manifest,
+      state: deriveRunState(manifest, input.stages, this.#context.workflow),
       stages,
       gates: input.gates as GateStatus[],
       costs: summariseCosts(costRecords),
@@ -1060,14 +1201,20 @@ function toSnapshot(
   };
 }
 
-/** Reduce a manifest to a list entry. */
-function toSummary(manifest: RunManifest): RunSummary {
+/**
+ * Reduce a manifest to a list entry, reporting its **derived** state.
+ *
+ * A list is exactly where the stored status misled worst: a directory of Runs all reading
+ * `created` gives an operator no way to tell finished work from untouched work (ADR-0026).
+ */
+function toSummary(manifest: RunManifest, state: RunState): RunSummary {
   return {
     runId: manifest.runId,
-    status: manifest.status,
+    status: state.status,
     workflowId: manifest.workflowId,
     workflowVersion: manifest.workflowVersion,
-    ...(manifest.currentStage !== undefined ? { currentStage: manifest.currentStage } : {}),
+    ...(state.currentStage !== undefined ? { currentStage: state.currentStage } : {}),
+    ...(state.waitingOn.length > 0 ? { waitingOn: state.waitingOn } : {}),
     createdAt: manifest.createdAt,
     updatedAt: manifest.updatedAt,
   };

@@ -73,6 +73,8 @@ export {
   type StageSummaryStatus,
 } from "./nextaction.js";
 
+export { deriveRunState, goalStagesFor, type RunState, type RunStateSource } from "./runstate.js";
+
 export type {
   ArchiveReport,
   ArtifactLineageReport,
@@ -119,5 +121,6 @@ export {
   type GateDecisionRequest,
   type InitRequest,
   type RunStageRequest,
+  type CancelRunRequest,
   type StartRunRequest,
 } from "./services.js";

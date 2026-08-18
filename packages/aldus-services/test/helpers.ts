@@ -26,7 +26,7 @@ import {
   type StageOutcome,
 } from "@aldus-runtime/stage-runner";
 
-import { AldusContext, AldusServices } from "../src/index.js";
+import { AldusContext, AldusServices, type WorkflowGraph } from "../src/index.js";
 
 /** A temporary workspace, removed after the test. */
 export interface TempWorkspace {
@@ -67,6 +67,7 @@ export function makeServices(
     stages?: StageRegistry;
     actor?: ActorRef;
     subjects?: SubjectsByGate;
+    workflow?: WorkflowGraph;
   } = {},
 ): AldusServices {
   const context = new AldusContext({
@@ -74,6 +75,7 @@ export function makeServices(
     gates: GateRegistry.from(options.gates ?? []),
     ...(options.stages !== undefined ? { stages: options.stages } : {}),
     ...(options.actor !== undefined ? { actor: options.actor } : {}),
+    ...(options.workflow !== undefined ? { workflow: options.workflow } : {}),
     subjects: () => Promise.resolve(options.subjects ?? {}),
     now: fixedClock(),
   });

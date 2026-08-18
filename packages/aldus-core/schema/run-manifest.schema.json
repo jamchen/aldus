@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.2:RunManifest",
+  "$id": "urn:aldus:schema:1.3:RunManifest",
   "type": "object",
   "properties": {
     "schemaVersion": {
@@ -53,6 +53,36 @@
         "$ref": "#/$defs/KnowledgePackRef"
       }
     },
+    "goalStages": {
+      "maxItems": 512,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "cancellation": {
+      "type": "object",
+      "properties": {
+        "cancelledAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "cancelledBy": {
+          "$ref": "#/$defs/ActorRef"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 8000
+        }
+      },
+      "required": [
+        "cancelledAt",
+        "cancelledBy"
+      ]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -76,7 +106,7 @@
     "updatedAt"
   ],
   "title": "RunManifest",
-  "description": "One attempt to move an Episode through part or all of a workflow (architecture contract §6.2). The Episode is embedded by value so the manifest stays interpretable in isolation. `knowledgePacks` is a snapshot, not a live reference, so a completed Run remains explicable after its packs are revised (§20). `workflowId` is an open string because workflows belong to adopters, not to Core (§4.2).",
+  "description": "One attempt to move an Episode through part or all of a workflow (architecture contract §6.2). The Episode is embedded by value so the manifest stays interpretable in isolation. `knowledgePacks` is a snapshot, not a live reference, so a completed Run remains explicable after its packs are revised (§20). `workflowId` is an open string because workflows belong to adopters, not to Core (§4.2). `status` and `currentStage` record the Run as created; its live state is derived from stage executions and `cancellation` rather than stored, so the summary cannot drift from the log it summarises (ADR-0026). `goalStages` declares what this Run intended to reach, because a workflow graph says what a workflow can do and not what one Run set out to do.",
   "$defs": {
     "EpisodeRef": {
       "type": "object",
@@ -170,6 +200,46 @@
       ],
       "title": "KnowledgePackRef",
       "description": "A reference to a resolved Knowledge Pack, snapshotted into a Run (architecture contract §9.1, §6.2). Reference only — discovery, manifest parsing, and precedence resolution are out of scope for the core schema. `scope` is an open string map because the dimension set (§9.2, §15.2) is adopter-extensible."
+    },
+    "ActorRef": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent",
+            "worker",
+            "system"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "backendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "sessionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "ActorRef",
+      "description": "Identity of the party that performed an action (architecture contract §6.4, §19.2). Every mutating action records one. `backendId` and `sessionRef` are traceability metadata; contract §3.4 forbids treating an agent session as authoritative state."
     }
   }
 }

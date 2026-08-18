@@ -78,6 +78,17 @@ const SANCTIONED_ADDITIONS: Partial<Record<SchemaName, readonly string[]>> = {
   GateDecision: ["schemaVersion", "decisionId"],
   // ADR-0003 plus §6: ReleaseReceipt is a child of a Run, and lineage queries need the edge.
   ReleaseReceipt: ["schemaVersion", "runId"],
+  // ADR-0026, both added at SCHEMA_VERSION 1.3.
+  //
+  // `goalStages`: §6.2 gives a Run a status but nothing that says what reaching the end would
+  // mean. A workflow graph describes what a workflow *can* do and cannot say what one Run set
+  // out to do — a stage may be conditional on the edition, and a Run may deliberately stop
+  // short of publishing. Completion is therefore declared intent, per Run.
+  //
+  // `cancellation`: §6.2's status enum includes `cancelled` but the contract gives no field
+  // recording who abandoned a Run or when. It is the one state that cannot be derived, because
+  // §5.1 makes long pauses ordinary and silence in an append-only log says nothing about intent.
+  RunManifest: ["goalStages", "cancellation"],
 };
 
 /** Types whose field list the contract states verbatim. */

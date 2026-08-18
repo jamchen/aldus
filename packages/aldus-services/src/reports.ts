@@ -32,6 +32,7 @@ import type {
 } from "@aldus-runtime/tts-ledger";
 
 import type { ActionPlan, StageSnapshot } from "./nextaction.js";
+import type { RunState } from "./runstate.js";
 
 /** One stage's current situation (contract §6.3). */
 export interface StageReport extends StageSnapshot {
@@ -66,7 +67,15 @@ export interface CostSummary {
 
 /** A Run's full situation (contract §24). */
 export interface RunReport {
+  /**
+   * The manifest exactly as stored.
+   *
+   * Its `status` and `currentStage` record the Run as *created* and are never rewritten. Read
+   * {@link RunReport.state} for where the Run is now (ADR-0026).
+   */
   run: RunManifest;
+  /** Where the Run is now, derived from its stages and its cancellation record (ADR-0026). */
+  state: RunState;
   stages: StageReport[];
   gates: GateStatus[];
   costs: CostSummary;
@@ -77,10 +86,14 @@ export interface RunReport {
 /** A Run reduced to what a list needs. */
 export interface RunSummary {
   runId: string;
+  /** The **derived** current status, not the one stored in the manifest (ADR-0026). */
   status: RunManifest["status"];
   workflowId: string;
   workflowVersion: string;
+  /** Derived, like {@link RunSummary.status}. */
   currentStage?: string;
+  /** Gates a `waiting` Run is held at, so a list does not force an operator to open each Run. */
+  waitingOn?: readonly string[];
   createdAt: string;
   updatedAt: string;
 }
