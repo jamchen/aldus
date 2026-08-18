@@ -34,6 +34,11 @@ jobs:
       - name: Build and typecheck
         run: npm run build
 
+      # Separate from the build: the build project's rootDir is src/, so test/ is outside it.
+      # Without this step a `@ts-expect-error` in a test is inert and passes either way.
+      - name: Typecheck tests
+        run: npm run typecheck:test
+
       - name: JSON Schema drift
         run: npm run schema:check
 
