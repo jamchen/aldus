@@ -118,6 +118,19 @@ export interface ReleaseOutcome {
   warnings: string[];
 }
 
+/**
+ * Options for one reconciliation.
+ *
+ * Reconciliation writes receipts, which makes it a mutating action, and §19.2 requires a
+ * mutating action to record actor identity. A repair attributed to no one is a record an
+ * operator cannot question later, so the actor is required rather than defaulted to a system
+ * placeholder.
+ */
+export interface ReconcileOptions {
+  /** Who is reconciling (contract §19.2). */
+  actor: ActorRef;
+}
+
 /** Options for one execution. */
 export interface ExecuteOptions {
   /** Who is releasing (contract §19.2 "mutating actions MUST record actor identity"). */
@@ -199,7 +212,7 @@ export class ReleaseExecutor {
    * recorded as succeeded or failed has an answer, and asking again would turn reconciliation
    * into polling.
    */
-  async reconcile(bundle: ReleaseBundle): Promise<ReconciliationReport> {
+  async reconcile(bundle: ReleaseBundle, options: ReconcileOptions): Promise<ReconciliationReport> {
     assertBundleValid(bundle);
     const latest = latestByKey(await this.#receipts.list(bundle.runId));
     const findings: ReconciliationFinding[] = [];
@@ -244,11 +257,17 @@ export class ReleaseExecutor {
         continue;
       }
 
-      const written = await this.#record(bundle, operation, idempotencyKey, {
-        status: "succeeded",
-        ...(remote.remoteId === undefined ? {} : { remoteId: remote.remoteId }),
-        ...(remote.remoteUrl === undefined ? {} : { remoteUrl: remote.remoteUrl }),
-      });
+      const written = await this.#record(
+        bundle,
+        operation,
+        idempotencyKey,
+        {
+          status: "succeeded",
+          ...(remote.remoteId === undefined ? {} : { remoteId: remote.remoteId }),
+          ...(remote.remoteUrl === undefined ? {} : { remoteUrl: remote.remoteUrl }),
+        },
+        options.actor,
+      );
       repaired.push(written);
       findings.push({
         operationId: operation.operationId,
@@ -274,7 +293,7 @@ export class ReleaseExecutor {
     const written: ReleaseReceipt[] = [];
 
     if (options.reconcile !== false) {
-      const report = await this.reconcile(bundle);
+      const report = await this.reconcile(bundle, { actor: options.actor });
       written.push(...report.repaired);
       for (const finding of report.findings) {
         if (finding.explanation !== undefined && finding.action !== "confirmed_absent") {
@@ -350,10 +369,13 @@ export class ReleaseExecutor {
         // A best-effort operation is recorded as skipped rather than failed. It was never
         // attempted, and a `failed` receipt would claim the destination rejected it.
         written.push(
-          await this.#record(bundle, operation, idempotencyKey, {
-            status: "skipped",
-            message: explanation,
-          }),
+          await this.#record(
+            bundle,
+            operation,
+            idempotencyKey,
+            { status: "skipped", message: explanation },
+            options.actor,
+          ),
         );
         warnings.push(explanation);
         continue;
@@ -361,7 +383,7 @@ export class ReleaseExecutor {
 
       const adapter = this.#adapters.require(operation.destination);
       const outcome = await adapter.execute({ operation, idempotencyKey, runId: bundle.runId });
-      written.push(await this.#record(bundle, operation, idempotencyKey, outcome));
+      written.push(await this.#record(bundle, operation, idempotencyKey, outcome, options.actor));
 
       if (outcome.status === "succeeded") continue;
 
@@ -413,6 +435,7 @@ export class ReleaseExecutor {
     operation: ReleaseOperation,
     idempotencyKey: string,
     outcome: AdapterOutcome | { status: "skipped"; message: string },
+    actor: ActorRef,
   ): Promise<ReleaseReceipt> {
     const at = this.#now().toISOString();
     const receipt: ReleaseReceipt = {
@@ -446,7 +469,7 @@ export class ReleaseExecutor {
     };
 
     await this.#receipts.append(bundle.runId, receipt);
-    await this.#events.emit(this.#event(bundle, operation, receipt, at, outcome));
+    await this.#events.emit(this.#event(bundle, operation, receipt, at, outcome, actor));
     return receipt;
   }
 
@@ -457,8 +480,8 @@ export class ReleaseExecutor {
     receipt: ReleaseReceipt,
     at: string,
     outcome: AdapterOutcome | { status: "skipped"; message: string },
+    actor: ActorRef,
   ): AldusEvent {
-    const actorless: ActorRef = { kind: "system", id: "release-executor" };
     return {
       schemaVersion: SCHEMA_VERSION,
       eventId: this.#nextEventId(),
@@ -466,7 +489,7 @@ export class ReleaseExecutor {
       episodeId: bundle.episodeId,
       runId: bundle.runId,
       action: `release.operation.${receipt.status}`,
-      actor: actorless,
+      actor,
       inputRefs: [],
       outputRefs: [],
       idempotencyKey: receipt.idempotencyKey,

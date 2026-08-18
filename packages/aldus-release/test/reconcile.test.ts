@@ -63,7 +63,7 @@ describe("the failure this package prevents", () => {
     await executor.execute(bundle, { actor: OPERATOR });
     receipts.forget(RUN_ID);
 
-    const report = await executor.reconcile(bundle);
+    const report = await executor.reconcile(bundle, { actor: OPERATOR });
 
     expect(report.repaired).toHaveLength(1);
     expect(report.findings[0]).toMatchObject({
@@ -82,7 +82,7 @@ describe("the failure this package prevents", () => {
 describe("reconciliation", () => {
   it("leaves an operation alone when the destination does not hold it", async () => {
     const { executor } = makeHarness();
-    const report = await executor.reconcile(aMinimalBundle());
+    const report = await executor.reconcile(aMinimalBundle(), { actor: OPERATOR });
 
     expect(report.repaired).toEqual([]);
     expect(report.findings[0]?.action).toBe("confirmed_absent");
@@ -94,7 +94,7 @@ describe("reconciliation", () => {
     await executor.execute(bundle, { actor: OPERATOR });
     const before = a.lookedUp.length;
 
-    const report = await executor.reconcile(bundle);
+    const report = await executor.reconcile(bundle, { actor: OPERATOR });
 
     // Asking again about a settled operation turns reconciliation into polling.
     expect(a.lookedUp).toHaveLength(before);
@@ -103,7 +103,7 @@ describe("reconciliation", () => {
 
   it("reports that a destination cannot be queried rather than assuming", async () => {
     const { executor } = makeHarness({ a: { withoutLookup: true } });
-    const report = await executor.reconcile(aMinimalBundle());
+    const report = await executor.reconcile(aMinimalBundle(), { actor: OPERATOR });
 
     expect(report.findings[0]).toMatchObject({ action: "unavailable" });
     expect(report.findings[0]?.explanation).toContain("cannot be queried");
@@ -152,7 +152,7 @@ describe("reconciliation", () => {
       })) as typeof bundle.required,
     });
 
-    await expect(executor.reconcile(bundle)).rejects.toMatchObject({
+    await expect(executor.reconcile(bundle, { actor: OPERATOR })).rejects.toMatchObject({
       code: ReleaseErrorCodes.ADAPTER_NOT_REGISTERED,
     });
   });

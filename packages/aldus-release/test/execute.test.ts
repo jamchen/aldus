@@ -302,3 +302,39 @@ describe("events (§6.4)", () => {
     expect(events.events[0]?.error).toMatchObject({ message: "rejected" });
   });
 });
+
+describe("actor identity on emitted events (§19.2)", () => {
+  // §19.2: "Mutating actions MUST record actor identity." A release operation is about as
+  // mutating as this system gets, and §20 must be able to answer "who or what performed it".
+  // An event attributed to the executor itself answers that question with the name of the
+  // machinery rather than the name of whoever decided to publish.
+  it("records the caller's actor on every emitted event, not the executor", async () => {
+    const harness = makeHarness();
+    const bundle = aMinimalBundle();
+
+    await harness.executor.execute(bundle, { actor: OPERATOR });
+
+    expect(harness.events.events.length).toBeGreaterThan(0);
+    for (const event of harness.events.events) {
+      expect(event.actor).toEqual(OPERATOR);
+    }
+  });
+
+  it("records the caller's actor on a reconciliation repair too", async () => {
+    // Reconciliation writes receipts, so it is a mutation and carries the same obligation.
+    const harness = makeHarness();
+    const bundle = aMinimalBundle();
+
+    await harness.executor.execute(bundle, { actor: OPERATOR });
+    harness.receipts.forget(RUN_ID);
+    harness.events.events.length = 0;
+
+    await harness.executor.reconcile(bundle, { actor: OPERATOR });
+
+    expect(harness.events.events.length).toBeGreaterThan(0);
+    for (const event of harness.events.events) {
+      expect(event.actor).toEqual(OPERATOR);
+      expect(event.actor.kind).not.toBe("system");
+    }
+  });
+});
