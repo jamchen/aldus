@@ -1,0 +1,38 @@
+{
+  "name": "@aldus/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aldus Production MCP — a capability-checked tool surface over @aldus/services (architecture contract §18.1).",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck:test": "tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@aldus/core": "*",
+    "@aldus/services": "*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@aldus/file-store": "*",
+    "@aldus/gate-engine": "*",
+    "@aldus/stage-runner": "*",
+    "@aldus/testkit": "*",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

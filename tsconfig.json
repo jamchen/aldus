@@ -11,6 +11,7 @@
     { "path": "./packages/aldus-release" },
     { "path": "./packages/aldus-regression" },
     { "path": "./packages/aldus-services" },
-    { "path": "./packages/aldus-cli" }
+    { "path": "./packages/aldus-cli" },
+    { "path": "./packages/aldus-mcp" }
   ]
 }
