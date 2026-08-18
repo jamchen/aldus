@@ -1,7 +1,6 @@
 {
   "name": "@aldus-runtime/testkit",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Aldus Testkit \u2014 deterministic builders, fixtures, and test doubles for Aldus Core contracts.",
   "license": "Apache-2.0",
@@ -35,11 +34,15 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "*"
+    "@aldus-runtime/core": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   }
 }

@@ -1,7 +1,6 @@
 {
   "name": "@aldus-runtime/core",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Aldus Core \u2014 domain types, JSON schemas, validation, IDs, and redaction. Generic runtime contracts only.",
   "license": "Apache-2.0",
@@ -45,5 +44,9 @@
     "ajv-formats": "^3.0.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   }
 }
