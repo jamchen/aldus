@@ -12,6 +12,9 @@
  */
 
 import {
+  formatSchemaVersion,
+  compareSchemaVersions,
+  parseSchemaVersion,
   SCHEMA_VERSION,
   VERSIONED_SCHEMA_NAMES,
   checkSchemaVersion,
@@ -52,6 +55,28 @@ describe("the frozen corpus", () => {
       const expected = INTRODUCED_AT[fixture.entry.schema] ?? WP01_BASELINE;
       expect(declared, `${fixtureId(fixture.entry)} is not pinned`).toBe(expected);
     }
+  });
+
+  // The oldest fixtures being two minor versions behind is not a coincidence to preserve by
+  // luck: it is what lets this corpus prove ADR-0003's same-major rule across more than one
+  // step. Asserted rather than left implicit, so "let's refresh the fixtures" fails here with
+  // the reason attached instead of quietly reducing the suite to a single-version check.
+  it("spans at least two minor versions below the current one", () => {
+    const oldest = versionedFixtures
+      .map((fixture) => (fixture.record as { schemaVersion?: unknown }).schemaVersion)
+      .filter((version): version is string => typeof version === "string")
+      .map(parseSchemaVersion)
+      .reduce((a, b) => (compareSchemaVersions(a, b) <= 0 ? a : b));
+    const current = parseSchemaVersion(SCHEMA_VERSION);
+
+    expect(oldest.major, "a fixture from another major would not be readable at all").toBe(
+      current.major,
+    );
+    expect(
+      current.minor - oldest.minor,
+      `oldest fixture is ${formatSchemaVersion(oldest)}, current is ${SCHEMA_VERSION}; ` +
+        "the corpus no longer exercises more than one minor step",
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("still contains fixtures older than the current build", () => {
