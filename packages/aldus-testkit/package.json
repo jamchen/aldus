@@ -4,7 +4,16 @@
   "private": true,
   "type": "module",
   "description": "Aldus Testkit \u2014 deterministic builders, fixtures, and test doubles for Aldus Core contracts.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamchen/aldus",
+    "directory": "packages/aldus-testkit"
+  },
+  "homepage": "https://github.com/jamchen/aldus/tree/main/packages/aldus-testkit#readme",
+  "bugs": {
+    "url": "https://github.com/jamchen/aldus/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -14,7 +23,8 @@
   },
   "files": [
     "dist",
-    "fixtures"
+    "fixtures",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -b",

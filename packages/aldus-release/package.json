@@ -3,8 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Aldus Release — release bundles, resumable idempotent operations, adapter contracts, and external-state reconciliation.",
-  "license": "UNLICENSED",
+  "description": "Aldus Release \u2014 release bundles, resumable idempotent operations, adapter contracts, and external-state reconciliation.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamchen/aldus",
+    "directory": "packages/aldus-release"
+  },
+  "homepage": "https://github.com/jamchen/aldus/tree/main/packages/aldus-release#readme",
+  "bugs": {
+    "url": "https://github.com/jamchen/aldus/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,7 +21,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -b",

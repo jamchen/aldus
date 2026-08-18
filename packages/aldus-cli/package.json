@@ -3,10 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Aldus CLI — a thin adapter over @aldus-runtime/services (architecture contract §18).",
-  "license": "UNLICENSED",
-  "bin": {
-    "aldus": "./dist/bin.js"
+  "description": "Aldus CLI \u2014 a thin adapter over @aldus-runtime/services (architecture contract \u00a718).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamchen/aldus",
+    "directory": "packages/aldus-cli"
+  },
+  "homepage": "https://github.com/jamchen/aldus/tree/main/packages/aldus-cli#readme",
+  "bugs": {
+    "url": "https://github.com/jamchen/aldus/issues"
   },
   "exports": {
     ".": {
@@ -15,8 +21,12 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
+  "bin": {
+    "aldus": "./dist/bin.js"
+  },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty",
