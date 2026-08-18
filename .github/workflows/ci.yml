@@ -28,6 +28,11 @@ jobs:
       - name: Install
         run: npm ci
 
+      # A workflow GitHub cannot parse fails on every push to every branch, named by its file
+      # path, with no useful error. Cheap to check here; expensive to diagnose from notifications.
+      - name: Workflows
+        run: python3 scripts/check-workflows.py
+
       - name: Format
         run: npm run format:check
 
