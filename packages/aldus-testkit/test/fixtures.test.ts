@@ -10,7 +10,14 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { SCHEMA_VERSION, listSchemaNames, validate, type SchemaName } from "@aldus/core";
+import {
+  SCHEMA_VERSION,
+  checkSchemaVersion,
+  isVersionedSchemaName,
+  listSchemaNames,
+  validate,
+  type SchemaName,
+} from "@aldus/core";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -36,8 +43,23 @@ function filesOnDisk(subdirectory: "valid" | "invalid"): string[] {
 }
 
 describe("manifest integrity", () => {
-  it("is pinned at the current schema version", () => {
-    expect(manifest.schemaVersion).toBe(SCHEMA_VERSION);
+  // Not equality with SCHEMA_VERSION. The corpus is deliberately mixed: a fixture carries the
+  // version of the release that introduced its type, and the WP-01 corpus stays frozen at 1.0
+  // precisely so that it keeps proving ADR-0003's same-major rule as the version advances.
+  it("has a baseline that is still readable by this build", () => {
+    expect(checkSchemaVersion(manifest.baselineSchemaVersion)).not.toBe("incompatible");
+  });
+
+  it("stamps every versioned fixture with a version this build can read", () => {
+    for (const fixture of loadValidFixtures()) {
+      if (!isVersionedSchemaName(fixture.entry.schema)) continue;
+      const declared = (fixture.record as { schemaVersion?: unknown }).schemaVersion;
+      expect(typeof declared, fixtureId(fixture.entry)).toBe("string");
+      expect(
+        checkSchemaVersion(declared as string),
+        `${fixtureId(fixture.entry)} is not readable by SCHEMA_VERSION ${SCHEMA_VERSION}`,
+      ).not.toBe("incompatible");
+    }
   });
 
   // Both directions. A manifest entry without a file fails loudly on load; a file without a

@@ -64,7 +64,7 @@ const attempt = {
 };
 
 describe("registry", () => {
-  it("registers exactly the eleven core domain types", () => {
+  it("registers exactly the twelve core domain types", () => {
     expect(listSchemaNames()).toEqual([
       "EpisodeRef",
       "RunManifest",
@@ -77,8 +77,9 @@ describe("registry", () => {
       "KnowledgePackRef",
       "ActorRef",
       "StructuredError",
+      "AldusEvent",
     ]);
-    expect(listSchemaNames()).toHaveLength(11);
+    expect(listSchemaNames()).toHaveLength(12);
   });
 
   it("marks only standalone documents as versioned (ADR-0003)", () => {

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.1",
+  "eventId": "evt_01JQXK0000000000000000007",
+  "occurredAt": "2026-01-01T00:00:00.000Z",
+  "episodeId": "show:example-show:episode:episode-a",
+  "runId": "run-a",
+  "action": "run.created",
+  "actor": {
+    "kind": "human",
+    "id": "operator-a"
+  },
+  "inputRefs": [],
+  "outputRefs": [],
+  "sequence": -1
+}

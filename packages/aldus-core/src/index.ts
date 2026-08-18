@@ -96,6 +96,7 @@ export {
   isValidId,
   newArtifactId,
   newCostId,
+  newEventId,
   newGateDecisionId,
   newGateId,
   newId,

@@ -42,6 +42,7 @@ export const SCHEMA_FILE_NAMES: Readonly<Record<SchemaName, string>> = {
   KnowledgePackRef: "knowledge-pack-ref.schema.json",
   ActorRef: "actor-ref.schema.json",
   StructuredError: "structured-error.schema.json",
+  AldusEvent: "aldus-event.schema.json",
 };
 
 /**

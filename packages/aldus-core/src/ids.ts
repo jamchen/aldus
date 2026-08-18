@@ -75,6 +75,8 @@ export const ID_PREFIXES = {
   cost: "cost",
   /** `ReleaseReceipt.releaseId` (§17). */
   release: "rel",
+  /** `AldusEvent.eventId` (§6.4). */
+  event: "evt",
 } as const;
 
 /** @see ID_PREFIXES */
@@ -129,6 +131,8 @@ export interface IdFactory {
   newCostId(): string;
   /** Mint a `ReleaseReceipt.releaseId` (§17). */
   newReleaseId(): string;
+  /** Mint an `AldusEvent.eventId` (§6.4). */
+  newEventId(): string;
   /** Mint a bare ULID with no prefix. Exposed for callers that need the raw time-ordered token. */
   newUlid(): string;
 }
@@ -236,6 +240,7 @@ export function createIdFactory(options: IdFactoryOptions = {}): IdFactory {
     newGateDecisionId: () => newId(ID_PREFIXES.gateDecision),
     newCostId: () => newId(ID_PREFIXES.cost),
     newReleaseId: () => newId(ID_PREFIXES.release),
+    newEventId: () => newId(ID_PREFIXES.event),
   };
 }
 
@@ -267,6 +272,8 @@ export const newGateDecisionId = (): string => defaultIdFactory.newGateDecisionI
 export const newCostId = (): string => defaultIdFactory.newCostId();
 /** Mint a `ReleaseReceipt.releaseId` (§17). */
 export const newReleaseId = (): string => defaultIdFactory.newReleaseId();
+/** Mint an `AldusEvent.eventId` (§6.4). */
+export const newEventId = (): string => defaultIdFactory.newEventId();
 
 /** True if `value` is a strictly well-formed 26-character ULID. */
 export function isUlid(value: string): boolean {

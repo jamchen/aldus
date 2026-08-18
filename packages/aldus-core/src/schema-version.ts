@@ -18,8 +18,13 @@ import { AldusError, CoreErrorCodes } from "./errors.js";
  *
  * One version covers the whole Core schema set; there are no per-entity versions (ADR-0003).
  * MINOR is bumped for backward-compatible additions, MAJOR for anything else.
+ *
+ * History:
+ * - `1.0` — the eleven WP-01 domain types.
+ * - `1.1` — adds `AldusEvent` (§6.4). Additive: no existing record's shape changed, so every
+ *   `1.0` record stays readable, which is what the same-major rule promises (ADR-0004).
  */
-export const SCHEMA_VERSION = "1.0";
+export const SCHEMA_VERSION = "1.1";
 
 /** Parsed form of a `MAJOR.MINOR` schema version. */
 export interface SchemaVersion {

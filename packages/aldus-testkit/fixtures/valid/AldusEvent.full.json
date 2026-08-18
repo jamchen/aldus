@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.1",
+  "eventId": "evt_01JQXK0000000000000000002",
+  "occurredAt": "2026-01-01T00:00:00.000Z",
+  "episodeId": "show:example-show:episode:episode-a",
+  "runId": "run-a",
+  "stageId": "stage-a",
+  "attemptId": "att_01JQXK0000000000000000003",
+  "action": "stage.attempt.failed",
+  "actor": {
+    "kind": "agent",
+    "id": "agent-a",
+    "displayName": "Agent A",
+    "backendId": "backend-a",
+    "sessionRef": "session-a"
+  },
+  "previousState": "running",
+  "resultingState": "failed",
+  "inputRefs": ["art_01JQXK0000000000000000004"],
+  "outputRefs": ["art_01JQXK0000000000000000005"],
+  "idempotencyKey": "idempotency-a",
+  "sequence": 7,
+  "error": {
+    "code": "ALDUS_EXAMPLE_FAILURE",
+    "category": "io",
+    "message": "The stage could not read its declared input.",
+    "retryable": true
+  },
+  "details": {
+    "note": "example detail"
+  }
+}
