@@ -20,6 +20,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
 const packagesDir = join(repoRoot, "packages");
 
 const rootLicense = readFileSync(join(repoRoot, "LICENSE"), "utf8");
+const rootNotice = readFileSync(join(repoRoot, "NOTICE"), "utf8");
 
 const packageDirs = readdirSync(packagesDir).filter((name) =>
   statSync(join(packagesDir, name)).isDirectory(),
@@ -59,6 +60,21 @@ describe("root LICENSE", () => {
   });
 });
 
+describe("root NOTICE", () => {
+  // Creating a NOTICE is this project's choice; Apache-2.0 §4(d) governs *preserving* one that
+  // already exists rather than requiring one be made. Having made that choice, the propagation
+  // obligation is now real, which is what the per-package checks below enforce.
+  it("names the copyright holder", () => {
+    expect(rootNotice).toContain("Copyright 2026 Jam Chen");
+  });
+
+  it("does not restate the licence text, only the attribution and its pointer", () => {
+    // A NOTICE that duplicates the licence invites the two drifting apart.
+    expect(rootNotice).not.toContain("TERMS AND CONDITIONS");
+    expect(rootNotice).toContain("LICENSE");
+  });
+});
+
 describe("workspace packages", () => {
   it("finds packages to check", () => {
     // Guards against the whole suite passing vacuously if the layout moves.
@@ -81,6 +97,15 @@ describe("workspace packages", () => {
     it("includes LICENSE in the published files", () => {
       // Without this the copy exists in the repository and still never reaches a consumer.
       expect(manifest.files ?? []).toContain("LICENSE");
+    });
+
+    it("carries a byte-identical copy of the root NOTICE", () => {
+      const packaged = readFileSync(join(packagesDir, dir, "NOTICE"), "utf8");
+      expect(packaged).toBe(rootNotice);
+    });
+
+    it("includes NOTICE in the published files", () => {
+      expect(manifest.files ?? []).toContain("NOTICE");
     });
 
     it("points at the canonical repository, with its own directory", () => {
