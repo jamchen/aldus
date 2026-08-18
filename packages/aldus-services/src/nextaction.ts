@@ -92,6 +92,19 @@ export interface NextAction {
   priority: number;
 }
 
+/**
+ * How firmly a gate blocks a stage (contract §11, ADR-0021, ADR-0024).
+ *
+ * The difference decides whether `runStage` refuses, so it is part of the policy's answer rather
+ * than something a caller infers:
+ *
+ * - **`enforced`** — the stage *declared* this gate, so the runtime knows the gate applies and
+ *   refuses to run the stage until it is satisfied.
+ * - **`advisory`** — nothing declared which gates gate this stage, so the conservative fallback
+ *   assumes every blocking gate might. Worth telling an operator; **not** grounds to refuse.
+ */
+export type BlockEnforcement = "enforced" | "advisory";
+
 /** Something that looks possible but is not, and why. */
 export interface BlockedAction {
   kind: string;
@@ -100,6 +113,15 @@ export interface BlockedAction {
   reason: string;
   gateId?: string;
   stageId?: string;
+  /**
+   * Whether this block actually stops the operation (ADR-0024).
+   *
+   * Absent for blocks that are not about gates. Present on gate-related blocks so an adapter can
+   * distinguish "decide this gate before this stage will run" from "I cannot tell whether this
+   * gate applies — declare the stage's required gates to narrow it". The second is a prompt to
+   * improve the workflow declaration, not a barrier, and the two read identically without it.
+   */
+  enforcement?: BlockEnforcement;
 }
 
 /** The policy's answer. */
@@ -253,6 +275,23 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
   // 3. Failed stages.
   for (const stage of stages) {
     if (stage.status !== "failed") continue;
+
+    // A gate that blocks running a stage blocks retrying it too: a retry re-executes the stage,
+    // so offering one while a required gate is unsatisfied would put `status` and `aldus retry`
+    // back in the disagreement ADR-0024 exists to remove.
+    const gateBlocker = blockerFor(stage, gates, gateById, associationDeclared);
+    if (gateBlocker?.enforcement === "enforced") {
+      blocked.push({
+        kind: "retry-stage",
+        summary: `Retry "${stage.stageId}"`,
+        reason: gateBlocker.reason,
+        stageId: stage.stageId,
+        enforcement: gateBlocker.enforcement,
+        ...(gateBlocker.gateId !== undefined ? { gateId: gateBlocker.gateId } : {}),
+      });
+      continue;
+    }
+
     if (stage.retryable === true) {
       next.push({
         kind: "retry-stage",
@@ -296,8 +335,12 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
         summary: `Run "${stage.stageId}"`,
         reason: blocker.reason,
         stageId: stage.stageId,
+        enforcement: blocker.enforcement,
         ...(blocker.gateId !== undefined ? { gateId: blocker.gateId } : {}),
       });
+      // Reported and not offered, enforced or not — this is exactly what `status` printed before
+      // ADR-0024, and that wording is unchanged. What changed is only whether `runStage` refuses:
+      // an advisory block explains a risk, an enforced one stops the work.
       continue;
     }
 
@@ -331,9 +374,58 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
 }
 
 /** Why a stage may not run, when something stops it. */
-interface StageBlocker {
+export interface StageBlocker {
+  /** Operator-facing explanation, identical to the one `status` prints for this state. */
   reason: string;
+  /** The gate responsible, when one is identifiable. */
   gateId?: string;
+  /** Whether this actually stops the stage running, or is only worth saying. @see BlockEnforcement */
+  enforcement: BlockEnforcement;
+}
+
+/**
+ * Whether a gate **stops** this stage from running (contract §11, §13, ADR-0024).
+ *
+ * Returns a blocker only when the stage declared the gate, so this is what `AldusServices.runStage`
+ * refuses on. The conservative fallback for an undeclared stage is deliberately *not* enforceable:
+ * a hint can afford to over-warn, an enforcement rule cannot. Every gate is unsatisfied when a Run
+ * starts, so refusing on the fallback would refuse every stage in a workflow that declared nothing
+ * — and the subjects those gates bind are produced by the very stages being refused. That is a
+ * deadlock, not a refusal an operator can act on.
+ *
+ * Enforcement and display share one implementation, and the enforceable/advisory judgement lives
+ * here rather than at a call site: computing blocked-ness a second way is exactly how `status` and
+ * `run` came to disagree in the first place.
+ *
+ * A stage absent from `input.stages` is evaluated conservatively rather than waved through: an
+ * unknown stage is not evidence that nothing gates it (ADR-0021).
+ */
+export function enforcedGateBlockerFor(
+  stageId: string,
+  input: ActionPolicyInput,
+): StageBlocker | undefined {
+  const blocker = gateBlockerFor(stageId, input);
+  return blocker?.enforcement === "enforced" ? blocker : undefined;
+}
+
+/**
+ * Whether any gate is worth reporting against this stage, enforced or not (ADR-0024).
+ *
+ * Callers deciding whether to *act* want {@link enforcedGateBlockerFor}. This one is for display.
+ */
+export function gateBlockerFor(
+  stageId: string,
+  input: ActionPolicyInput,
+): StageBlocker | undefined {
+  const stage = input.stages.find((candidate) => candidate.stageId === stageId) ?? {
+    stageId,
+    status: "never_run" as const,
+  };
+  const gateById = new Map(input.gates.map((gate) => [gate.gateId, gate]));
+  const associationDeclared = input.stages.some(
+    (candidate) => candidate.requiredGates !== undefined,
+  );
+  return blockerFor(stage, input.gates, gateById, associationDeclared);
 }
 
 /**
@@ -361,8 +453,11 @@ function blockerFor(
   if (required === undefined) {
     const blocker = gates.find((gate) => isBlocking(gate));
     if (blocker === undefined) return undefined;
+    // Advisory, never enforced. Nothing declared that this gate gates this stage, so the runtime
+    // is guessing — and a guess must not refuse work (ADR-0024).
     return {
       gateId: blocker.gateId,
+      enforcement: "advisory",
       reason: associationDeclared
         ? `Gate "${blocker.gateId}" is ${blocker.state} and is blocking (contract §13). ` +
           `Stage "${stage.stageId}" is not declared in the workflow graph, so every blocking ` +
@@ -375,8 +470,11 @@ function blockerFor(
   for (const gateId of required) {
     const gate = gateById.get(gateId);
     if (gate === undefined) {
+      // Declared, so enforced: the stage named a gate that does not exist. Running it anyway
+      // would proceed past a guard the adopter believes is protecting it.
       return {
         gateId,
+        enforcement: "enforced",
         reason:
           `Stage "${stage.stageId}" requires gate "${gateId}", which is not registered, so it ` +
           "cannot be satisfied. Register the gate, or remove it from the stage's requirements.",
@@ -385,6 +483,7 @@ function blockerFor(
     if (isBlocking(gate)) {
       return {
         gateId,
+        enforcement: "enforced",
         reason:
           `Gate "${gateId}" is ${gate.state} and is blocking (contract §13). Stage ` +
           `"${stage.stageId}" requires it. Decide it first.`,

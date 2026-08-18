@@ -22,6 +22,7 @@ import {
   NARRATION_STAGE,
   OPERATOR,
   PERFORMANCE_FREEZE_GATE,
+  RENDER_STAGE,
   RUN_ID,
   SHOW_ID,
   UPLOAD_GATE,
@@ -254,5 +255,87 @@ describe("anonymous mutations are refused (§19.2)", () => {
     const status = await stack.services.status();
     // An operator must be able to see where things stand before configuring an identity.
     expect(status.outcome).toBe("ok");
+  });
+});
+
+describe("a declared gate stops the stage from running (§11, issue #45, ADR-0024)", () => {
+  /*
+   * WAS A FINDING, NOW FIXED (issue #45, ADR-0024), reported by the first external adopter.
+   *
+   * `status` reported a stage as blocked and `aldus run` executed it anyway — side effects and
+   * all. §11 requires a stage to "stop at required gates", and recording `waiting_for_gate`
+   * afterwards is not stopping. Only composition shows it: the runner cannot evaluate a gate, and
+   * the gate engine never sees the run request, so the gap lives precisely where the two meet.
+   */
+  it("refuses a stage whose declared gate is unsatisfied, and runs it once approved", async () => {
+    stack = await makeStack({
+      gates: journeyGates(PLAN),
+      workflow: journeyWorkflow(),
+      stages: (registry, workingRoot) => [
+        producingStage(RENDER_STAGE, {
+          workingRoot,
+          relativePath: "render.txt",
+          contents: "rendered\n",
+          kind: "RenderManifest",
+          mediaType: "text/plain",
+          reconstructability: "reproducible",
+          registry,
+        }),
+      ],
+    });
+    stack.state.subjects = journeySubjects({
+      content: "content-a",
+      render: "render-a",
+      plan: PLAN,
+      grant: aGrant(),
+    });
+    await stack.services.init({ episode: { showId: SHOW_ID, slug: "episode-a" }, actor: OPERATOR });
+    await stack.services.startRun({
+      workflowId: "workflow-a",
+      workflowVersion: "1",
+      runId: RUN_ID,
+      actor: OPERATOR,
+    });
+
+    // journeyWorkflow declares RENDER_STAGE as requiring the content freeze, which is pending.
+    const refused = await stack.services.runStage({ runId: RUN_ID, stageId: RENDER_STAGE });
+    expect(refused.outcome).toBe("refused");
+    if (refused.outcome === "refused") {
+      expect(refused.refusal.reason).toBe("stage_gate_unsatisfied");
+      expect(refused.refusal.explanation).toContain(CONTENT_FREEZE_GATE);
+    }
+
+    // Nothing ran, so no artifact was produced — the assertion that matters, because a render
+    // against an unapproved script is exactly the irreversible work this prevents.
+    const before = await stack.services.artifacts(RUN_ID);
+    if (before.outcome === "ok") expect(before.data.artifacts).toHaveLength(0);
+
+    await stack.services.approve({
+      runId: RUN_ID,
+      gateId: CONTENT_FREEZE_GATE,
+      actor: OPERATOR,
+    });
+
+    const allowed = await stack.services.runStage({ runId: RUN_ID, stageId: RENDER_STAGE });
+    expect(allowed.outcome).toBe("ok");
+
+    const after = await stack.services.artifacts(RUN_ID);
+    if (after.outcome === "ok") expect(after.data.artifacts.length).toBeGreaterThan(0);
+  });
+
+  it("leaves an undeclared workflow entirely runnable, so an upgrade cannot deadlock it", async () => {
+    // The conservative fallback is a hint, never enforcement. Every gate is unsatisfied when a Run
+    // starts and the subjects gates bind are produced by stages, so refusing on the fallback would
+    // refuse every stage in a workflow that declared nothing — with no way out (ADR-0024).
+    await runWith(journeyGates(PLAN));
+
+    const status = await stack.services.status(RUN_ID);
+    if (status.outcome === "ok") {
+      const blocked = status.data.focused?.plan.blocked.find((e) => e.stageId === NARRATION_STAGE);
+      expect(blocked?.enforcement).toBe("advisory");
+    }
+
+    const result = await stack.services.runStage({ runId: RUN_ID, stageId: NARRATION_STAGE });
+    expect(result.outcome, "an undeclared workflow must stay runnable").toBe("ok");
   });
 });

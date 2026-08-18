@@ -60,11 +60,15 @@ export { ServiceErrorCodes, serviceError, type ServiceErrorCode } from "./errors
 
 export {
   decideActions,
+  enforcedGateBlockerFor,
+  gateBlockerFor,
   type ActionPlan,
   type ActionPolicyInput,
   type BlockedAction,
+  type BlockEnforcement,
   type NextAction,
   type RunSnapshot,
+  type StageBlocker,
   type StageSnapshot,
   type StageSummaryStatus,
 } from "./nextaction.js";
