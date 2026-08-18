@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.2",
+  "packId": "example-show-editorial",
+  "version": "2",
+  "authority": "normative",
+  "description": "Editorial standards for the example show.",
+  "scope": {
+    "show": "example-show",
+    "host": "example-host"
+  },
+  "precedence": 200,
+  "dependencies": [
+    {
+      "packId": "example-global-style",
+      "version": "1"
+    }
+  ],
+  "provides": ["editorial.structure", "editorial.tone"],
+  "includes": ["SOP.md", "writing-style.md"],
+  "tests": ["tests/example-show-editorial.test.ts"],
+  "negativeKnowledge": ["known-failures.md", "evaluator-blind-spots.md"],
+  "sourceRevision": "revision-a",
+  "contentHash": "3f2a1c9e8b7d6540f1e2d3c4b5a697887766554433221100ffeeddccbbaa9988"
+}

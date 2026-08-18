@@ -144,6 +144,18 @@
       "case": "full",
       "file": "valid/AldusEvent.full.json",
       "description": "Every optional field populated, including a state transition, an idempotency key, an explicit sequence ordinal, and a redacted error."
+    },
+    {
+      "schema": "KnowledgePackManifest",
+      "case": "minimal",
+      "file": "valid/KnowledgePackManifest.minimal.json",
+      "description": "Only identity, version, and authority — the fields §9.1 requires unconditionally."
+    },
+    {
+      "schema": "KnowledgePackManifest",
+      "case": "full",
+      "file": "valid/KnowledgePackManifest.full.json",
+      "description": "Every optional field populated, including dependencies, declared claims, indexed resources, and §9.3 negative knowledge."
     }
   ],
   "invalid": [
@@ -369,6 +381,38 @@
       "file": "invalid/AldusEvent.timestamp-without-offset.json",
       "description": "`occurredAt` carries no UTC offset, so the instant is ambiguous across machines.",
       "expectedPath": "occurredAt",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "KnowledgePackManifest",
+      "case": "unknown-authority",
+      "file": "invalid/KnowledgePackManifest.unknown-authority.json",
+      "description": "`authority` outside the closed PACK_AUTHORITIES enum of §9.1.",
+      "expectedPath": "authority",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "KnowledgePackManifest",
+      "case": "numeric-version",
+      "file": "invalid/KnowledgePackManifest.numeric-version.json",
+      "description": "`version` is a number, as §9.1's own YAML example writes it. The schema requires a string so a manifest and the KnowledgePackRef snapshotted from it agree; parsePackManifest coerces this case before validation, but the raw document is invalid.",
+      "expectedPath": "version",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "KnowledgePackManifest",
+      "case": "missing-pack-id",
+      "file": "invalid/KnowledgePackManifest.missing-pack-id.json",
+      "description": "`packId` absent, so the pack has no identity to resolve or snapshot against.",
+      "expectedPath": "packId",
+      "jsonSchemaDetectable": true
+    },
+    {
+      "schema": "KnowledgePackManifest",
+      "case": "non-integer-precedence",
+      "file": "invalid/KnowledgePackManifest.non-integer-precedence.json",
+      "description": "`precedence` is fractional; §9.2 precedence is a discrete rung, not a continuum.",
+      "expectedPath": "precedence",
       "jsonSchemaDetectable": true
     }
   ],

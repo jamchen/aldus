@@ -39,12 +39,14 @@ export {
 
 export {
   buildActorRef,
+  buildAldusEvent,
   buildArtifactRef,
   buildCostRecord,
   buildEpisodeRef,
   buildFor,
   buildGateDecision,
   buildInvalid,
+  buildKnowledgePackManifest,
   buildKnowledgePackRef,
   buildMoney,
   buildReleaseReceipt,

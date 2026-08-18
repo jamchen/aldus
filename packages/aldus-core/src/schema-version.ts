@@ -23,8 +23,9 @@ import { AldusError, CoreErrorCodes } from "./errors.js";
  * - `1.0` — the eleven WP-01 domain types.
  * - `1.1` — adds `AldusEvent` (§6.4). Additive: no existing record's shape changed, so every
  *   `1.0` record stays readable, which is what the same-major rule promises (ADR-0004).
+ * - `1.2` — adds `KnowledgePackManifest` (§9.1). Additive for the same reason (ADR-0006).
  */
-export const SCHEMA_VERSION = "1.1";
+export const SCHEMA_VERSION = "1.2";
 
 /** Parsed form of a `MAJOR.MINOR` schema version. */
 export interface SchemaVersion {

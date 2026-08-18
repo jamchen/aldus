@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aldus:schema:1.2:KnowledgePackManifest",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "packId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "authority": {
+      "type": "string",
+      "enum": [
+        "normative",
+        "advisory",
+        "example",
+        "deprecated"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "scope": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "precedence": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "dependencies": {
+      "maxItems": 128,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/KnowledgePackDependency"
+      }
+    },
+    "provides": {
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "includes": {
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "tests": {
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "negativeKnowledge": {
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "sourceRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "contentHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "packId",
+    "version",
+    "authority"
+  ],
+  "title": "KnowledgePackManifest",
+  "description": "A Knowledge Pack manifest (architecture contract §9.1). Indexes knowledge that stays in its authored form — Markdown, fixtures, scripts, examples — rather than requiring it to be converted, which §1.2 lists as an explicit non-goal. `includes`, `tests`, and `negativeKnowledge` are resource paths Core records and never parses. `scope` is an open string map because §9.2's dimension set is adopter-extensible and §4.2 forbids Core from naming a provider. `provides` declares the claim keys this pack asserts authority over, which is what makes §9.2's conflict detection possible without Core interpreting pack content. `negativeKnowledge` exists because §9.3 makes failed approaches and known blind spots first-class content.",
+  "$defs": {
+    "KnowledgePackDependency": {
+      "type": "object",
+      "properties": {
+        "packId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "packId"
+      ],
+      "title": "KnowledgePackDependency",
+      "description": "A dependency on another Knowledge Pack (architecture contract §9.1). `version` is an open string because §9.1 imposes no version scheme on packs."
+    }
+  }
+}
