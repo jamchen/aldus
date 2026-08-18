@@ -24,7 +24,11 @@ import { isArchived, type ArtifactRecord } from "@aldus-runtime/artifact-registr
 import { initWorkspace } from "@aldus-runtime/file-store";
 import type { GateStatus } from "@aldus-runtime/gate-engine";
 import { operationsOf, type ReleaseBundle, type ReleaseOutcome } from "@aldus-runtime/release";
-import type { StageRunResult, StoredStageExecution } from "@aldus-runtime/stage-runner";
+import type {
+  StageRunResult,
+  StageRunner,
+  StoredStageExecution,
+} from "@aldus-runtime/stage-runner";
 import { segmentsAwaitingAcceptance } from "@aldus-runtime/tts-ledger";
 import type {
   PerformanceScript,
@@ -37,7 +41,13 @@ import { requireActor } from "./actor.js";
 import type { AldusContext } from "./context.js";
 import { summariseCosts } from "./costs.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
-import { decideActions, type StageSnapshot, type StageSummaryStatus } from "./nextaction.js";
+import {
+  decideActions,
+  enforcedGateBlockerFor,
+  type ActionPolicyInput,
+  type StageSnapshot,
+  type StageSummaryStatus,
+} from "./nextaction.js";
 import type {
   ArchiveReport,
   ArtifactLineageReport,
@@ -734,9 +744,34 @@ export class AldusServices {
    */
   async runStage(request: RunStageRequest): Promise<ServiceResult<StageRunReport>> {
     const actor = requireActor(request.actor ?? this.#context.actor, "run");
-    await this.#requireRun(request.runId);
-
+    const manifest = await this.#requireRun(request.runId);
     const runner = this.#context.runnerFor(actor);
+
+    // §11 requires a stage to stop at its required gates, and recording `waiting_for_gate` after
+    // the fact is not stopping. `@aldus-runtime/stage-runner` genuinely cannot check this — it
+    // does not depend on the gate engine, deliberately — but this layer holds the engine, the
+    // subjects provider, and the workflow graph, so the check belongs here (ADR-0015, ADR-0024).
+    //
+    // Only a gate the stage *declared* refuses. ADR-0021's conservative fallback — every blocking
+    // gate blocks an undeclared stage — is right for the next-action display and would be a
+    // deadlock here: every gate is unsatisfied when a Run starts, and the subjects those gates
+    // bind are produced by the very stages that would be refused (ADR-0024).
+    const blocker = enforcedGateBlockerFor(
+      request.stageId,
+      await this.#policyInput(request.runId, manifest, runner),
+    );
+    if (blocker !== undefined) {
+      return refused({
+        reason: "stage_gate_unsatisfied",
+        explanation: blocker.reason,
+        details: {
+          runId: request.runId,
+          stageId: request.stageId,
+          ...(blocker.gateId !== undefined ? { gateId: blocker.gateId } : {}),
+        },
+      });
+    }
+
     const result: StageRunResult = await runner.run(request.runId, request.stageId, request.input, {
       ...(request.stageVersion !== undefined ? { stageVersion: request.stageVersion } : {}),
       ...(request.configuration !== undefined ? { configuration: request.configuration } : {}),
@@ -907,19 +942,22 @@ export class AldusServices {
     return [...statuses.values()];
   }
 
-  /** Assemble the full picture of one Run, including what to do next. */
-  async #runReport(runId: string): Promise<RunReport> {
-    const manifest = await this.#requireRun(runId);
+  /**
+   * The policy's view of a Run.
+   *
+   * Assembled in one place because two callers depend on it agreeing: `status` renders the plan,
+   * and `runStage` refuses on it. If each built its own view, the two could drift apart — which
+   * is the defect ADR-0024 fixes, reintroduced one level up.
+   */
+  async #policyInput(
+    runId: string,
+    manifest: RunManifest,
+    runner: StageRunner,
+  ): Promise<ActionPolicyInput> {
     const gates = await this.#gateStatuses(runId);
-    const costRecords = await this.#context.workspace.runs.listRecords(runId, "costs");
-
-    const runner = this.#context.runnerFor(
-      this.#context.actor ?? { kind: "system", id: "aldus-services" },
-    );
     const state = await runner.stageState(runId);
     const stages = this.#stageReports(state.stages);
-
-    const plan = decideActions({
+    return {
       run: { runId: manifest.runId, status: manifest.status },
       // Required gates are resolved here rather than inside the policy, so `decideActions` stays
       // a pure function of state and the workflow graph stays a caller concern (ADR-0021).
@@ -927,9 +965,28 @@ export class AldusServices {
         toSnapshot(report, this.#context.requiredGatesFor(report.stageId)),
       ),
       gates,
-    });
+    };
+  }
 
-    return { run: manifest, stages, gates, costs: summariseCosts(costRecords), plan };
+  /** Assemble the full picture of one Run, including what to do next. */
+  async #runReport(runId: string): Promise<RunReport> {
+    const manifest = await this.#requireRun(runId);
+    const costRecords = await this.#context.workspace.runs.listRecords(runId, "costs");
+
+    const runner = this.#context.runnerFor(
+      this.#context.actor ?? { kind: "system", id: "aldus-services" },
+    );
+    const input = await this.#policyInput(runId, manifest, runner);
+    const state = await runner.stageState(runId);
+    const stages = this.#stageReports(state.stages);
+
+    return {
+      run: manifest,
+      stages,
+      gates: input.gates as GateStatus[],
+      costs: summariseCosts(costRecords),
+      plan: decideActions(input),
+    };
   }
 
   /**
