@@ -27,5 +27,6 @@ Rules:
 | [0008](0008-stage-execution-and-retry.md)              | Stage execution, attempt lifecycle, and retry policy                | Accepted | —                 |
 | [0009](0009-gate-binding-and-invalidation.md)          | Gate binding, cascading invalidation, and spend grants              | Accepted | —                 |
 | [0010](0010-evaluator-promotion-evidence.md)           | Evaluator promotion evidence                                        | Accepted | §25.9             |
+| [0011](0011-application-services-and-cli.md)           | Application services and the CLI adapter                            | Accepted | —                 |
 | [0012](0012-performance-script-and-take-lineage.md)    | PerformanceScript origin, take lineage, and repair scope            | Accepted | §25.6             |
 | [0013](0013-release-bundles-and-reconciliation.md)     | Release bundles, adapter contract, and reconciliation               | Accepted | —                 |
