@@ -31,3 +31,4 @@ Rules:
 | [0012](0012-performance-script-and-take-lineage.md)    | PerformanceScript origin, take lineage, and repair scope            | Accepted | §25.6             |
 | [0013](0013-release-bundles-and-reconciliation.md)     | Release bundles, adapter contract, and reconciliation               | Accepted | —                 |
 | [0014](0014-production-mcp-trust-boundary.md)          | Production MCP trust boundary                                       | Accepted | §25.8 (partial)   |
+| [0015](0015-composition-boundary.md)                   | Aldus composes its own packages; adopters supply adapters           | Accepted | —                 |
