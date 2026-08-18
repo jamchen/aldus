@@ -10,8 +10,16 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 ## Unreleased
 
-Targeted at `0.2.0-next.0` — a prerelease published to the `next` dist-tag only, per ADR-0023.
-Not yet published; the release gate is the owner's.
+Nothing yet.
+
+## 0.2.0-next.0 — 2026-08-18
+
+A prerelease on the `next` dist-tag only. `latest` still points at `0.1.0` and moves only by a
+deliberate owner decision (ADR-0023, `docs/RELEASING.md`).
+
+**Every behaviour change below came from the first real adopter integration**, which found them by
+using the runtime rather than by reading it. The gate-enforcement fix is the one to read first: it
+closes a hole where `status` said a stage was blocked and `run` executed it anyway.
 
 ### Behaviour changes
 
