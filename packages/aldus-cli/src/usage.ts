@@ -46,6 +46,8 @@ Commands
 
 Common options
   --workspace <path>        Workspace root. Defaults to ALDUS_WORKSPACE, then the cwd.
+                            May be written before or after the command; both are equivalent,
+                            and a config module sees whichever you used.
   --run <run-id>            The Run to act on. Required by most commands.
   --actor <kind:id>         Who is acting, e.g. human:operator-a. Defaults to ALDUS_ACTOR.
                             Required for anything that changes durable state.
@@ -92,6 +94,11 @@ Configuration
       stages: [...], gates: [...], subjects: async (runId) => ({}),
       releaseAdapters: [...], synthesisAdapter: ..., spendGrants: ..., archive: ...,
     }
+
+  Export a function instead when the config depends on which workspace is being operated on —
+  it is given the resolved --workspace, so it configures the workspace the command acts on:
+
+    export default ({ workspace }) => ({ stages: stagesFor(workspace), gates: [...] })
 
   Without one, the commands that need nothing wired still work.
 

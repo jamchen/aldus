@@ -11,7 +11,13 @@
 
 export { run, type CliEnvironment } from "./cli.js";
 
-export { loadConfig, stageRegistryOf, type AldusConfig } from "./config.js";
+export {
+  loadConfig,
+  stageRegistryOf,
+  type AldusConfig,
+  type AldusConfigFactory,
+  type ConfigContext,
+} from "./config.js";
 
 export { readJsonDocument, requireFlag } from "./documents.js";
 

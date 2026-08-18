@@ -65,10 +65,30 @@ storage.
 _Schema:_ `SCHEMA_VERSION` moves 1.2 → 1.3 — additive, MINOR under ADR-0003. Records written by
 1.2 stay readable and need no migration.
 
+**A config module now sees the workspace the command acts on** ([#54]). `--workspace` was parsed
+after the config was loaded, so a config could observe only `ALDUS_WORKSPACE` and the cwd. One
+deriving anything from the workspace therefore configured a _different_ workspace than the
+command acted on, and the failure surfaced as `ALDUS_STAGE_NOT_REGISTERED` — an error pointing at
+a stage list that was correct and complete.
+
+_What you will see:_ a config that reads `process.env.ALDUS_WORKSPACE` now sees the `--workspace`
+value, where before it saw the shell's. That is the fix, and it changes what such a config
+observes. `--workspace` may also now be written before the subcommand.
+
+_What has not changed:_ a config exported as a plain object, and one that derives nothing from
+the workspace, behave exactly as before.
+
 ### Added
 
 - **`AldusConfig.workflow`** ([#46]) — a workflow graph is now reachable from the CLI, so the
   stage↔gate association of ADR-0021 can actually be used from the binary.
+- **A config module may export a function** ([#54]) — `export default ({ workspace }) => ({ … })`,
+  given the resolved invocation. The object form is unchanged. `ConfigContext` is an object so
+  the resolved actor and `--json` can join it later without breaking existing modules.
+- **`ALDUS_NO_STAGES_CONFIGURED`** ([#54]) — raised when _nothing_ is registered, rather than
+  reporting it as a missing stage. An empty registry is a configuration problem; a missing stage
+  is a typo. Errors whose usual cause is the wrong workspace now name the workspace and config in
+  effect.
 - **`RunManifest.goalStages`** ([#47]) — the stages a Run intends to reach. `completed` derives
   from these rather than from "every stage in the graph", because optionality is a property of an
   episode's edition and not of the stage. **A workflow with conditional stages should set this
@@ -93,6 +113,7 @@ _Schema:_ `SCHEMA_VERSION` moves 1.2 → 1.3 — additive, MINOR under ADR-0003.
 [#47]: https://github.com/jamchen/aldus/issues/47
 [#39]: https://github.com/jamchen/aldus/issues/39
 [#50]: https://github.com/jamchen/aldus/pull/50
+[#54]: https://github.com/jamchen/aldus/issues/54
 
 ## 0.1.0 — 2026-08-18
 

@@ -34,6 +34,40 @@ import type {
 import { StageRegistry, type StageDefinition } from "@aldus-runtime/stage-runner";
 
 /**
+ * What the CLI knows about this invocation when it loads a config module.
+ *
+ * The reason this exists: `--workspace` is resolved by the CLI, and before this parameter
+ * existed a config module could observe only `ALDUS_WORKSPACE` and the cwd. A config deriving
+ * anything from the workspace — an archive path, a per-episode adapter, a spend grant that
+ * varies by show — therefore configured a *different* workspace than the command acted on, and
+ * the failure surfaced as an unrelated error two layers away.
+ *
+ * Deliberately an object rather than a positional argument, so the resolved actor or the
+ * `--json` flag can join it later without breaking every config module that takes one.
+ */
+export interface ConfigContext {
+  /**
+   * The resolved workspace root: `--workspace`, then `ALDUS_WORKSPACE`, then the cwd.
+   *
+   * Absolute or relative exactly as the operator wrote it, because a config that derives a path
+   * from it should produce the same path the command acts on rather than a normalised variant.
+   */
+  readonly workspace: string;
+}
+
+/**
+ * A config module may export a function of the invocation instead of a fixed object.
+ *
+ * The object form remains the common case and is unchanged. The function form exists for a
+ * config that needs to know the workspace before it can name its stages or adapters — which is
+ * every config that serves more than one Episode from one module.
+ *
+ * May return a promise: deriving a config sometimes means reading a manifest, and forcing that
+ * to be synchronous would push adopters toward top-level side effects at import time.
+ */
+export type AldusConfigFactory = (context: ConfigContext) => AldusConfig | Promise<AldusConfig>;
+
+/**
  * What an operator's config module may export.
  *
  * Every field is optional. A workspace that only needs `status` and `inspect` needs no config at
@@ -107,21 +141,30 @@ const KNOWN_CONFIG_KEYS = [
   "workflow",
 ] as const satisfies readonly (keyof AldusConfig)[];
 
-/** A config module may export its config as `default` or as `config`. */
+/** A config module may export its config as `default` or as `config`, as an object or a factory. */
 interface ConfigModule {
-  default?: AldusConfig;
-  config?: AldusConfig;
+  default?: AldusConfig | AldusConfigFactory;
+  config?: AldusConfig | AldusConfigFactory;
 }
 
 /**
  * Load an operator's config module.
+ *
+ * `context` carries what the CLI resolved for this invocation, so a config exported as a function
+ * can see the workspace the command will actually act on. `cwd` is separate and is used only to
+ * resolve a relative `--config` path: the module lives where the operator wrote it, which is not
+ * necessarily inside the workspace.
  *
  * @throws {AldusError} `ALDUS_CONFIG_UNREADABLE` when the module cannot be imported,
  * `ALDUS_CONFIG_INVALID` when it exports nothing usable or a malformed workflow graph, and
  * `ALDUS_CONFIG_UNKNOWN_KEY` when it sets a key Aldus does not recognise. All are environment
  * problems rather than refusals: no approval makes a missing file appear.
  */
-export async function loadConfig(specifier: string, cwd: string): Promise<AldusConfig> {
+export async function loadConfig(
+  specifier: string,
+  cwd: string,
+  context: ConfigContext,
+): Promise<AldusConfig> {
   const url = resolveSpecifier(specifier, cwd);
 
   let module: ConfigModule;
@@ -137,12 +180,16 @@ export async function loadConfig(specifier: string, cwd: string): Promise<AldusC
     );
   }
 
-  const config = module.default ?? module.config;
+  const exported = module.default ?? module.config;
+  const config =
+    typeof exported === "function" ? await callFactory(exported, context, specifier) : exported;
+
   if (config === undefined || typeof config !== "object") {
     throw new AldusError(
       "ALDUS_CONFIG_INVALID",
       `The Aldus config module at "${specifier}" exports no configuration. Export it as the ` +
-        'default export, or as a named export called "config".',
+        'default export, or as a named export called "config" — either an object, or a ' +
+        "function of the invocation returning one.",
       { category: "validation", retryable: false, details: { specifier } },
     );
   }
@@ -150,6 +197,35 @@ export async function loadConfig(specifier: string, cwd: string): Promise<AldusC
   assertKnownKeys(config, specifier);
   if (config.workflow !== undefined) assertWorkflowGraph(config.workflow, specifier);
   return config;
+}
+
+/**
+ * Invoke a config factory, attributing what it throws to the module rather than to Aldus.
+ *
+ * A factory runs adopter code, so a failure inside it is an adopter's bug — and a bare stack
+ * trace from an imported module is close to the least useful thing a CLI can print. Naming the
+ * module and the workspace it was building for keeps the fault findable, since the usual cause
+ * is a workspace that does not hold what the config assumed.
+ *
+ * @throws {AldusError} `ALDUS_CONFIG_UNREADABLE`
+ */
+async function callFactory(
+  factory: AldusConfigFactory,
+  context: ConfigContext,
+  specifier: string,
+): Promise<AldusConfig> {
+  try {
+    return await factory(context);
+  } catch (cause) {
+    throw new AldusError(
+      "ALDUS_CONFIG_UNREADABLE",
+      `The Aldus config module at "${specifier}" threw while building its configuration for ` +
+        `workspace "${context.workspace}": ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      { category: "io", retryable: false, details: { specifier, workspace: context.workspace } },
+    );
+  }
 }
 
 /**
