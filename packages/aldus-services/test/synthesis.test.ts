@@ -197,7 +197,14 @@ describe("reaching the adapter without authorization", () => {
 
     await expect(
       harness.services.synthesiseSegment({ plan, segmentId: "seg-1", actor: OPERATOR }),
-    ).rejects.toMatchObject({ code: ServiceErrorCodes.ADAPTER_NOT_WIRED });
+    ).rejects.toMatchObject({
+      code: ServiceErrorCodes.ADAPTER_NOT_WIRED,
+      // Not `policy`. A policy refusal is something an operator could approve away, and no
+      // approval conjures an adapter — so classifying it that way tells a caller it may wait
+      // and retry, forever. The code's doc comment always said this; the category disagreed.
+      category: "validation",
+      retryable: false,
+    });
   });
 
   it("refuses an anonymous synthesis (§19.2)", async () => {
