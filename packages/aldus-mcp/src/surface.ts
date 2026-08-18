@@ -21,13 +21,17 @@ import {
 } from "@aldus-runtime/core";
 import { FileWorkspace } from "@aldus-runtime/file-store";
 import { GateRegistry, type GateDefinition } from "@aldus-runtime/gate-engine";
+import type { ArtifactArchive } from "@aldus-runtime/artifact-registry";
+import type { ReleaseAdapter } from "@aldus-runtime/release";
 import { StageRegistry } from "@aldus-runtime/stage-runner";
 import {
   AldusContext,
   AldusServices,
   type Refusal,
   type ServiceResult,
+  type SpendGrantProvider,
   type SubjectsProvider,
+  type SynthesisAdapter,
 } from "@aldus-runtime/services";
 
 import { CapabilityGrant, type Capability } from "./capabilities.js";
@@ -73,7 +77,13 @@ export interface ToolCallResult {
   isError: boolean;
   /** The bound workspace (contract §19.2), echoed so the acting scope is never ambiguous. */
   workspaceRoot: string;
-  /** The actor a mutation was recorded against (contract §19.2). Absent for reads. */
+  /**
+   * The actor a mutation was attributed to (contract §19.2). Absent for reads.
+   *
+   * Present even when the call failed, because §20 asks who performed something and a failed
+   * attempt is still an attempt. Whether anything was *recorded* is a separate question the
+   * outcome answers.
+   */
   actor?: ActorRef;
   /** Why that actor, when one was recorded. @see resolveActor */
   actorRationale?: string;
@@ -108,6 +118,29 @@ export interface AldusToolSurfaceOptions {
   gates?: readonly GateDefinition[];
   /** Current digests of what gates bind (contract §13.2). */
   subjects?: SubjectsProvider;
+  /**
+   * Adapters that can reach release destinations (contract §17, §4.3).
+   *
+   * Host-supplied, like the stage and gate registries. ADR-0015 places composition with Aldus
+   * and concrete adapters with the adopter: this package decides *when* an adapter is called and
+   * refuses when policy is unmet; the adapter performs the call. §4.2 forbids Aldus from
+   * importing one.
+   *
+   * With none wired, the release tools refuse rather than appearing to work.
+   */
+  releaseAdapters?: readonly ReleaseAdapter[];
+  /**
+   * Adapter that can perform synthesis (contract §15, §4.3).
+   *
+   * Reached only through a successful §13.2 authorization — see `synthesis.ts` in
+   * `@aldus-runtime/services` for why it is unreachable rather than merely guarded. Supplying one
+   * grants no authority; it only makes synthesis possible for calls that are already authorized.
+   */
+  synthesisAdapter?: SynthesisAdapter;
+  /** Spend grants backing §13.2 authorization checks. */
+  spendGrants?: SpendGrantProvider;
+  /** Where irreplaceable artifacts are archived (contract §8.1). */
+  archive?: ArtifactArchive;
   /** Clock, injectable for deterministic tests. */
   now?: () => Date;
 }
@@ -139,6 +172,14 @@ export class AldusToolSurface {
       gates: GateRegistry.from(options.gates ?? []),
       stages: this.#stages,
       ...(options.subjects !== undefined ? { subjects: options.subjects } : {}),
+      ...(options.releaseAdapters !== undefined
+        ? { releaseAdapters: options.releaseAdapters }
+        : {}),
+      ...(options.synthesisAdapter !== undefined
+        ? { synthesisAdapter: options.synthesisAdapter }
+        : {}),
+      ...(options.spendGrants !== undefined ? { spendGrants: options.spendGrants } : {}),
+      ...(options.archive !== undefined ? { archive: options.archive } : {}),
       ...(options.now !== undefined ? { now: options.now } : {}),
     });
     this.#services = new AldusServices(context);
@@ -236,8 +277,16 @@ export class AldusToolSurface {
     // §19.2: the actor is decided here, from how the host configured the session — never from
     // an argument. See identity.ts for why the default records the agent.
     const resolved = resolveActor(this.#options.identity);
-    const result = await tool.invoke(this.#services, args, resolved.actor);
-    return this.#shape(tool.name, result, resolved.actor, resolved.rationale);
+    try {
+      const result = await tool.invoke(this.#services, args, resolved.actor);
+      return this.#shape(tool.name, result, resolved.actor, resolved.rationale);
+    } catch (error) {
+      // Attribute the failed attempt. §20 asks production trace "who or what performed it", and
+      // an attempt that failed is still an attempt someone made — an operator reading a broken
+      // release call should not have to guess which session tried it. Caught here rather than in
+      // `callTool` because this is the only scope that knows the resolved actor.
+      return this.#failure(tool.name, error, resolved.actor, resolved.rationale);
+    }
   }
 
   /**
@@ -294,7 +343,12 @@ export class AldusToolSurface {
   }
 
   /** Map a thrown failure onto the transport shape, redacted (§19.2). */
-  #failure(tool: string, thrown: unknown): ToolCallResult {
+  #failure(
+    tool: string,
+    thrown: unknown,
+    actor?: ActorRef,
+    actorRationale?: string,
+  ): ToolCallResult {
     const structured =
       thrown instanceof AldusError ? thrown.toStructuredError() : toStructuredError(thrown);
     return {
@@ -302,6 +356,8 @@ export class AldusToolSurface {
       outcome: "error",
       isError: true,
       workspaceRoot: this.#options.workspaceRoot,
+      ...(actor !== undefined ? { actor } : {}),
+      ...(actorRationale !== undefined ? { actorRationale } : {}),
       error: redact(structured) as StructuredError,
     };
   }

@@ -33,14 +33,17 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
+    "@aldus-runtime/artifact-registry": "*",
     "@aldus-runtime/core": "*",
+    "@aldus-runtime/file-store": "*",
+    "@aldus-runtime/gate-engine": "*",
+    "@aldus-runtime/release": "*",
     "@aldus-runtime/services": "*",
+    "@aldus-runtime/stage-runner": "*",
+    "@aldus-runtime/tts-ledger": "*",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@aldus-runtime/file-store": "*",
-    "@aldus-runtime/gate-engine": "*",
-    "@aldus-runtime/stage-runner": "*",
     "@aldus-runtime/testkit": "*",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
