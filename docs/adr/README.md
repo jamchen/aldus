@@ -27,3 +27,4 @@ Rules:
 | [0008](0008-stage-execution-and-retry.md)              | Stage execution, attempt lifecycle, and retry policy                | Accepted | —                 |
 | [0009](0009-gate-binding-and-invalidation.md)          | Gate binding, cascading invalidation, and spend grants              | Accepted | —                 |
 | [0010](0010-evaluator-promotion-evidence.md)           | Evaluator promotion evidence                                        | Accepted | §25.9             |
+| [0013](0013-release-bundles-and-reconciliation.md)     | Release bundles, adapter contracts, and reconciliation              | Accepted | —                 |
