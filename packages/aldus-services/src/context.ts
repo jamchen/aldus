@@ -40,6 +40,7 @@ import {
   RunStoreGateDecisionStore,
 } from "./adapters.js";
 import { fileLedgerStores, type LedgerLayout } from "./ledger-store.js";
+import { resolveRequiredGates, type WorkflowGraph } from "./workflow.js";
 import {
   SynthesisGateway,
   gateEngineSpendAuthorizer,
@@ -65,6 +66,13 @@ export interface AldusContextOptions {
   gates?: GateRegistry;
   /** Registered stage definitions (contract §11). Defaults to empty. */
   stages?: StageRegistry;
+  /**
+   * The workflow's stage↔gate graph (contract §11, ADR-0021).
+   *
+   * Optional. Without it, a stage's own `requiredGates` still applies, and a workflow that
+   * declares neither behaves exactly as it did before ADR-0021.
+   */
+  workflow?: WorkflowGraph;
   /**
    * Default actor for mutating operations (contract §19.2).
    *
@@ -117,6 +125,8 @@ export class AldusContext {
   readonly releaseAdapters: AdapterRegistry;
   /** Where the TTS ledger's durable state lives (contract §15). */
   readonly ledgerLayout: LedgerLayout;
+  /** The workflow's stage↔gate graph, when the adopter supplied one (contract §11). */
+  readonly workflow: WorkflowGraph | undefined;
 
   readonly #synthesisAdapter: SynthesisAdapter | undefined;
   readonly #spendGrants: SpendGrantProvider | undefined;
@@ -126,6 +136,7 @@ export class AldusContext {
     this.workspace = options.workspace;
     this.gateRegistry = options.gates ?? GateRegistry.from([]);
     this.stageRegistry = options.stages ?? new StageRegistry();
+    this.workflow = options.workflow;
     this.actor = options.actor;
     this.backend = options.backend;
     this.subjectsFor = options.subjects ?? (() => Promise.resolve({}));
@@ -150,6 +161,24 @@ export class AldusContext {
     const stores = fileLedgerStores(this.workspace.layout, this.workspace.locks);
     this.ledgerLayout = stores.layout;
     this.#ledgerStores = stores;
+  }
+
+  /**
+   * Gates that gate one stage (contract §11, ADR-0021).
+   *
+   * Returns `undefined` when neither the workflow graph nor the stage definition declares an
+   * association — which the next-action policy reads as "undeclared", not as "requires nothing".
+   *
+   * When several versions of a stage are registered, the latest is consulted. `versionsOf` sorts,
+   * so the last entry is the highest version. Reading every version and merging would let a
+   * retired definition keep gating a stage its current version no longer gates.
+   */
+  requiredGatesFor(stageId: string): readonly string[] | undefined {
+    const versions = this.stageRegistry.versionsOf(stageId);
+    const latest = versions[versions.length - 1];
+    const definition = latest === undefined ? undefined : this.stageRegistry.get(stageId, latest);
+    const resolution = resolveRequiredGates(stageId, this.workflow, definition?.requiredGates);
+    return resolution.declared ? resolution.gates : undefined;
   }
 
   /** True when an adopter supplied a synthesis adapter (contract §4.3). */

@@ -921,7 +921,11 @@ export class AldusServices {
 
     const plan = decideActions({
       run: { runId: manifest.runId, status: manifest.status },
-      stages: stages.map(toSnapshot),
+      // Required gates are resolved here rather than inside the policy, so `decideActions` stays
+      // a pure function of state and the workflow graph stays a caller concern (ADR-0021).
+      stages: stages.map((report) =>
+        toSnapshot(report, this.#context.requiredGatesFor(report.stageId)),
+      ),
       gates,
     });
 
@@ -984,13 +988,18 @@ function gateIdOf(entry: StoredStageExecution): string | undefined {
 }
 
 /** Narrow a full report to what the action policy reads. */
-function toSnapshot(report: StageReport): StageSnapshot {
+function toSnapshot(
+  report: StageReport,
+  requiredGates: readonly string[] | undefined,
+): StageSnapshot {
   return {
     stageId: report.stageId,
     status: report.status as StageSummaryStatus,
     ...(report.gateId !== undefined ? { gateId: report.gateId } : {}),
     ...(report.retryable !== undefined ? { retryable: report.retryable } : {}),
     ...(report.attempt !== undefined ? { attempt: report.attempt } : {}),
+    // Absent stays absent: the policy distinguishes "declared none" from "not declared".
+    ...(requiredGates !== undefined ? { requiredGates } : {}),
   };
 }
 

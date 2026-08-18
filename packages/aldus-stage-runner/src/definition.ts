@@ -194,6 +194,24 @@ export interface StageDefinition<I = unknown, O = unknown> {
   requiredCapabilities: readonly string[];
   /** Idempotency declaration. Required — §11 permits no silent answer. */
   idempotency: StageIdempotency;
+  /**
+   * Gates that must be satisfied before this stage should be offered (contract §11 "stop at
+   * required gates", §13).
+   *
+   * **Declarative, not enforcement.** The runner cannot evaluate a gate — gate state belongs to
+   * `@aldus-runtime/gate-engine`, which this package deliberately does not depend on — so this
+   * field does not stop `run()`. It tells the next-action policy which gates actually gate this
+   * stage, so that an unrelated pending gate no longer suppresses unrelated work (ADR-0021).
+   * Enforcement of what a gate authorizes stays with the gate engine, where §13 puts it.
+   *
+   * Absent means "not declared", which is not the same as "requires nothing": see ADR-0021 for
+   * why an undeclared stage falls back to the conservative reading rather than being treated as
+   * unblocked. Declare `[]` to say a stage genuinely requires no gate.
+   *
+   * A workflow graph supplied to the services overrides this per workflow, because one stage
+   * definition may be reused by workflows that gate it differently.
+   */
+  requiredGates?: readonly string[];
   /** Spend limits, for a stage that can incur cost (contract §19.3). */
   costPolicy?: CostPolicy;
   /** Retry limits (contract §19.1). Absent means a single attempt. */

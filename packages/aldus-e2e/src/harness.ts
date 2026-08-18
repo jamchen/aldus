@@ -22,7 +22,12 @@ import {
   type SubjectsByGate,
 } from "@aldus-runtime/gate-engine";
 import { RecordingReleaseAdapter, type RecordingAdapterOptions } from "@aldus-runtime/release";
-import { AldusContext, AldusServices, isIssuedSynthesisPermit } from "@aldus-runtime/services";
+import {
+  AldusContext,
+  AldusServices,
+  isIssuedSynthesisPermit,
+  type WorkflowGraph,
+} from "@aldus-runtime/services";
 import { StageRegistry, type StageDefinition } from "@aldus-runtime/stage-runner";
 
 import { FakeSynthesisAdapter } from "./adapters.js";
@@ -78,6 +83,13 @@ export type StageFactory = (
 export interface StackOptions {
   gates?: readonly GateDefinition[];
   stages?: StageFactory;
+  /**
+   * The workflow's stage↔gate graph (contract §11, ADR-0021).
+   *
+   * Omitted by default, so a scenario that does not care exercises the conservative fallback —
+   * which is what an adopter who has not yet declared a graph gets.
+   */
+  workflow?: WorkflowGraph;
   /** Pass `null` for a context with no default actor, to exercise §19.2's refusal. */
   actor?: ActorRef | null;
   /** Omit the synthesis adapter entirely, modelling an adopter that wired none. */
@@ -147,6 +159,7 @@ export async function makeStack(options: StackOptions = {}): Promise<Stack> {
       workspace,
       gates: GateRegistry.from(options.gates ?? []),
       stages: stageRegistry,
+      ...(options.workflow === undefined ? {} : { workflow: options.workflow }),
       ...(actor === undefined ? {} : { actor }),
       subjects: () => Promise.resolve(state.subjects),
       now: fixedClock(),
