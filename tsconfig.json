@@ -9,6 +9,8 @@
     { "path": "./packages/aldus-gate-engine" },
     { "path": "./packages/aldus-tts-ledger" },
     { "path": "./packages/aldus-release" },
-    { "path": "./packages/aldus-regression" }
+    { "path": "./packages/aldus-regression" },
+    { "path": "./packages/aldus-services" },
+    { "path": "./packages/aldus-cli" }
   ]
 }

@@ -1,0 +1,14 @@
+{
+  // Tests are typechecked but never emitted. The build tsconfig has rootDir "src", so tests
+  // cannot live in it — and without this project a `@ts-expect-error` in a test is inert,
+  // silently passing whether or not the error it claims exists.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
