@@ -278,3 +278,98 @@ describe("plan digests (§13.2)", () => {
     );
   });
 });
+
+describe("recordUnauthorizedCharge captures spend the ledger would otherwise lose (§13.2, §20)", () => {
+  // recordTake refusing an unauthorized charge does not stop the spend — the money is already
+  // gone by the time the ledger hears about it. Refusal only stops the ledger *asserting* the
+  // spend was authorized. But refusal alone leaves a worse hole: §20 requires the production
+  // trace to answer "what it cost", and a charge that happened yet appears nowhere is its own
+  // harm. These tests pin the escape hatch, and that it stays visibly an escape hatch.
+  let ctx: ReturnType<typeof makeLedger>;
+
+  beforeEach(async () => {
+    ctx = makeLedger(new RefusingAuthorizer());
+    await ctx.ledger.recordPlan(plan(), EPISODE_ID, OPERATOR);
+  });
+
+  it("records a charge the ordinary path refuses", async () => {
+    const { authorization: _dropped, ...unauthorized } = paidTake(plan());
+
+    // The ordinary path refuses, leaving the charge unrecorded.
+    const refusal = await caught(() =>
+      ctx.ledger.recordTake({
+        runId: RUN_ID,
+        planId: PLAN_ID,
+        segmentId: "seg-1",
+        take: unauthorized,
+        episodeId: EPISODE_ID,
+        actor: WORKER,
+      }),
+    );
+    expect(refusal.code).toBe(TtsLedgerErrorCodes.UNAUTHORIZED_CHARGE);
+    expect(await ctx.ledger.listTakes(RUN_ID)).toHaveLength(0);
+
+    const take = await ctx.ledger.recordUnauthorizedCharge({
+      runId: RUN_ID,
+      planId: PLAN_ID,
+      segmentId: "seg-1",
+      take: unauthorized,
+      episodeId: EPISODE_ID,
+      actor: OPERATOR,
+      reason: "A worker called the provider without checking permitSynthesis.",
+    });
+
+    expect(await ctx.ledger.listTakes(RUN_ID)).toHaveLength(1);
+    expect(take.unauthorizedCharge?.reason).toContain("without checking");
+    expect(take.unauthorizedCharge?.acknowledgedBy).toEqual(OPERATOR);
+  });
+
+  it("marks the record plainly rather than laundering it into an ordinary take", async () => {
+    const { authorization: _dropped, ...unauthorized } = paidTake(plan());
+    const take = await ctx.ledger.recordUnauthorizedCharge({
+      runId: RUN_ID,
+      planId: PLAN_ID,
+      segmentId: "seg-1",
+      take: unauthorized,
+      episodeId: EPISODE_ID,
+      actor: OPERATOR,
+      reason: "Recovered from provider billing after the fact.",
+    });
+
+    // The marker is the whole point: without it this is indistinguishable from an authorized
+    // charge, and recording it would be worse than refusing.
+    expect(take.unauthorizedCharge).toBeDefined();
+    expect(take.authorization).toBeUndefined();
+  });
+
+  it("emits a distinct event so an unauthorized charge is greppable in the log", async () => {
+    const { authorization: _dropped, ...unauthorized } = paidTake(plan());
+    await ctx.ledger.recordUnauthorizedCharge({
+      runId: RUN_ID,
+      planId: PLAN_ID,
+      segmentId: "seg-1",
+      take: unauthorized,
+      episodeId: EPISODE_ID,
+      actor: OPERATOR,
+      reason: "Charge discovered during reconciliation.",
+    });
+
+    const actions = ctx.events.events.map((event) => event.action);
+    expect(actions).toContain("tts.charge.unauthorized");
+  });
+
+  it("still refuses an ordinary paid take, so the hatch is not a bypass", async () => {
+    const { authorization: _dropped, ...unauthorized } = paidTake(plan());
+    const error = await caught(() =>
+      ctx.ledger.recordTake({
+        runId: RUN_ID,
+        planId: PLAN_ID,
+        segmentId: "seg-2",
+        take: unauthorized,
+        episodeId: EPISODE_ID,
+        actor: WORKER,
+      }),
+    );
+    expect(error.code).toBe(TtsLedgerErrorCodes.UNAUTHORIZED_CHARGE);
+  });
+});

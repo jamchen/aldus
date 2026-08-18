@@ -286,7 +286,9 @@ export class TtsLedger {
     });
 
     const paid = candidate.authorization !== undefined || candidate.costRecordId !== undefined;
-    if (paid) await this.#assertChargeAuthorized(plan, candidate);
+    if (paid && candidate.unauthorizedCharge === undefined) {
+      await this.#assertChargeAuthorized(plan, candidate);
+    }
 
     await this.#takes.append(input.runId, candidate);
     await this.#emit(input.runId, input.episodeId, input.actor, "tts.take.recorded", {
@@ -298,6 +300,56 @@ export class TtsLedger {
       ...(candidate.repair === undefined ? {} : { repairRung: candidate.repair.rung }),
     });
     return candidate;
+  }
+
+  /**
+   * Record a charge that was incurred without a valid authorization (contract §13.2, §20).
+   *
+   * §13.2's enforcement point is {@link TtsLedger.permitSynthesis}, before a Worker runs. By the
+   * time a take reaches the ledger the money is already gone, so {@link TtsLedger.recordTake}
+   * refusing an unauthorized charge does not prevent spend — it prevents the ledger *asserting*
+   * that spend was authorized when it was not.
+   *
+   * That leaves a worse hole if refusal is the only option: a Worker that skipped
+   * `permitSynthesis` produces a real charge the ledger will not record, and §20 requires the
+   * production trace to answer "what it cost". A charge that happened but appears nowhere is its
+   * own harm, and a larger one than an ugly record.
+   *
+   * So this admits the record and marks it plainly, via
+   * {@link TakeRecord.unauthorizedCharge}. It deliberately carries **no policy** about what an
+   * operator does next — whether such a take may be accepted, whether it must be escalated, and
+   * what it means for a budget are decisions this package does not own. It only makes the
+   * question answerable.
+   *
+   * The emitted event uses a distinct action so an unauthorized charge is greppable in the log
+   * rather than hidden among ordinary recordings.
+   */
+  async recordUnauthorizedCharge(
+    input: RecordTakeInput & { reason: string; rejectedAuthorizationId?: string },
+  ): Promise<TakeRecord> {
+    const take = await this.recordTake({
+      ...input,
+      take: {
+        ...input.take,
+        unauthorizedCharge: {
+          reason: input.reason,
+          ...(input.rejectedAuthorizationId === undefined
+            ? {}
+            : { rejectedAuthorizationId: input.rejectedAuthorizationId }),
+          acknowledgedBy: input.actor,
+          acknowledgedAt: this.#now().toISOString(),
+        },
+      },
+    });
+    await this.#emit(input.runId, input.episodeId, input.actor, "tts.charge.unauthorized", {
+      takeId: take.takeId,
+      segmentId: take.segmentId,
+      reason: input.reason,
+      ...(input.rejectedAuthorizationId === undefined
+        ? {}
+        : { rejectedAuthorizationId: input.rejectedAuthorizationId }),
+    });
+    return take;
   }
 
   /**

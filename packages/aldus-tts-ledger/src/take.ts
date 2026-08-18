@@ -14,6 +14,7 @@
  * same shape the artifact registry uses for the same reason.
  */
 
+import { actorRefSchema } from "@aldus/core";
 import { z } from "zod";
 
 import { iso8601, nonEmptyString, schemaVersionPattern, sha256Hex } from "./common.js";
@@ -229,6 +230,29 @@ export const takeRecordSchema = z
     costRecordId: z.string().min(1).max(200).optional(),
     /** How the spend was authorized (contract §13.2). Absent for an unpaid or local take. */
     authorization: takeAuthorizationSchema.optional(),
+    /**
+     * Why a charge was recorded without a valid authorization (contract §13.2, §20).
+     *
+     * Present **only** on a take admitted through the unauthorized-charge path. Its presence is
+     * the marker that §13.2 was not satisfied: the money was already spent by the time the
+     * ledger heard about it, and refusing to record would have left §20's production trace
+     * unable to answer "what it cost" — a charge that happened but appears nowhere.
+     *
+     * Recording it is not condoning it. This field carries no policy about what an operator
+     * should do next; it exists so the question is answerable at all.
+     */
+    unauthorizedCharge: z
+      .object({
+        /** Why the authorization was absent or invalid, as reported by the caller. */
+        reason: z.string().min(1).max(2000),
+        /** The authorization that was cited and rejected, where one was cited at all. */
+        rejectedAuthorizationId: z.string().min(1).max(200).optional(),
+        /** Who admitted the record (contract §19.2). */
+        acknowledgedBy: actorRefSchema,
+        /** When it was admitted. */
+        acknowledgedAt: iso8601,
+      })
+      .optional(),
     /**
      * The produced audio, by artifact identity (contract §15 "output URI and SHA-256").
      *

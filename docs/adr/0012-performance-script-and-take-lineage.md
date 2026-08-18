@@ -109,12 +109,21 @@ money being spent, because the spend already happened before anyone called this 
 stops is the ledger asserting that spend was authorized when it was not. §13.2's real enforcement
 point is `permitSynthesis`, before the Worker runs.
 
-That leaves a gap worth naming: a Worker that calls a provider without checking, then reports back,
-produces real spend the ledger will refuse to record. **The trace is then missing a charge that
-happened**, which is its own harm. The right answer is a dedicated "record an unauthorized charge"
-operation that captures reality while marking it plainly — deliberately _not_ built here, because
-it needs a policy for what an operator does with such a record, and inventing that policy
-unprompted would be worse than leaving the gap documented. Flagged for review.
+That leaves a gap: a Worker that calls a provider without checking, then reports back, produces
+real spend the ledger would refuse to record. **The trace is then missing a charge that
+happened** — and §20 requires production trace to answer "what it cost". A charge that occurred
+yet appears nowhere is a larger harm than an ugly record.
+
+`recordUnauthorizedCharge` closes it. The take is admitted and marked with
+`TakeRecord.unauthorizedCharge` — the reason, the rejected authorization if one was cited, and
+who acknowledged it — and a distinct `tts.charge.unauthorized` event is emitted so it is
+greppable rather than hidden among ordinary recordings. The ordinary `recordTake` path still
+refuses, so this is an explicit escape hatch and not a bypass.
+
+It deliberately carries **no policy**. Whether such a take may be accepted, whether it must be
+escalated, and what it means for a budget are decisions this package does not own; capturing
+reality is not the same as condoning it. Separating the two is what allows the record to exist
+before anyone has decided what to do about it.
 
 ### 6. Lexicon scope stays caller-supplied, and normative conflicts are reported
 
