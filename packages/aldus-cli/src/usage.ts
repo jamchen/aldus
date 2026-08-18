@@ -24,6 +24,7 @@ Commands
   retry <stage>             Re-attempt a stage
   approve <gate>            Record an approval
   reject <gate>             Record a rejection
+  cancel                    Abandon a Run
   costs                     Cost records and totals
 
   artifacts                 Artifacts recorded against a Run, with archival state
@@ -64,6 +65,7 @@ Command options
   run           --stage-version <version> --input <json> --force
   retry         --stage-version <version> --input <json> --force
   approve       --comment <text>
+  cancel        --reason <text>
   reject        --comment <text>
   release       --bundle <path>            plan, reconcile, and execute
                 --dry-run                  execute only: show what remains, perform nothing

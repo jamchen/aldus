@@ -388,3 +388,42 @@ describe("commands over a seeded workspace", () => {
     expect(result.stdout).toContain("satisfied");
   });
 });
+
+describe("cancel (contract §19.1, §19.2; ADR-0026)", () => {
+  it("abandons a Run and names who did it", async () => {
+    const runId = await seed();
+    const result = await invoke(
+      base,
+      "cancel",
+      "--run",
+      runId,
+      "--reason",
+      "Superseded by a re-cut.",
+      "--actor",
+      "human:operator-a",
+    );
+
+    expect(result.code).toBe(ExitCodes.success);
+    expect(result.stdout).toContain("cancelled");
+    expect(result.stdout).toContain("operator-a");
+    expect(result.stdout).toContain("Superseded by a re-cut.");
+  });
+
+  it("reports the Run as cancelled afterwards", async () => {
+    const runId = await seed();
+    await invoke(base, "cancel", "--run", runId, "--actor", "human:operator-a");
+
+    const status = await invoke(base, "status", "--run", runId, "--json");
+    const parsed = status.json() as { data: { focused: { state: { status: string } } } };
+    expect(parsed.data.focused.state.status).toBe("cancelled");
+  });
+
+  it("refuses a second cancellation rather than overwriting the record", async () => {
+    // §20's trace depends on who abandoned the Run and when; there is only one copy of that.
+    const runId = await seed();
+    await invoke(base, "cancel", "--run", runId, "--actor", "human:operator-a");
+
+    const again = await invoke(base, "cancel", "--run", runId, "--actor", "human:operator-a");
+    expect(again.code).toBe(ExitCodes.refused);
+  });
+});

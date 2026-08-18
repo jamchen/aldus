@@ -50,6 +50,7 @@ import {
   renderArchive,
   renderArtifactLineage,
   renderArtifacts,
+  renderCancelRun,
   renderCleanupPlan,
   renderCosts,
   renderGateDecision,
@@ -237,6 +238,8 @@ async function dispatch(
       return await runDecision(argv, environment, "approve");
     case "reject":
       return await runDecision(argv, environment, "reject");
+    case "cancel":
+      return await runCancel(argv, environment);
     case "artifacts":
       return await runArtifacts(argv, environment);
     case "costs":
@@ -545,6 +548,30 @@ async function runDecision(
   const result =
     command === "approve" ? await services.approve(request) : await services.reject(request);
   return emit(result, options, environment, renderGateDecision);
+}
+
+/**
+ * `cancel` — abandon a Run (contract §19.1, §19.2).
+ *
+ * The only Run state that cannot be derived: §5.1 makes long pauses ordinary, so an idle Run and
+ * an abandoned one are indistinguishable until someone says which it is (ADR-0026).
+ *
+ * No confirmation prompt. §3.4 makes durable records authoritative and §19.2 requires a recorded
+ * actor; a y/n prompt records nothing, and a second weaker approval beside the real one is what
+ * people learn to pass by habit.
+ */
+async function runCancel(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
+  const { options, values } = parseCommon(argv, environment, {
+    reason: { type: "string" },
+  });
+
+  const services = servicesFor(options, environment);
+  const result = await services.cancelRun({
+    runId: requireRunId(options, "cancel"),
+    ...(typeof values["reason"] === "string" ? { reason: values["reason"] } : {}),
+    ...(options.actor !== undefined ? { actor: options.actor } : {}),
+  });
+  return emit(result, options, environment, renderCancelRun);
 }
 
 /**

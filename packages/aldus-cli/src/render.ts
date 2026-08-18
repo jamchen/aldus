@@ -87,7 +87,16 @@ export function renderStatus(report: StatusReport): string {
   } else if (report.runs.length > 0) {
     lines.push("Runs");
     for (const run of report.runs) {
-      lines.push(`  ${run.runId}  ${run.status}  ${run.workflowId}@${run.workflowVersion}`);
+      // Naming the gates here is what makes a list of Runs actionable: the whole point of the
+      // derived status is that an operator can tell these apart at a glance (ADR-0026).
+      const waiting =
+        run.waitingOn !== undefined && run.waitingOn.length > 0
+          ? `  waiting on ${run.waitingOn.join(", ")}`
+          : "";
+      const at = run.currentStage === undefined ? "" : `  at ${run.currentStage}`;
+      lines.push(
+        `  ${run.runId}  ${run.status}  ${run.workflowId}@${run.workflowVersion}${at}${waiting}`,
+      );
     }
   }
 
@@ -97,8 +106,23 @@ export function renderStatus(report: StatusReport): string {
 /** Render one Run's full picture. */
 function renderRunReport(report: RunReport): string[] {
   const lines: string[] = [];
-  lines.push(`Run      ${report.run.runId}  (${report.run.status})`);
+  // The derived state, not the manifest's stored one: the manifest records how the Run was
+  // created and never changes (ADR-0026).
+  const at = report.state.currentStage === undefined ? "" : `  at ${report.state.currentStage}`;
+  lines.push(`Run      ${report.run.runId}  (${report.state.status})${at}`);
   lines.push(`Workflow ${report.run.workflowId}@${report.run.workflowVersion}`);
+  if (report.state.waitingOn.length > 0) {
+    // Named here so "waiting" does not send an operator hunting through the gate list.
+    lines.push(`Waiting  ${report.state.waitingOn.join(", ")}`);
+  }
+  if (report.state.status === "cancelled" && report.run.cancellation !== undefined) {
+    const reason =
+      report.run.cancellation.reason === undefined ? "" : ` — ${report.run.cancellation.reason}`;
+    lines.push(
+      `Cancelled ${report.run.cancellation.cancelledAt} by ` +
+        `${report.run.cancellation.cancelledBy.id}${reason}`,
+    );
+  }
   lines.push("");
   lines.push(...renderActionPlan(report.plan));
 
@@ -559,5 +583,23 @@ export function renderTakes(report: TakeReport): string {
       `Awaiting a human ear (contract §13.3): ${report.awaitingAcceptance.join(", ")}`,
     );
   }
+  return lines.join("\n");
+}
+
+/**
+ * Render the result of abandoning a Run (contract §19.1).
+ *
+ * States who and when, because that is the whole content of the decision — §20 asks trace who
+ * performed something, and "cancelled" without an actor answers half the question.
+ */
+export function renderCancelRun(report: RunReport): string {
+  const cancellation = report.run.cancellation;
+  const lines = [`Run ${report.run.runId} cancelled.`];
+  if (cancellation !== undefined) {
+    lines.push(`  by       ${cancellation.cancelledBy.id} (${cancellation.cancelledBy.kind})`);
+    lines.push(`  at       ${cancellation.cancelledAt}`);
+    if (cancellation.reason !== undefined) lines.push(`  reason   ${cancellation.reason}`);
+  }
+  lines.push("", "Start a new Run to continue this Episode.");
   return lines.join("\n");
 }
