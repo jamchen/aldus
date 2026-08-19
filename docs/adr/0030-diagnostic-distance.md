@@ -129,3 +129,17 @@ and it is the argument that was originally made for this feature:
 The ordering of checks follows from this rather than from taste. Ordering is checked before gates
 because with gates first an operator is told to decide a gate whose subjects the unrun predecessor
 has not produced — a recommendation that is not merely premature but unsatisfiable.
+
+The two failures are **not symmetric**, and this is the reason the recommendation form ranks above
+the silence form rather than beside it. The adopter's statement of it:
+
+> A runtime that knows a fact and does not say it costs someone an investigation. A runtime that
+> says it _wrongly_ spends someone's trust, and they stop reading the output — after which the
+> correct refusals are noise too. The second is worse and recovers more slowly.
+
+Silence has a bounded cost, paid once per incident by whoever is investigating. A false statement
+has an unbounded one, because the operator's response is to discount the channel — and the channel
+being discounted is the same one every correct refusal arrives on. That is also what bounds the
+over-reporting caution recorded in the consequences above: a hint shown when it does not apply and
+a recommendation that will be refused are the same defect, and they are expensive for the same
+reason.
