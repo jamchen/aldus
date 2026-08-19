@@ -659,9 +659,12 @@ async function runStage(
   const request = {
     runId: requireRunId(options, command),
     stageId,
-    ...(typeof values["input"] === "string"
-      ? { input: JSON.parse(values["input"]) as unknown }
-      : {}),
+    // An absent `--input` means "run this with no input", and `{}` is that in JSON. Omitting the
+    // key sends `undefined` to the stage's schema, and every object-shaped schema rejects it — so
+    // the command `status` prints, which never carries `--input`, refused for any stage with a
+    // realistic input schema (#80). A stage that genuinely requires fields still refuses, with the
+    // same message: `{}` is what the operator supplied, not a claim that it is valid.
+    input: typeof values["input"] === "string" ? (JSON.parse(values["input"]) as unknown) : {},
     ...(typeof values["stage-version"] === "string"
       ? { stageVersion: values["stage-version"] }
       : {}),

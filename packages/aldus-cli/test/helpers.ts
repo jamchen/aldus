@@ -208,6 +208,32 @@ export function gatedStage(id: string, gateId: string): StageDefinition<unknown,
   };
 }
 
+/**
+ * A stage that declares a real object-shaped input schema, as an adopter's stage does.
+ *
+ * Every other stage here uses {@link anySchema}, which accepts anything including `undefined`.
+ * That is convenient and it hides the case every real stage is in: an object schema rejects
+ * `undefined`, so whether the CLI supplies a value at all becomes load-bearing.
+ */
+export function objectInputStage(id: string): StageDefinition<unknown, unknown> {
+  const objectSchema = {
+    safeParse: (value: unknown) =>
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? { success: true as const, data: value }
+        : { success: false as const, error: new Error("expected an object") },
+  };
+  return {
+    id,
+    version: "1",
+    inputSchema: objectSchema,
+    outputSchema: anySchema,
+    requiredCapabilities: [],
+    idempotency: { kind: "idempotent" },
+    execute: (_context, input): Promise<StageOutcome<unknown>> =>
+      Promise.resolve({ kind: "completed", output: input }),
+  };
+}
+
 const anySchema = { safeParse: (value: unknown) => ({ success: true as const, data: value }) };
 
 /** A registry holding the given stages. */

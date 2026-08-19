@@ -26,6 +26,7 @@ import {
   gateDefinition,
   invoke,
   makeTempWorkspace,
+  objectInputStage,
   passthroughStage,
   RecordingSynthesisAdapter,
   registryOf,
@@ -722,5 +723,61 @@ describe("init flag grouping (#46 follow-on)", () => {
     expect(result.code).toBe(ExitCodes.success);
     const parsed = result.json() as { data: { episode?: { episodeId: string } } };
     expect(parsed.data.episode?.episodeId).toBe("show:example-show:episode:episode-a");
+  });
+});
+
+describe("the command status prints is a command that runs (#80, ADR-0030)", () => {
+  /**
+   * A runtime that recommends an action it will then refuse has told the operator something
+   * false, and no amount of correct refusal downstream repairs it (ADR-0030).
+   *
+   * `status` emits `aldus run <stage> --run <id>` with no `--input`. Every stage elsewhere in
+   * these tests declares a schema that accepts anything, `undefined` included — which is exactly
+   * why this went unnoticed. A real stage declares an object schema, and an object schema rejects
+   * `undefined`, so whether the CLI supplies a value at all decides whether the recommended
+   * command works.
+   */
+  it("runs a stage with an object input schema when no --input is given", async () => {
+    const options: CliOptions = { ...base, stages: registryOf(objectInputStage("render")) };
+    const { runId } = await seed(options);
+
+    const result = await invoke(options, "run", "render", "--run", runId, "--json");
+
+    expect(result.code, result.stderr).toBe(ExitCodes.success);
+  });
+
+  it("prints a recommendation that this same invocation satisfies", async () => {
+    // The two halves have to agree. Asserting the run works is not enough on its own: if the
+    // recommendation ever grew a flag, this would catch the pair drifting apart.
+    const options: CliOptions = { ...base, stages: registryOf(objectInputStage("render")) };
+    const { runId } = await seed(options);
+
+    const status = await invoke(options, "status", "--run", runId, "--json");
+    const printed = JSON.stringify(status.json());
+
+    expect(printed).toContain(`aldus run render --run ${runId}`);
+    expect(printed).not.toContain("--input");
+  });
+
+  it("still refuses a stage whose input schema wants fields it was not given", async () => {
+    // The guard must not become "accept anything". An empty object is what an absent --input
+    // means; it is not a claim that the input is valid.
+    const demanding = objectInputStage("render");
+    const options: CliOptions = {
+      ...base,
+      stages: registryOf({
+        ...demanding,
+        inputSchema: {
+          safeParse: (value: unknown) =>
+            typeof value === "object" && value !== null && "required" in value
+              ? { success: true as const, data: value }
+              : { success: false as const, error: new Error("missing required") },
+        },
+      }),
+    };
+    const { runId } = await seed(options);
+
+    const result = await invoke(options, "run", "render", "--run", runId);
+    expect(result.code).not.toBe(ExitCodes.success);
   });
 });
