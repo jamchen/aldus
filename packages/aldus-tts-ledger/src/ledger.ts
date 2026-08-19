@@ -367,7 +367,26 @@ export class TtsLedger {
     takeId: string,
     decision: TakeDecision,
     episodeId: string,
+    decidedBy: ActorRef,
   ): Promise<TakeRecord> {
+    // §13.3 keeps final performance approval human-owned. Gates enforce this through
+    // `permittedActorKinds`; takes did not, and for an adopter who reviews per segment, accepting
+    // a take *is* the human-ear judgement — so the protection was applied to the gate while the
+    // value it binds could be determined by an agent (#64).
+    if (decidedBy.kind !== "human") {
+      throw ttsLedgerError(
+        TtsLedgerErrorCodes.TAKE_ACTOR_NOT_PERMITTED,
+        `Take "${takeId}" may only be decided by a human, but "${decidedBy.id}" is a ` +
+          `${decidedBy.kind}. Contract §13.3 keeps final performance approval human-owned until ` +
+          "a scoped evaluator is demonstrably reliable.",
+        {
+          category: "policy",
+          retryable: false,
+          details: { runId, takeId, actorKind: decidedBy.kind },
+        },
+      );
+    }
+
     const takes = await this.#takes.list(runId);
     const take = takes.find((candidate) => candidate.takeId === takeId);
     if (take === undefined) {
@@ -396,7 +415,11 @@ export class TtsLedger {
     await this.#emit(
       runId,
       episodeId,
-      { kind: "human", id: decision.decidedBy },
+      // The actor as supplied, never a fabricated one. This previously asserted `kind: "human"`
+      // from a bare string, so §20's production trace recorded that a human decided the take
+      // whatever had actually happened — the runtime stating as fact something it had not been
+      // told (#64).
+      decidedBy,
       `tts.take.${decision.decision}`,
       {
         takeId,

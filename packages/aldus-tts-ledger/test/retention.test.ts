@@ -11,7 +11,7 @@
  * would throw away the reason the working one was reachable.
  */
 
-import { AldusError } from "@aldus-runtime/core";
+import { AldusError, type ActorRef } from "@aldus-runtime/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { TtsLedgerErrorCodes } from "../src/errors.js";
@@ -92,6 +92,7 @@ describe("rejected takes are retained (§15.1)", () => {
         findings: ["pronunciation/named-entity"],
       },
       EPISODE_ID,
+      OPERATOR,
     );
 
     const second = await ledger.recordTake({
@@ -111,6 +112,7 @@ describe("rejected takes are retained (§15.1)", () => {
       second.takeId,
       { decision: "accepted", decidedBy: "operator-a", decidedAt: AT },
       EPISODE_ID,
+      OPERATOR,
     );
 
     const all = await ledger.listTakes(RUN_ID);
@@ -149,6 +151,7 @@ describe("rejected takes are retained (§15.1)", () => {
       take.takeId,
       { decision: "rejected", decidedBy: "operator-a", decidedAt: AT, reason: "Too fast." },
       EPISODE_ID,
+      OPERATOR,
     );
 
     const error = await caught(() =>
@@ -157,6 +160,7 @@ describe("rejected takes are retained (§15.1)", () => {
         take.takeId,
         { decision: "accepted", decidedBy: "operator-b", decidedAt: AT },
         EPISODE_ID,
+        OPERATOR,
       ),
     );
     expect(error.code).toBe(TtsLedgerErrorCodes.TAKE_ALREADY_DECIDED);
@@ -352,5 +356,84 @@ describe("lineage", () => {
       "seg-2",
       "seg-3",
     ]);
+  });
+});
+
+describe("who may decide a take, and what the trace records (§13.3, #64)", () => {
+  /**
+   * §13.3 keeps final performance approval human-owned until a scoped evaluator is demonstrably
+   * reliable. Gates enforce that through `permittedActorKinds`. Takes did not — and for an
+   * adopter who reviews per segment, accepting a take *is* the human-ear judgement, so the
+   * human-only protection sat on a gate whose bound value an agent was free to determine.
+   */
+  it("refuses a take decision from an agent", async () => {
+    const { ledger } = makeLedger();
+    await ledger.recordPlan(plan(), EPISODE_ID, OPERATOR);
+    const take = await ledger.recordTake({
+      runId: RUN_ID,
+      planId: PLAN_ID,
+      segmentId: "seg-1",
+      take: paidTake(plan(), { takeId: "take-agent" }),
+      episodeId: EPISODE_ID,
+      actor: WORKER,
+    });
+
+    const error = await caught(() =>
+      ledger.decideTake(
+        RUN_ID,
+        take.takeId,
+        { decision: "accepted", decidedBy: "claude", decidedAt: AT },
+        EPISODE_ID,
+        { kind: "agent", id: "claude" },
+      ),
+    );
+
+    expect(error.code).toBe(TtsLedgerErrorCodes.TAKE_ACTOR_NOT_PERMITTED);
+    // Refused before anything durable changed: the take is still undecided.
+    expect((await ledger.listTakes(RUN_ID))[0]?.decision).toBeUndefined();
+  });
+
+  it("records the actor it was given, not one it assumed", async () => {
+    // The half the report did not name, and the worse of the two. The ledger built the trace
+    // event with `{ kind: "human", id: decision.decidedBy }` — asserting a human had decided
+    // whatever had actually happened. §20's trace is what gets consulted afterwards to answer
+    // "who approved this?", so a fabricated kind there is not a missing fact but a false one.
+    const takes = new MemoryTakeStore();
+    const sink = new MemoryLedgerEventSink();
+    const ledger = new TtsLedger({
+      takes,
+      plans: new MemoryPlanStore(),
+      scripts: new MemoryScriptStore(),
+      events: sink,
+      authorizer: new ApprovingAuthorizer(),
+      now: () => new Date(AT),
+    });
+    await ledger.recordPlan(plan(), EPISODE_ID, OPERATOR);
+    const take = await ledger.recordTake({
+      runId: RUN_ID,
+      planId: PLAN_ID,
+      segmentId: "seg-1",
+      take: paidTake(plan(), { takeId: "take-traced" }),
+      episodeId: EPISODE_ID,
+      actor: WORKER,
+    });
+
+    // The acting identity and the name written into the decision are deliberately different.
+    // With `decidedBy: "producer-b"` and an actor id of "producer-b", the fabricated actor and
+    // the real one are the same object and the mutation is invisible — which is exactly what my
+    // first version of this test did, and it proved nothing.
+    const decider: ActorRef = { kind: "human", id: "user-42", displayName: "Producer B" };
+    await ledger.decideTake(
+      RUN_ID,
+      take.takeId,
+      { decision: "accepted", decidedBy: "producer-b", decidedAt: AT },
+      EPISODE_ID,
+      decider,
+    );
+
+    const accepted = sink.events.filter((event) => event.action === "tts.take.accepted");
+    expect(accepted).toHaveLength(1);
+    // The identity that acted, carried through rather than reconstructed from a bare string.
+    expect(accepted[0]?.actor).toEqual(decider);
   });
 });

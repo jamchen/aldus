@@ -827,11 +827,20 @@ export class AldusServices {
     decision: TakeDecision;
     actor?: ActorRef;
   }): Promise<ServiceResult<TakeDecisionReport>> {
-    requireActor(request.actor ?? this.#context.actor, "decide take");
+    // The actor is used, not merely demanded. It was validated here and then dropped, leaving the
+    // ledger to fabricate `kind: "human"` for the trace — a fact this layer held and the next one
+    // had to invent (#64, and the same shape as #67).
+    const decidedBy = requireActor(request.actor ?? this.#context.actor, "decide take");
     const manifest = await this.#requireRun(request.runId);
     const take = await this.#context
       .ledgerFor()
-      .decideTake(request.runId, request.takeId, request.decision, manifest.episode.episodeId);
+      .decideTake(
+        request.runId,
+        request.takeId,
+        request.decision,
+        manifest.episode.episodeId,
+        decidedBy,
+      );
     return ok({ runId: request.runId, take });
   }
 
