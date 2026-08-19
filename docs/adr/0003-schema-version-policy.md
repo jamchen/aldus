@@ -72,6 +72,28 @@ them: `ActorRef`, `StageAttempt`, `KnowledgePackRef`, `StructuredError`, `Money`
 `EpisodeRef` carries `schemaVersion` even when embedded in a `RunManifest`, because §6.1 makes
 it required and because an Episode is persisted independently (§7 `episode.json`).
 
+## Evidence, 2026-08-19
+
+This policy was asserted by fixtures for its first two minor versions. It has now been exercised
+against real stored state by the first adopter integration, upgrading `1.2` → `1.3`:
+
+- **37 stored `1.2` records across five workspaces, all classified `compatible`.** Read through
+  the real stores — episode store, run store, run manifests, event logs, artifact reports, and the
+  status service — with nothing migrated and nothing rewritten.
+- **Manifests still reported `1.2` after a `1.3` runtime read them.** Silent restamping would have
+  looked like success while destroying the evidence that the rule holds, so this is the specific
+  property worth having checked.
+- **The reverse direction was tested too**, which an upgrade cannot check afterwards: a real
+  workspace copied, every `schemaVersion` restamped to the _next_ minor, and read back by the
+  older runtime. Episode, runs, an eleven-event log, and `status` all read correctly.
+
+The reverse direction is the half that matters when a Git-friendly `.aldus/` is shared between
+machines on different builds — the situation §5.1's long pauses make ordinary — and it is the half
+no fixture in this repository exercises, because every fixture is older than the build reading it.
+
+A rule validated against real data is a different claim from a rule asserted, and this note exists
+so a future reader can tell which one this is.
+
 ## Consequences
 
 - One constant to reason about. A reader checks one field per document and knows whether the
