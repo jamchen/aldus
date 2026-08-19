@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import type { AldusError } from "@aldus-runtime/core";
 import { buildGateDecision } from "@aldus-runtime/testkit";
 
 import {
@@ -18,8 +19,11 @@ import {
   toSubjectHashes,
   type GateSubject,
 } from "../src/binding.js";
-import { validateGateDefinition } from "../src/definition.js";
+import { GateRegistry, validateGateDefinition } from "../src/definition.js";
+import { GateEngine } from "../src/engine.js";
 import { GateEngineErrorCodes } from "../src/errors.js";
+import { CONTENT_FREEZE, standardGates } from "./helpers.js";
+import { MemoryGateDecisionStore, MemoryGateEventSink } from "../src/ports.js";
 
 const gate = validateGateDefinition({
   gateId: "gate-a",
@@ -177,5 +181,73 @@ describe("drift detection", () => {
       subjectHashes: [...toSubjectHashes(original)].reverse(),
     });
     expect(detectDrift(unsorted, original)).toBeUndefined();
+  });
+});
+
+/** An engine over the standard gates, with the stores its constructor requires. */
+function makeEngine(registry = GateRegistry.from(standardGates())): GateEngine {
+  return new GateEngine({
+    registry,
+    decisions: new MemoryGateDecisionStore(),
+    events: new MemoryGateEventSink(),
+  });
+}
+
+describe("a gate whose bound values are only partly supplied (#91)", () => {
+  /**
+   * `assertSubjectsCover` refuses an approval that does not bind everything the gate lists
+   * (§13.2). Until #91 nothing said so *before* the attempt: an undecided gate reported `pending`
+   * whether its subjects were complete or absent, so a caller could only discover the problem by
+   * being refused.
+   *
+   * An adopter had made that refusal unreachable deliberately, publishing a gate only once every
+   * bound value existed — because otherwise the runtime offered a gate that could not be
+   * approved. The pre-filter was rational and it hid the runtime's best diagnostic.
+   */
+  it("names the values nobody has supplied", () => {
+    const engine = makeEngine();
+    const status = engine
+      .evaluateWith([], { [CONTENT_FREEZE]: [subject("spokenText", "a")] })
+      .get(CONTENT_FREEZE);
+
+    expect(status?.state).toBe("pending");
+    expect(status?.missingSubjects).toEqual(["claims", "structure"]);
+    // The explanation must say why it cannot be decided, not merely that nobody decided it.
+    expect(status?.explanation).toContain("claims");
+    expect(status?.explanation).toContain("cannot be decided yet");
+  });
+
+  it("reports nothing missing when every bound value is supplied", () => {
+    const engine = makeEngine();
+    const status = engine
+      .evaluateWith([], {
+        [CONTENT_FREEZE]: [
+          subject("spokenText", "a"),
+          subject("claims", "b"),
+          subject("structure", "c"),
+        ],
+      })
+      .get(CONTENT_FREEZE);
+
+    expect(status?.missingSubjects).toBeUndefined();
+    expect(status?.explanation).not.toContain("cannot be decided yet");
+  });
+
+  it("agrees with the refusal assertSubjectsCover would raise", () => {
+    // The two must not drift: what `status` says is missing is what `approve` would refuse over.
+    // Two pieces of the runtime that have to agree, with something making them agree (#80).
+    const registry = GateRegistry.from(standardGates());
+    const engine = makeEngine(registry);
+    const supplied = [subject("spokenText", "a")];
+    const status = engine.evaluateWith([], { [CONTENT_FREEZE]: supplied }).get(CONTENT_FREEZE);
+
+    let refusedMissing: string[] | undefined;
+    try {
+      assertSubjectsCover(registry.require(CONTENT_FREEZE), supplied);
+    } catch (error) {
+      refusedMissing = (error as AldusError).details?.["missing"] as string[];
+    }
+
+    expect(refusedMissing).toEqual(status?.missingSubjects);
   });
 });

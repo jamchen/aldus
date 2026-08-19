@@ -386,3 +386,41 @@ describe("walking a gate dependency chain safely (#86 residual)", () => {
     expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
   });
 });
+
+describe("a gate that cannot be decided yet is explained, not offered (#91)", () => {
+  it("reports the missing bound values instead of recommending an approval that would refuse", () => {
+    const result = plan({
+      stages: [{ stageId: "script", status: "never_run", requiredGates: ["human-ear"] }],
+      gates: [
+        gateStatus({ gateId: "human-ear", state: "pending", missingSubjects: ["approvedAudio"] }),
+      ],
+    });
+
+    // Not offered: approving it would be refused by §13.2, and recommending a command that will
+    // be rejected is the defect this path exists to avoid.
+    expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
+
+    // But not silent either — the operator is told what is missing and that something must
+    // produce it. "Nothing to do" would be the false statement; this is the true one.
+    // Both the stage's blocker and the gate's own entry must say why. The stage blocker used to
+    // read "Decide it first", which is false advice for a gate that cannot be decided.
+    const stageBlocker = result.blocked.find((entry) => entry.stageId === "script");
+    expect(stageBlocker?.reason).toContain("approvedAudio");
+    expect(stageBlocker?.reason).not.toContain("Decide it first");
+
+    const gateEntry = result.blocked.find(
+      (entry) => entry.kind === "approve-gate" && entry.gateId === "human-ear",
+    );
+    expect(gateEntry?.reason).toContain("approvedAudio");
+    expect(gateEntry?.reason).toContain("must produce them first");
+  });
+
+  it("offers the same gate once its bound values exist", () => {
+    const result = plan({
+      stages: [{ stageId: "script", status: "never_run", requiredGates: ["human-ear"] }],
+      gates: [gateStatus({ gateId: "human-ear", state: "pending" })],
+    });
+
+    expect(result.next.map((action) => action.gateId)).toEqual(["human-ear"]);
+  });
+});
