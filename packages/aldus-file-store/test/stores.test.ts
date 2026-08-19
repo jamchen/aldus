@@ -392,3 +392,92 @@ describe("nextSequenceOf", () => {
     expect(nextSequenceOf(events)).toBe(4);
   });
 });
+
+describe("a store holding records at more than one schema version (ADR-0003)", () => {
+  /**
+   * The state an incremental upgrade actually produces.
+   *
+   * ADR-0003 says any same-major record is readable, and every test that checked it used a
+   * corpus stamped at one version — either all-current or all-newer. That never constructs the
+   * case a real upgrade leaves behind: some records written before the bump, some after, in one
+   * workspace, read in a single pass. The first adopter upgrade produced exactly that (37
+   * records at the older minor, 1 at the current one) and reported it back, which is why this
+   * fixture exists rather than a single-version one.
+   *
+   * Read through the stores, deliberately not through `checkSchemaVersion` — a version check
+   * asked whether it agrees with itself will always say yes.
+   */
+  const olderMinor = (): string => {
+    const [major, minor] = SCHEMA_VERSION.split(".");
+    const previous = Number(minor) - 1;
+    // The policy is same-major, so an older *minor* is the case worth constructing. At x.0 there
+    // is no older minor and the newer direction is the only same-major variation available.
+    return previous >= 0 ? `${major}.${previous}` : `${major}.${Number(minor) + 1}`;
+  };
+
+  it("reads runs stamped before and after a version bump in one pass", async () => {
+    // Distinct ids: the builders are deterministic, so two bare aRun() calls collide.
+    const older = aRun({ runId: "run_01AAAAAAAAAAAAAAAAAAAAAAAA" });
+    const current = aRun({ runId: "run_01BBBBBBBBBBBBBBBBBBBBBBBB" });
+    await workspace.runs.create(older);
+    await workspace.runs.create(current);
+
+    // Restamp one manifest as if written by the previous build. Only the stamp changes.
+    const path = workspace.layout.runFilePath(older.runId, "manifest");
+    const stored = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    await writeFile(path, JSON.stringify({ ...stored, schemaVersion: olderMinor() }), "utf8");
+
+    const ids = await workspace.runs.list();
+    expect(ids).toEqual(expect.arrayContaining([older.runId, current.runId]));
+
+    // Both readable, and each still reports the version it was written at.
+    expect((await workspace.runs.get(older.runId))?.schemaVersion).toBe(olderMinor());
+    expect((await workspace.runs.get(current.runId))?.schemaVersion).toBe(SCHEMA_VERSION);
+  });
+
+  it("reads an event log whose entries were written at different versions", async () => {
+    const run = aRun();
+    await workspace.runs.create(run);
+    // Distinct event ids for the same reason the runs above need distinct run ids, and the
+    // log is right to refuse a repeat: §6.4 makes it append-only.
+    await workspace.events.append(
+      run.runId,
+      anEvent({ runId: run.runId, eventId: "evt_01AAAAAAAAAAAAAAAAAAAAAAAA" }),
+    );
+    await workspace.events.append(
+      run.runId,
+      anEvent({ runId: run.runId, eventId: "evt_01BBBBBBBBBBBBBBBBBBBBBBBB" }),
+    );
+
+    const path = workspace.layout.runFilePath(run.runId, "events");
+    const lines = (await readFile(path, "utf8")).trimEnd().split("\n");
+    const first = JSON.parse(lines[0] as string) as Record<string, unknown>;
+    const rewritten = [
+      JSON.stringify({ ...first, schemaVersion: olderMinor() }),
+      ...lines.slice(1),
+    ].join("\n");
+    await writeFile(path, `${rewritten}\n`, "utf8");
+
+    const { events } = await workspace.events.read(run.runId);
+    expect(events).toHaveLength(2);
+    expect(events[0]?.schemaVersion).toBe(olderMinor());
+    expect(events[1]?.schemaVersion).toBe(SCHEMA_VERSION);
+  });
+
+  it("does not restamp an older record just because it was read", async () => {
+    // The assertion that gives the two above their meaning. A runtime that silently migrated
+    // records on read would pass both of them while destroying the evidence a rollback needs —
+    // so if read-time migration is ever added, this check stops being able to detect it and must
+    // be replaced rather than kept.
+    const run = aRun();
+    await workspace.runs.create(run);
+    const path = workspace.layout.runFilePath(run.runId, "manifest");
+    const stored = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    await writeFile(path, JSON.stringify({ ...stored, schemaVersion: olderMinor() }), "utf8");
+
+    const before = await readFile(path, "utf8");
+    await workspace.runs.get(run.runId);
+    await workspace.runs.list();
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+});
