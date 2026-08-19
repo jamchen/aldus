@@ -14,7 +14,11 @@
  */
 
 import type { ActorRef } from "@aldus-runtime/core";
-import { ArtifactRegistry, type ArtifactArchive } from "@aldus-runtime/artifact-registry";
+import {
+  ArtifactRegistry,
+  stageArtifactRecorder,
+  type ArtifactArchive,
+} from "@aldus-runtime/artifact-registry";
 import type { FileWorkspace } from "@aldus-runtime/file-store";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
@@ -237,6 +241,13 @@ export class AldusContext {
     return createStageRunner(this.workspace, {
       registry: this.stageRegistry,
       actor,
+      // Without this a stage's `registerOutput` refuses with ARTIFACT_RECORDER_UNAVAILABLE, so
+      // the capability exists on the context, is reachable as `context.artifacts`, and is
+      // unusable from every stage the services actually run. The refusal is correct — a stage
+      // that believed it registered an irreplaceable take and had not would find out the day a
+      // cleanup removed the bytes — which is exactly why the port has to be wired rather than
+      // the refusal softened.
+      artifacts: stageArtifactRecorder(this.artifacts),
       ...(this.backend !== undefined ? { backend: this.backend } : {}),
       now: this.now,
     });
