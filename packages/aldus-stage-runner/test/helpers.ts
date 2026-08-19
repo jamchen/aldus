@@ -61,6 +61,15 @@ export interface TempRunOptions {
   sleeps?: number[];
   /** Where `registerOutput` sends files. Omitted so the unwired refusal stays testable. */
   artifacts?: ArtifactRecorder;
+  /**
+   * Override the Run manifest's identity.
+   *
+   * The testkit builders are deterministic, so two bare `makeTempRun()` calls produce the **same**
+   * `runId` and `episodeId` — separate temp directories, identical manifests. Any test comparing
+   * behaviour "across runs" or "across episodes" must vary these explicitly, or it compares a
+   * value with itself and passes for the wrong reason.
+   */
+  manifest?: { runId?: string; episodeId?: string };
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -68,7 +77,14 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
   const root = await mkdtemp(join(tmpdir(), "aldus-stage-runner-"));
   const workspace = await openWorkspace(root);
   const ctx = context();
-  const manifest = builders.RunManifest(undefined, ctx);
+  const built = builders.RunManifest(undefined, ctx);
+  const manifest = {
+    ...built,
+    ...(options.manifest?.runId !== undefined ? { runId: options.manifest.runId } : {}),
+    ...(options.manifest?.episodeId !== undefined
+      ? { episode: { ...built.episode, episodeId: options.manifest.episodeId } }
+      : {}),
+  };
   await workspace.runs.create(manifest);
 
   const registry = new StageRegistry();

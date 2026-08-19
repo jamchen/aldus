@@ -42,6 +42,34 @@ export class StageRegistry {
         },
       );
     }
+    // Refused at registration, before anything can run it (ADR-0036). The type already requires
+    // `effectKey` on this arm, so this catches the definition that did not come through the type:
+    // one built from configuration, or handed over by a JavaScript adopter. A stage that declares
+    // a deduplicable external effect and supplies no derivation would otherwise silently receive
+    // the invocation fingerprint, which is stable across content it read but did not declare.
+    const idempotency = definition.idempotency as {
+      kind: string;
+      effectKey?: unknown;
+    };
+    if (
+      idempotency.kind === "idempotent_external_effect" &&
+      typeof idempotency.effectKey !== "function"
+    ) {
+      throw stageRunnerError(
+        StageRunnerErrorCodes.STAGE_EFFECT_KEY_REQUIRED,
+        `Stage "${definition.id}" declares an idempotent external effect but supplies no ` +
+          "`effectKey` derivation. The runtime-derived invocation key is a fingerprint of " +
+          "declared work and must never be offered to an external system as a deduplication " +
+          "guarantee (contract §19.1, ADR-0036): it is stable across content a stage read but " +
+          "did not declare as an input artifact.",
+        {
+          category: "validation",
+          retryable: false,
+          details: { stageId: definition.id, stageVersion: definition.version },
+        },
+      );
+    }
+
     this.#byKey.set(key, definition as unknown as StageDefinition<never, unknown>);
     const versions = this.#versionsById.get(definition.id) ?? [];
     versions.push(definition.version);

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.4:AldusEvent",
+  "$id": "urn:aldus:schema:1.5:AldusEvent",
   "type": "object",
   "properties": {
     "schemaVersion": {
@@ -74,6 +74,16 @@
       }
     },
     "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "invocationKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "effectKey": {
       "type": "string",
       "minLength": 1,
       "maxLength": 1024

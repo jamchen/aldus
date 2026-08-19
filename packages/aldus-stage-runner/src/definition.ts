@@ -17,6 +17,8 @@
 
 import type { ArtifactRef, Reconstructability, StructuredError } from "@aldus-runtime/core";
 
+import { digestJson } from "./state.js";
+
 /**
  * The minimum a validator must offer for the runner to use it.
  *
@@ -33,26 +35,113 @@ export interface StageSchema<T> {
 export type StageSchemaResult<T> = { success: true; data: T } | { success: false; error?: unknown };
 
 /**
- * Whether a stage can be re-run without duplicating external side effects (contract §11, §19.1).
+ * Fingerprint the declared work of one stage invocation (contract §20; ADR-0036).
  *
- * Not a boolean, because §11 requires a stage that is *not* idempotent to "explicitly declare why
- * it is not". A boolean records that the answer is no; this records the reason, which is what an
- * operator deciding whether to re-run actually needs (§20).
+ * Material is episode, stage identity and version, the validated input, the recorded
+ * configuration, and the sorted identities and digests of declared input artifacts. Sorted because
+ * the *set* of declared inputs is what identifies the work, not the order a caller listed them in
+ * — the same reason ADR-0033 sorts release input hashes.
+ *
+ * `runId` is deliberately absent: two Runs performing the same declared work produce the same
+ * fingerprint, which is what makes it one. Including it would reintroduce ADR-0033's defect one
+ * layer up, where a reassembled identity produced a fresh key and re-performed settled work.
+ *
+ * **Never offer this to an external system as a deduplication guarantee.** It covers what the
+ * stage declared, and a stage that reads by convention declares less than it reads.
+ */
+export function deriveInvocationKey(material: {
+  episodeId: string;
+  stageId: string;
+  stageVersion: string;
+  input: unknown;
+  configuration: Readonly<Record<string, unknown>>;
+  inputArtifacts: readonly { artifactId: string; sha256: string }[];
+}): string {
+  return digestJson({
+    episodeId: material.episodeId,
+    stageId: material.stageId,
+    stageVersion: material.stageVersion,
+    input: material.input,
+    configuration: material.configuration,
+    inputArtifacts: [...material.inputArtifacts]
+      .map((artifact) => `${artifact.artifactId}:${artifact.sha256}`)
+      .sort(),
+  });
+}
+
+/**
+ * What a stage's effect-key derivation is given (contract §19.1; ADR-0036).
+ *
+ * A context rather than a bare input. The previous hook received only `input`, which could not
+ * reach the class of stage that most needed it: a stage resolving its work from the Run declares
+ * `inputSchema: z.object({})`, so its author could not write a key function that distinguished
+ * anything however willing.
+ */
+export interface EffectKeyContext {
+  /** Canonical Episode identity (§6.1). */
+  episodeId: string;
+  /** Stage declaring the effect (§11). */
+  stageId: string;
+  /** Version of the stage definition (§11, §20). */
+  stageVersion: string;
+  /** The validated input. */
+  input: unknown;
+  /** The configuration this attempt runs under, as supplied. */
+  configuration: Readonly<Record<string, unknown>>;
+  /**
+   * Identities and digests of the artifacts the stage declared as inputs (§8.1).
+   *
+   * The content identity available to the derivation. ADR-0033 established by measurement that a
+   * key must depend on what is being sent rather than on the identity of whatever is enclosing
+   * it — a reassembled bundle with a fresh id re-published everything.
+   */
+  inputArtifacts: readonly { artifactId: string; sha256: string }[];
+}
+
+/**
+ * What re-running a stage does to the world outside the workspace (§11, §15.1, §19.1; ADR-0036).
+ *
+ * Three states, where there were previously two words for three meanings. An adopter reported nine
+ * of thirteen stages declaring `not_idempotent`, several because the stage's *output* is not
+ * reproducible rather than because re-running has an external effect — §15.1's retry refusal is
+ * right for the second and merely conservative for the first.
  */
 export type StageIdempotency =
   | {
-      kind: "idempotent";
       /**
-       * Value distinguishing one invocation from another for deduplication (contract §19.1
-       * "idempotency keys for external side effects").
+       * Re-running touches nothing outside the workspace.
        *
-       * Defaults to a digest of the stage identity, its input, and its configuration. Override
-       * when the natural key is narrower — for example when only part of the input determines the
-       * external effect.
+       * The ordinary case. `invocationKey` identifies the declared work for the trace and nothing
+       * is deduplicated externally, so there is no effect key to get wrong.
        */
-      key?: (input: unknown) => string;
+      kind: "idempotent";
     }
   | {
+      /**
+       * Re-running repeats an external effect that the receiving system can deduplicate.
+       *
+       * `effectKey` is **required**. A stage in this state without one is refused before
+       * execution (ADR-0036): the runtime-derived invocation key must never be used as an
+       * external deduplication guarantee, and silently falling back to it is how a stage that is
+       * right about its semantics gets a key that is wrong about its content.
+       */
+      kind: "idempotent_external_effect";
+      /**
+       * Derive the key the external system deduplicates on.
+       *
+       * For a content-bearing effect this must ultimately depend on effect identity and content
+       * digests (ADR-0033). `runId`, attempt id, path and bundle identity are not substitutes for
+       * content identity, which ADR-0033 established by measurement rather than by argument.
+       */
+      effectKey: (context: EffectKeyContext) => string;
+    }
+  | {
+      /**
+       * Re-running duplicates an effect that cannot be deduplicated.
+       *
+       * Never auto-retried: §15.1's "Aldus MUST NOT silently retry paid requests without policy
+       * and cost authorization". An operator can still re-run explicitly, having read the reason.
+       */
       kind: "not_idempotent";
       /** Why re-running duplicates an effect. Recorded on every attempt and surfaced to operators. */
       reason: string;
@@ -233,8 +322,21 @@ export interface StageContext {
   readonly configuration: Readonly<Record<string, unknown>>;
   /** Digest of {@link configuration}, so §20 can answer "which configuration produced this". */
   readonly configurationHash: string;
-  /** Deduplication key for external side effects (contract §19.1). */
-  readonly idempotencyKey: string;
+  /**
+   * Fingerprint of this attempt's declared work (§20; ADR-0036).
+   *
+   * For the trace and for correlating retries. Never an external deduplication guarantee.
+   */
+  readonly invocationKey: string;
+  /**
+   * The key an external system deduplicates this stage's effect on (§19.1; ADR-0036).
+   *
+   * Present only when the stage declared `idempotent_external_effect`. **Absent is not a licence
+   * to use {@link StageContext.invocationKey} instead** — that key fingerprints declared work and
+   * is stable across content a stage read but did not declare. A stage performing an external
+   * effect without declaring one is refused before it runs.
+   */
+  readonly effectKey?: string | undefined;
   /** Artifacts declared as inputs (contract §11). */
   readonly inputArtifacts: readonly ArtifactRef[];
   /**
