@@ -49,3 +49,4 @@ Rules:
 | [0030](0030-diagnostic-distance.md)                     | Rank diagnostic work by distance from symptom to cause                                     | Accepted | —                 |
 | [0031](0031-derive-prose-from-the-program.md)           | Derive prose about the program from the program                                            | Accepted | —                 |
 | [0032](0032-absent-cli-input-is-empty.md)               | An absent `--input` is an empty input, not a missing one                                   | Accepted | #80               |
+| [0033](0033-idempotency-keys-identify-the-effect.md)    | A release idempotency key identifies the effect, not the bundle                            | Accepted | #40               |

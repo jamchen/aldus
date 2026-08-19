@@ -88,10 +88,20 @@ export function assertBundleValid(bundle: ReleaseBundle): void {
  *
  * Input hashes are sorted before digesting: the set of things released is what matters, not the
  * order a caller happened to list them in.
+ *
+ * **The bundle's identity is deliberately not part of the key** (ADR-0033). It was, and that
+ * defeated the sentence above: nothing stores a `ReleaseBundle`, so a caller resuming after a
+ * crash reassembles one — and a reassembled bundle with a fresh `bundleId` produced a fresh key
+ * for every operation, matched no receipt, and re-executed the lot. Measured before the change:
+ * an equivalent bundle under a new id re-ran all three operations, including the media upload and
+ * the visibility transition (#40).
+ *
+ * What identifies an operation is what it does: this kind of operation, against this destination,
+ * over these exact bytes. Two bundles agreeing on all three are asking for the same external
+ * effect, and §19.1 requires that effect to happen once.
  */
-export function deriveIdempotencyKey(bundleId: string, operation: ReleaseOperation): string {
+export function deriveIdempotencyKey(operation: ReleaseOperation): string {
   const material = JSON.stringify({
-    bundleId,
     operationId: operation.operationId,
     kind: operation.kind,
     destination: operation.destination,

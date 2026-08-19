@@ -42,6 +42,16 @@ export const releaseReceiptSchema = z
      */
     runId: nonEmptyString,
     /**
+     * Bundle whose execution produced this receipt (ADR-0033).
+     *
+     * Optional, and deliberately **not** part of the idempotency key — that is what made a
+     * reconstructed bundle re-execute everything (#40). It is recorded so §20's trace can answer
+     * "which release produced this", which nothing could previously do: receipts named the run
+     * and the destination but never the bundle, so two releases of one Run were
+     * indistinguishable after the fact.
+     */
+    bundleId: nonEmptyString.optional(),
+    /**
      * Where the operation was directed.
      *
      * An OPEN string, never a Core-defined enum. Contract §1.2 explicitly rules out prescribing
