@@ -18,6 +18,7 @@
 import type { ArtifactRef, Reconstructability, StructuredError } from "@aldus-runtime/core";
 
 import { digestJson } from "./state.js";
+import type { WorkerResult } from "./worker.js";
 
 /**
  * The minimum a validator must offer for the runner to use it.
@@ -33,6 +34,29 @@ export interface StageSchema<T> {
 
 /** Outcome of a {@link StageSchema} check. */
 export type StageSchemaResult<T> = { success: true; data: T } | { success: false; error?: unknown };
+
+/**
+ * What a stage asks of {@link StageContext.runWorker} (ADR-0035).
+ *
+ * Deliberately small: which Worker, what it needs, and what it is being given. Everything else —
+ * run, episode, stage, attempt, digests, keys, signal — is supplied by the runtime from the
+ * attempt in progress, because a Worker that could state its own identity could state a false one.
+ */
+export interface StageWorkerRequest<I = unknown> {
+  /** Worker id, resolved exactly. */
+  workerId: string;
+  /** Worker version, resolved exactly — never "latest" (§20). */
+  workerVersion: string;
+  /** The operation's input. Validated by the stage; Core does not know its shape. */
+  input: I;
+  /**
+   * Capabilities this operation requires of the Worker.
+   *
+   * Checked before `execute`. Omitted means the stage requires none, which is different from a
+   * Worker offering none — the check fails closed on what was asked for, not on what was offered.
+   */
+  requiredCapabilities?: readonly string[];
+}
 
 /**
  * Fingerprint the declared work of one stage invocation (contract §20; ADR-0036).
@@ -373,6 +397,26 @@ export interface StageContext {
    * take and did not would discover it the day a cleanup removed the bytes.
    */
   registerOutput(registration: StageOutputRegistration): Promise<ArtifactRef>;
+  /**
+   * Invoke a registered Worker (contract §3.2, §4.1; ADR-0035).
+   *
+   * Resolved by **exact** id and version — nothing selects a nearest or latest one, so a completed
+   * Run stays explicable after a second version is registered (§20).
+   *
+   * The runtime supplies the invocation's identity from this attempt: run, episode, stage,
+   * attempt, configuration digest, declared input digests, effect or invocation key, and the
+   * cancellation signal. A Worker therefore cannot assert its own provenance, which is what keeps
+   * §20's trace attributable to what executed rather than to what a Worker claimed.
+   *
+   * Capabilities are checked **before** `execute`, so a misconfiguration fails on the declaration
+   * rather than halfway through a side effect. A composition that wired no registry refuses rather
+   * than silently doing nothing — the capability that exists and is unreachable is #67's defect,
+   * and a Worker seam nothing wired would repeat it one layer up.
+   *
+   * @throws {AldusError} `ALDUS_WORKER_REGISTRY_UNAVAILABLE`, `ALDUS_WORKER_NOT_REGISTERED`,
+   * `ALDUS_WORKER_CAPABILITY_UNAVAILABLE`
+   */
+  runWorker<I, O>(request: StageWorkerRequest<I>): Promise<WorkerResult<O>>;
   /** Emit an operator-facing progress note. Recorded on the attempt's events (contract §20). */
   note(message: string, details?: Record<string, unknown>): void;
 }
