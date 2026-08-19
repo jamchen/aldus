@@ -111,6 +111,62 @@ That is the same decision as the rule above, applied one level down: do not rest
 program can compute — and where the restatement is unavoidable because it was computed earlier,
 recompute it at the moment it is acted on.
 
+## Amendment, 2026-08-19: what derivation costs, and a third reader
+
+Two more from the adopter, one of which is a limit on the decision above rather than support for
+it.
+
+### Deriving a value can weaken the check the constant was carrying
+
+Their pin checker held a hardcoded `ALDUS_VERSION`, so bumping the pin made the checker fail
+against the very version it was enforcing — exactly the defect this ADR names. They fixed it the
+way the decision says to: derive the expected version as the value every `@aldus-runtime/*`
+dependency agrees on.
+
+But agreement is a weaker property than correctness, and the difference is a real hole. **A
+uniformly wrong value looks exactly like consensus.** If every pin drifts to a floating range
+together, a checker that asks "do they agree?" says yes. The hardcoded constant, for all its
+staleness, was asserting something agreement cannot: that the pins are _exact_ and _this specific
+value_.
+
+So the rule needs its own caveat, and it is the part most likely to be got wrong by someone
+applying this ADR enthusiastically:
+
+> "Derive it from the data" quietly weakens a check unless you keep the property the constant was
+> carrying.
+
+Their replacement keeps it by checking exactness separately from agreement, and is mutation-tested
+through all four paths — partial bump, floating range, local link, and uniformly-floating pins.
+That last case is the one agreement alone cannot see, and the one worth naming, because it is
+invisible in every test that does not deliberately construct it.
+
+The general form: when replacing a restated fact with a computed one, enumerate what the
+restatement was asserting. Some of it is usually not in the derivation, and that part needs
+saying another way.
+
+### A third reader: the build
+
+The amendment above distinguishes a maintainer misled by prose from a program misled by a data
+structure. There is a third case, and this repository had it undetected.
+
+`aldus-e2e` composes the workspace through package entry points, which resolve to `dist/`. Editing
+a source file and running those tests directly exercises the _previous_ build and reports green.
+The stale artifact is a build; the reader it misleads is a person; and the authority it carries is
+the strongest of the three, because a passing test is what people trust most.
+
+What makes it worse than a stale comment is the indistinguishability:
+
+> A mutation that was never loaded and a mutation that had no effect produce identical output.
+
+The comfortable readings — "the guard is unnecessary", "my test is weak" — are both wrong in the
+same direction, and the result contains nothing that points at the real cause. The adopter hit
+this twice in one migration, and notes that both times the wrong conclusion was the comfortable
+one. That is the argument for a mechanical tripwire over more care, and it is the same argument
+their workspace near-miss made: care was available and did not generalise.
+
+`packages/aldus-e2e/test/fresh-build.test.ts` is the tripwire, and it was proven against the real
+scenario before being trusted — an unbuilt edit fails and names the package.
+
 ## Consequences
 
 - Some prose becomes less readable to gain this. A sentence carrying an interpolated constant
