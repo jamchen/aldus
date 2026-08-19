@@ -150,6 +150,19 @@ jobs:
           node scripts/publish-dirs.mjs > "${RUNNER_TEMP}/publish-dirs.txt"
           while IFS= read -r dir; do
             [ -n "${dir}" ] || continue
+            name="$( cd "${dir}" && node -p "require('./package.json').name" )"
+            version="$( cd "${dir}" && node -p "require('./package.json').version" )"
+
+            # Skip what is already on the registry, so a release resumes instead of dying on its
+            # own earlier success. A publish set is twelve separate writes and any of them can
+            # fail — a missing trusted publisher, a network blip, a rate limit — and without this
+            # the retry stops on the first package that worked last time. Matched on the exact
+            # name@version, so this can never skip a version that has not actually been published.
+            if npm view "${name}@${version}" version > /dev/null 2>&1; then
+              echo "already published, skipping: ${name}@${version}"
+              continue
+            fi
+
             echo "::group::publish ${dir}"
             ( cd "${dir}" && npm publish --tag next --access public --provenance )
             echo "::endgroup::"
