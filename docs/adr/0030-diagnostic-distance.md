@@ -77,3 +77,55 @@ explains the current refusal satisfies the letter and not the purpose.
 - **Add a diagnostic mode that dumps resolved configuration.** Rejected as a substitute — it helps
   someone who already suspects a configuration problem, which is the step the misleading message
   prevented them from reaching.
+
+## Amendment, 2026-08-19
+
+Two further instances arrived after this ADR was accepted, and between them they extend it in a
+direction the original text did not cover. The decision above is unchanged; this adds to it.
+
+### A sixth instance, and the detection rule it suggests
+
+`AldusContext.runnerFor` built a `StageRunner` without an `artifacts` recorder (#67), so
+`registerOutput` refused for every stage run through `AldusServices` or the CLI. The capability
+existed on the context, was reachable as `context.artifacts`, and was unusable from every stage
+the services actually run. Same shape as the four above: an input accepted at one layer and
+silently discarded at the next.
+
+What makes it worth recording separately is **why the test suite did not catch it.** Every
+`registerOutput` test in the repository built a `StageRunner` by hand. None went through
+`AldusServices` — the only path the CLI or an adopter ever takes. The capability was tested
+everywhere except where it was used.
+
+That generalises into a question worth asking of every injected port:
+
+> **Does the composed stack exercise this, or only a hand-built one?**
+
+The adopter put the same observation in more general terms, about a different set of defects on
+their side: _the path nobody takes is the one that is wrong, and a test that takes a different
+path is what lets it stay wrong._ A hand-built fixture is not a weaker version of the real
+composition — it is a different composition, and it is the one where the wiring bug cannot occur.
+
+### The recommendation form of the same defect
+
+The original text treats the failure as **a fact the runtime holds and does not say.** Ordering
+edges (ADR-0028) surfaced the other orientation: **a fact the runtime holds and says wrongly.**
+
+Before edges, an adopter could enforce ordering themselves — a stage checking its own
+preconditions can refuse. What they could not do is stop `status` from _recommending_ the stage
+one line earlier. The adopter's report:
+
+> An operator was being told to run something that would then refuse. That asymmetry was
+> invisible to me until it went away.
+
+This is worth stating as its own consequence because the enforcement argument is the weaker one
+and it is the argument that was originally made for this feature:
+
+3. **A runtime that recommends an action it will then refuse has told the operator something
+   false.** No amount of correct refusal downstream repairs it. Where the runtime both advises and
+   enforces, the advice is bound by the same facts as the enforcement — a check that runs in the
+   refusal path and not in the recommendation path is a half-implemented rule, and the half that
+   is missing is the one the operator reads first.
+
+The ordering of checks follows from this rather than from taste. Ordering is checked before gates
+because with gates first an operator is told to decide a gate whose subjects the unrun predecessor
+has not produced — a recommendation that is not merely premature but unsatisfiable.
