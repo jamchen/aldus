@@ -39,7 +39,12 @@ describe("no association declared", () => {
       gates: twoGates,
     });
 
-    expect(result.next).toEqual([]);
+    // The stage stays blocked, which is what this test is about. What changed with #86 is that
+    // the gate holding it up is now offered: telling an operator "release-publish blocks
+    // narration" while also telling them there is nothing to do is incoherent, and the second
+    // half was the false one.
+    expect(result.next.map((action) => action.gateId)).toEqual(["release-publish"]);
+    expect(result.next.every((action) => action.stageId === undefined)).toBe(true);
     const blocked = result.blocked.find((entry) => entry.stageId === "narration");
     expect(blocked?.gateId).toBe("release-publish");
     // No mention of a graph: none was declared, and suggesting one here would be noise.
@@ -75,7 +80,10 @@ describe("a stage that declares its gates", () => {
       gates: twoGates,
     });
 
-    expect(result.next).toEqual([]);
+    // No stage is offered — the stage is genuinely blocked. The gate it requires is offered,
+    // because deciding it is the operator's next action (#86).
+    expect(result.next.map((action) => action.stageId)).toEqual([undefined]);
+    expect(result.next.map((action) => action.gateId)).toEqual(["release-publish"]);
     const blocked = result.blocked.find((entry) => entry.stageId === "publish-step");
     expect(blocked?.gateId).toBe("release-publish");
     expect(blocked?.reason).toContain("requires it");
@@ -141,7 +149,11 @@ describe("a stage left out of a graph that declares others", () => {
       gates: twoGates,
     });
 
-    expect(result.next.map((action) => action.stageId)).toEqual(["declared"]);
+    // "declared" is offered; "forgotten" is not. The gate holding "forgotten" up is offered
+    // alongside it (#86), so filter to stage actions to keep this test about the omission.
+    expect(
+      result.next.filter((action) => action.kind === "run-stage").map((a) => a.stageId),
+    ).toEqual(["declared"]);
     const blocked = result.blocked.find((entry) => entry.stageId === "forgotten");
     expect(blocked?.reason).toMatch(/not declared in the workflow graph/i);
   });
@@ -204,5 +216,81 @@ describe("the association narrows blocking without reordering priorities", () =>
           entry.gateId === "release-publish" && /must be satisfied first/i.test(entry.reason),
       ),
     ).toBe(true);
+  });
+});
+
+describe("a gate nobody has decided is a next action (#86)", () => {
+  /**
+   * `status` reported "nothing is currently safe to do" on a Run whose only outstanding item was
+   * a pending, blocking, decidable gate — while the thing the Run was waiting for was the
+   * operator. Not an omitted item but an omitted category: §13 makes deciding gates the
+   * operator's central act.
+   *
+   * The runtime already knew how to recommend a gate decision. It did it for a drifted approval
+   * and for a stage halted mid-execution. Every gate starts `pending` and only some ever go
+   * `stale`, so the two handled cases were the exceptions and this was the rule.
+   */
+  it("offers the undecided gate that is holding up an otherwise-ready stage", () => {
+    const result = plan({
+      stages: [{ stageId: "script", status: "never_run", requiredGates: ["topic-select"] }],
+      gates: [gateStatus({ gateId: "topic-select", state: "pending" })],
+    });
+
+    const offered = result.next.find((action) => action.kind === "approve-gate");
+    expect(offered?.gateId).toBe("topic-select");
+    expect(offered?.command).toBe("aldus approve topic-select --run run-a");
+    // The whole point: `status` must not be able to say there is nothing to do here.
+    expect(result.next).not.toEqual([]);
+  });
+
+  it("does not offer a gate whose cascade would void the decision", () => {
+    // §13.1: deciding a gate blocked upstream is wasted work — the cascade voids it. Reported as
+    // blocked with the reason, never urged.
+    const result = plan({
+      stages: [{ stageId: "publish", status: "never_run", requiredGates: ["release"] }],
+      gates: [
+        gateStatus({ gateId: "release", state: "blocked_upstream", blockedBy: ["content-freeze"] }),
+      ],
+    });
+
+    expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
+  });
+
+  it("does not offer a gate when an unrun predecessor still has to produce what it binds", () => {
+    // ADR-0028's ordering-before-gates rule, which is what keeps this recommendation honest.
+    // Urging a decision whose subjects do not exist yet is worse than premature: it is
+    // unsatisfiable, and it is the failure the ordering check was added to prevent.
+    const result = plan({
+      stages: [
+        // Declares it needs no gate: otherwise ADR-0021 blocks it conservatively and the gate
+        // reaches the recommendation through *this* stage, which is not what is under test.
+        { stageId: "render", status: "never_run", requiredGates: [] },
+        {
+          stageId: "review",
+          status: "never_run",
+          after: ["render"],
+          requiredGates: ["human-ear"],
+        },
+      ],
+      gates: [gateStatus({ gateId: "human-ear", state: "pending" })],
+    });
+
+    expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
+    // Running the predecessor is what makes progress, and that is what is offered.
+    expect(result.next.map((action) => action.stageId)).toEqual(["render"]);
+  });
+
+  it("does not offer an advisory gate, because an advisory gate blocks nothing", () => {
+    // This pins the invariant the recommendation relies on rather than a second guard beside it:
+    // an advisory gate never becomes a stage blocker, so it never reaches the set of gates
+    // standing in the way. The load-bearing assertion is the first one — if advisory gates ever
+    // started blocking, the stage would stop being offered and this fails there first.
+    const result = plan({
+      stages: [{ stageId: "script", status: "never_run", requiredGates: ["style-note"] }],
+      gates: [gateStatus({ gateId: "style-note", state: "pending", blocking: false })],
+    });
+
+    expect(result.next.map((action) => action.stageId)).toEqual(["script"]);
+    expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
   });
 });

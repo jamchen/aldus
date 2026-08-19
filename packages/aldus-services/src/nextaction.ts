@@ -283,6 +283,15 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
     }
   }
 
+  /**
+   * Gates that are the reason an otherwise-ready stage cannot run (#86).
+   *
+   * Filled by the stage loop below and drained after it. A gate reaches this set only when the
+   * stage's ordering predecessors have already succeeded, which is what keeps the recommendation
+   * from urging a decision whose subjects do not exist yet.
+   */
+  const gatesStandingInTheWay = new Set<string>();
+
   // 3. Failed stages.
   for (const stage of stages) {
     if (stage.status !== "failed") continue;
@@ -346,6 +355,11 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
     const blocker =
       orderingBlockerIn(stage, stages) ?? blockerFor(stage, gates, gateById, associationDeclared);
     if (blocker !== undefined) {
+      // A gate blocking a stage whose ordering is already satisfied is the thing standing in the
+      // way, and deciding it is the operator's next action. Recorded here rather than derived
+      // from the gate list, because only this loop knows the gate is blocking a stage that is
+      // otherwise ready — the ordering blocker was consulted first and lost (ADR-0028).
+      if (blocker.gateId !== undefined) gatesStandingInTheWay.add(blocker.gateId);
       blocked.push({
         kind: "run-stage",
         summary: `Run "${stage.stageId}"`,
@@ -366,6 +380,40 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
       command: `aldus run ${stage.stageId} --run ${run.runId}`,
       stageId: stage.stageId,
       priority: PRIORITY.runStage,
+    });
+  }
+
+  // 5. Gates that are simply waiting on a person (#86).
+  //
+  // The runtime already recommended deciding a gate in two narrower situations — a drifted
+  // approval, and a stage halted mid-execution. Neither covers the ordinary one: a gate that has
+  // never been decided, required by a stage that has not run. Every gate starts `pending` and
+  // only some ever go `stale`, so the handled cases were the exceptions and this was the rule.
+  //
+  // Without it `status` reported "nothing is currently safe to do" while the thing the Run waited
+  // for was the operator — not an omitted item but an omitted category, since §13 makes deciding
+  // gates the operator's central act.
+  const alreadyOffered = new Set(
+    next.filter((action) => action.gateId !== undefined).map((action) => action.gateId),
+  );
+  for (const gateId of gatesStandingInTheWay) {
+    if (alreadyOffered.has(gateId)) continue;
+    const gate = gateById.get(gateId);
+    // `stale` is handled above with its own wording, and `blocked_upstream` is deliberately not
+    // offered: deciding it now would be voided by the cascade (§13.1).
+    if (gate === undefined || !DECIDABLE_STATES.has(gate.state) || gate.state === "stale") continue;
+    // No check that the gate is blocking: `blockerFor` only ever returns one that is, so an
+    // advisory gate cannot reach this set. Asserted in the tests rather than re-checked here —
+    // a second guard for a condition that cannot occur reads as load-bearing and is never
+    // exercised, which is worse than relying on the invariant out loud.
+    next.push({
+      kind: "approve-gate",
+      summary:
+        `Decide "${gate.gateId}": it has not been decided, and it is what is holding up work ` +
+        `(${gate.level === "human_oracle" ? "human judgement required" : gate.level}).`,
+      command: `aldus approve ${gate.gateId} --run ${run.runId}`,
+      gateId: gate.gateId,
+      priority: PRIORITY.gateAwaitingDecision,
     });
   }
 
