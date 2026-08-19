@@ -1,8 +1,8 @@
 {
   "name": "@aldus-runtime/file-store",
-  "version": "0.2.0-next.0",
+  "version": "0.2.0-next.1",
   "type": "module",
-  "description": "Aldus File Store \u2014 file-backed Episode, Run, and Event stores with atomic writes and crash recovery.",
+  "description": "Aldus File Store — file-backed Episode, Run, and Event stores with atomic writes and crash recovery.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -33,10 +33,10 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "0.2.0-next.0"
+    "@aldus-runtime/core": "0.2.0-next.1"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "0.2.0-next.0",
+    "@aldus-runtime/testkit": "0.2.0-next.1",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
