@@ -21,7 +21,7 @@ import {
   type ArtifactRef,
   type Reconstructability,
 } from "@aldus-runtime/core";
-import { WorkspaceLayout, type LockManager } from "@aldus-runtime/file-store";
+import { WorkspaceLayout, isNotFound, type LockManager } from "@aldus-runtime/file-store";
 
 import { LocalDirectoryArchive, localPathFromUri, type ArtifactArchive } from "./archive.js";
 import { planCleanup, type CleanupPlan } from "./cleanup.js";
@@ -85,11 +85,31 @@ export interface ArtifactRegistryOptions {
 }
 
 /** Result of removing working files after a cleanup plan. */
+/**
+ * A short, value-free description of a filesystem error (§19.2).
+ *
+ * The `code` and nothing else: an error message can carry a path, and a path can carry an
+ * adopter's episode naming. The operator has the artifact id from the record beside it.
+ */
+function describeIoError(error: unknown): string {
+  const code =
+    typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown";
+  return `the filesystem refused the delete (${code})`;
+}
+
 export interface CleanupOutcome {
   /** Artifacts whose working file was removed. */
   removed: ArtifactRecord[];
   /** Artifacts whose working file was already absent. */
   alreadyAbsent: ArtifactRecord[];
+  /**
+   * Artifacts whose working file could not be removed, with the reason (#94).
+   *
+   * Distinct from {@link CleanupOutcome.alreadyAbsent}, which is a claim that the file is gone.
+   * A permissions error, a read-only mount or `EBUSY` all leave the bytes on disk, and reporting
+   * them as absent tells the operator the opposite of what happened. Empty in the ordinary case.
+   */
+  failed: { record: ArtifactRecord; reason: string }[];
 }
 
 /** The artifact registry for one workspace. */
@@ -329,6 +349,7 @@ export class ArtifactRegistry {
     // §8.1's `req-00.wav` case — and the plan would then clear a path holding bytes it never
     // examined. Checked as a whole pass first, so a stale plan removes nothing rather than some.
     const stale: { artifactId: string; path: string }[] = [];
+    const unreadable: { artifactId: string; path: string }[] = [];
     const targets: { record: ArtifactRecord; path: string }[] = [];
     for (const record of plan.removable) {
       const path = localPathFromUri(record.artifact.uri);
@@ -336,12 +357,31 @@ export class ArtifactRegistry {
       let actual: string;
       try {
         actual = await sha256File(path);
-      } catch {
-        // Absent, or unreadable. Not the hazard: nothing is lost by not deleting it.
+      } catch (error) {
+        // A file that is genuinely gone is not the hazard — nothing is lost by not deleting it.
+        // A file that cannot be *read* is a different answer, and folding the two together says
+        // "already absent" about bytes that are still on disk (#94). Unverifiable means unsafe to
+        // delete, so it refuses here, before anything has been removed.
+        if (isNotFound(error)) continue;
+        unreadable.push({ artifactId: record.artifact.artifactId, path });
         continue;
       }
       if (actual === record.artifact.sha256) targets.push({ record, path });
       else stale.push({ artifactId: record.artifact.artifactId, path });
+    }
+
+    if (unreadable.length > 0) {
+      throw artifactRegistryError(
+        ArtifactRegistryErrorCodes.CLEANUP_UNVERIFIABLE,
+        `Cleanup refused: ${unreadable.length} working file(s) exist but could not be read, so ` +
+          "there is no way to confirm they still hold the bytes this plan cleared. Deleting them " +
+          "unverified is exactly the risk the check before this one exists to remove.",
+        {
+          category: "io",
+          retryable: true,
+          details: { unreadable: unreadable.map((entry) => entry.artifactId) },
+        },
+      );
     }
 
     if (stale.length > 0) {
@@ -360,6 +400,7 @@ export class ArtifactRegistry {
 
     const removed: ArtifactRecord[] = [];
     const alreadyAbsent: ArtifactRecord[] = [];
+    const failed: { record: ArtifactRecord; reason: string }[] = [];
     const verified = new Map(targets.map((target) => [target.record.artifact.artifactId, target]));
     for (const record of plan.removable) {
       const target = verified.get(record.artifact.artifactId);
@@ -370,11 +411,21 @@ export class ArtifactRegistry {
       try {
         await unlink(target.path);
         removed.push(record);
-      } catch {
-        alreadyAbsent.push(record);
+      } catch (error) {
+        // Collected rather than thrown: deletion is already underway, and a partial cleanup that
+        // throws tells the operator less than one that finishes and reports what did not work.
+        //
+        // The `isNotFound` branch covers one narrow case and no test reaches it: the pre-check
+        // above already established this file exists and hashes correctly, so an `ENOENT` here
+        // means something else deleted it in between. That is a race no test in this file can
+        // construct without a seam, and it is deliberately *not* reported as a failure — the
+        // operator wanted the file gone and it is gone. Stated rather than left to be discovered,
+        // because an untested branch that looks load-bearing is worth flagging as untested.
+        if (isNotFound(error)) alreadyAbsent.push(record);
+        else failed.push({ record, reason: describeIoError(error) });
       }
     }
-    return { removed, alreadyAbsent };
+    return { removed, alreadyAbsent, failed };
   }
 }
 
