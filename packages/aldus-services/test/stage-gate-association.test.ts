@@ -294,3 +294,95 @@ describe("a gate nobody has decided is a next action (#86)", () => {
     expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
   });
 });
+
+describe("the decidable root of a gate dependency chain (#86 residual)", () => {
+  it("offers the pending gate a blocked_upstream gate is waiting on", () => {
+    // `publish` requires `release`, which is blocked upstream by `content-freeze`.
+    // `release` is correctly not offered — deciding it would be voided by the cascade (§13.1).
+    // `content-freeze` is pending, decidable, and the only thing anyone can actually do. Nothing
+    // offered it, because no *stage* required it, so `status` reported nothing to do.
+    const result = plan({
+      stages: [{ stageId: "publish", status: "never_run", requiredGates: ["release"] }],
+      gates: [
+        gateStatus({ gateId: "release", state: "blocked_upstream", blockedBy: ["content-freeze"] }),
+        gateStatus({ gateId: "content-freeze", state: "pending" }),
+      ],
+    });
+
+    expect(result.next.map((action) => action.gateId)).toEqual(["content-freeze"]);
+  });
+});
+
+describe("walking a gate dependency chain safely (#86 residual)", () => {
+  it("follows a chain more than one link deep", () => {
+    const result = plan({
+      stages: [{ stageId: "publish", status: "never_run", requiredGates: ["c"] }],
+      gates: [
+        gateStatus({ gateId: "c", state: "blocked_upstream", blockedBy: ["b"] }),
+        gateStatus({ gateId: "b", state: "blocked_upstream", blockedBy: ["a"] }),
+        gateStatus({ gateId: "a", state: "pending" }),
+      ],
+    });
+
+    expect(result.next.map((action) => action.gateId)).toEqual(["a"]);
+  });
+
+  it("offers every root when a gate waits on more than one", () => {
+    const result = plan({
+      stages: [{ stageId: "publish", status: "never_run", requiredGates: ["c"] }],
+      gates: [
+        gateStatus({ gateId: "c", state: "blocked_upstream", blockedBy: ["a", "b"] }),
+        gateStatus({ gateId: "a", state: "pending" }),
+        gateStatus({ gateId: "b", state: "pending" }),
+      ],
+    });
+
+    expect(result.next.map((action) => action.gateId).sort()).toEqual(["a", "b"]);
+  });
+
+  it("terminates on a cycle in adopter-supplied dependencies rather than hanging", () => {
+    // `blockedBy` comes from the adopter (§4.2), so bad data must not wedge `status` — the one
+    // command an operator runs when they already suspect something is wrong.
+    const result = plan({
+      stages: [{ stageId: "publish", status: "never_run", requiredGates: ["a"] }],
+      gates: [
+        gateStatus({ gateId: "a", state: "blocked_upstream", blockedBy: ["b"] }),
+        gateStatus({ gateId: "b", state: "blocked_upstream", blockedBy: ["a"] }),
+      ],
+    });
+
+    // A cycle has no root, which is the honest answer — and the stage stays blocked and explained.
+    expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
+    expect(result.blocked.some((entry) => entry.stageId === "publish")).toBe(true);
+  });
+
+  it("stops at a resolved gate that still carries its dependency metadata", () => {
+    // The walk must key on *state*, not on the presence of `blockedBy`. A gate that has been
+    // satisfied may still record what it once waited on, and walking past it would offer a
+    // decision for a cascade that has already resolved. Without this the two readings are
+    // indistinguishable, because in every other fixture here they coincide.
+    const result = plan({
+      stages: [{ stageId: "publish", status: "never_run", requiredGates: ["c"] }],
+      gates: [
+        gateStatus({ gateId: "c", state: "blocked_upstream", blockedBy: ["settled"] }),
+        { ...satisfied("settled"), blockedBy: ["deep-root"] },
+        gateStatus({ gateId: "deep-root", state: "pending" }),
+      ],
+    });
+
+    expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
+  });
+
+  it("does not offer a satisfied gate found at the root of a chain", () => {
+    // Reaching a satisfied gate means the cascade is already resolving; there is nothing to decide.
+    const result = plan({
+      stages: [{ stageId: "publish", status: "never_run", requiredGates: ["c"] }],
+      gates: [
+        gateStatus({ gateId: "c", state: "blocked_upstream", blockedBy: ["done"] }),
+        satisfied("done"),
+      ],
+    });
+
+    expect(result.next.filter((action) => action.kind === "approve-gate")).toEqual([]);
+  });
+});
