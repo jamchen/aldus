@@ -144,6 +144,33 @@ The general form: when replacing a restated fact with a computed one, enumerate 
 restatement was asserting. Some of it is usually not in the derivation, and that part needs
 saying another way.
 
+### When the fact belongs to a different program
+
+The decision above offers two mitigations: compute the fact, or pin it with a test. Both assume
+the fact lives in _this_ repository. A claim about a **dependency's** behaviour has neither
+available, and it fails in a way neither mitigation addresses.
+
+The adopter hit it exactly. Their runbook paragraph was edited three times in one session: they
+added `--input '{}'` on meeting #80, then wrote "`--input '{}'` is not optional", then reverted it
+because #81 made it optional again. Every edit was correct when made.
+
+> Documentation describing a dependency's behaviour goes stale on the dependency's schedule, not
+> on mine.
+
+That is why care at writing time cannot help: the fact changes after the writing, and the author
+is not present when it does. Treating it as carelessness produces the wrong fix — more review of
+a sentence that was true at review.
+
+The available mitigation is neither computing nor asserting, but **scoping**: state the version
+the claim was true of. A reader on that pin is served; a reader on a newer one is warned rather
+than misled. It is weaker than derivation, and it is the strongest thing available when the fact
+lives in someone else's repository and moves on their cadence.
+
+This applies to Aldus's own documents wherever they describe a dependency rather than the runtime
+— and it applies to every adopter reading these docs, since Aldus is the dependency whose schedule
+they cannot control. A statement here about how a stage behaves is exactly the class of claim that
+should carry the version it was true of.
+
 ### A third reader: the build
 
 The amendment above distinguishes a maintainer misled by prose from a program misled by a data
