@@ -92,6 +92,16 @@ export interface LocalDirectoryArchiveOptions {
  * observes a half-copied object, and a crash mid-archive leaves no partial object that a later
  * `has()` would mistake for custody.
  */
+/**
+ * Evidence that stored bytes were read back and re-hashed.
+ *
+ * Only producible by the verification itself, so a receipt cannot claim `verified: true` without
+ * one — §8.1's rule that an unverified archive must not release an irreplaceable working file.
+ */
+interface VerifiedDigest {
+  readonly digest: string;
+}
+
 export class LocalDirectoryArchive implements ArtifactArchive {
   readonly archiveId: string;
   readonly #root: string;
@@ -167,9 +177,9 @@ export class LocalDirectoryArchive implements ArtifactArchive {
       // Already held. Verify rather than assume: an archive that reports custody of bytes it has
       // silently lost is worse than one that reports nothing, because §8.1's cleanup gate trusts
       // this answer before deleting the only other copy.
-      await this.#verifyStored(digest, destination);
+      const verified = await this.#verifyStored(digest, destination);
       const stats = await stat(destination);
-      return this.#receipt(digest, destination, stats.size, request.now);
+      return this.#receipt(verified, destination, stats.size, request.now);
     }
 
     await mkdir(dirname(destination), { recursive: true });
@@ -195,9 +205,9 @@ export class LocalDirectoryArchive implements ArtifactArchive {
       );
     }
 
-    await this.#verifyStored(digest, destination);
+    const verified = await this.#verifyStored(digest, destination);
     const stats = await stat(destination);
-    return this.#receipt(digest, destination, stats.size, request.now);
+    return this.#receipt(verified, destination, stats.size, request.now);
   }
 
   async read(sha256: string): Promise<Uint8Array> {
@@ -212,8 +222,18 @@ export class LocalDirectoryArchive implements ArtifactArchive {
     return readFile(path);
   }
 
-  /** Re-hash what was stored, so a receipt records a verified fact. */
-  async #verifyStored(digest: string, path: string): Promise<void> {
+  /**
+   * Re-hash what was stored, so a receipt records a verified fact.
+   *
+   * Returns the evidence rather than nothing, because {@link ArchiveReceipt.verified} is what
+   * lets `planCleanup` release an `irreplaceable` working file for deletion. Both call sites
+   * happened to verify before building a receipt, but nothing made them: `#receipt` set
+   * `verified: true` unconditionally, so a third call site that forgot would have produced a
+   * receipt claiming a check that never ran — and that claim authorizes deleting bytes nothing
+   * can regenerate. The token is now the only way to obtain a receipt, so the compiler enforces
+   * what the convention was carrying.
+   */
+  async #verifyStored(digest: string, path: string): Promise<VerifiedDigest> {
     const stored = await sha256File(path);
     if (stored !== digest) {
       throw artifactRegistryError(
@@ -223,13 +243,14 @@ export class LocalDirectoryArchive implements ArtifactArchive {
         { category: "io", retryable: false, details: { path, expected: digest, actual: stored } },
       );
     }
+    return { digest };
   }
 
-  #receipt(digest: string, path: string, sizeBytes: number, now: string): ArchiveReceipt {
+  #receipt(verified: VerifiedDigest, path: string, sizeBytes: number, now: string): ArchiveReceipt {
     return {
       archiveId: this.archiveId,
       uri: pathToFileURL(path).href,
-      sha256: digest,
+      sha256: verified.digest,
       sizeBytes,
       archivedAt: now,
       verified: true,
