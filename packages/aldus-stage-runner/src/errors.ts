@@ -33,6 +33,44 @@ export const StageRunnerErrorCodes = {
    * it should fail on the declaration, not halfway through its side effects.
    */
   STAGE_CAPABILITY_UNAVAILABLE: "ALDUS_STAGE_CAPABILITY_UNAVAILABLE",
+  /**
+   * A stage asked for a Worker that is not registered under that exact id and version (ADR-0035).
+   *
+   * Versions resolve exactly and nothing selects a nearest or latest one: §20 requires a completed
+   * Run to stay explicable, and a registry that silently upgraded would make the trace describe an
+   * implementation that did not run.
+   */
+  /**
+   * A stage declares a deduplicable external effect and supplies no key derivation (ADR-0036).
+   *
+   * A configuration error rather than a warning. The alternative is silently handing the stage the
+   * runtime-derived invocation fingerprint, which is stable across content the stage read but did
+   * not declare — and the consumer is an external system nobody here can ask.
+   */
+  STAGE_EFFECT_KEY_REQUIRED: "ALDUS_STAGE_EFFECT_KEY_REQUIRED",
+  WORKER_NOT_REGISTERED: "ALDUS_WORKER_NOT_REGISTERED",
+  /**
+   * A different Worker object was registered under an id and version already in use.
+   *
+   * Rebinding a version is refused for the same reason a stage version cannot be rebound: a Run
+   * that executed the earlier implementation would afterwards read as having executed this one.
+   */
+  WORKER_ALREADY_REGISTERED: "ALDUS_WORKER_ALREADY_REGISTERED",
+  /**
+   * A Worker does not offer a capability the stage requires (§10, §11).
+   *
+   * Fails closed: a Worker declaring nothing does not thereby satisfy a requirement. A capability
+   * check that passes because it could not run is worse than absent, because a reader counts it
+   * as protection that is not there (ADR-0030).
+   */
+  WORKER_CAPABILITY_UNAVAILABLE: "ALDUS_WORKER_CAPABILITY_UNAVAILABLE",
+  /**
+   * A stage invoked a Worker in a composition that wired no Worker registry (ADR-0035).
+   *
+   * Deliberately a refusal rather than a no-op. The capability that exists and is unreachable is
+   * the defect #67 was, and a Worker seam nothing wired would repeat it one layer up.
+   */
+  WORKER_REGISTRY_UNAVAILABLE: "ALDUS_WORKER_REGISTRY_UNAVAILABLE",
   /** The stage's retry budget was exhausted without a success (contract §19.1). */
   STAGE_RETRIES_EXHAUSTED: "ALDUS_STAGE_RETRIES_EXHAUSTED",
   /** Execution was cancelled by an operator or a supervising runtime (contract §19.1). */

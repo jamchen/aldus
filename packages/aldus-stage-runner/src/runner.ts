@@ -45,6 +45,7 @@ import {
   type StageOutcome,
   type StageOutputRegistration,
   type StageRunResult,
+  deriveInvocationKey,
 } from "./definition.js";
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
 import type { StageRegistry } from "./registry.js";
@@ -382,22 +383,42 @@ export class StageRunner {
     const outputs: ArtifactRef[] = [];
     const notes: string[] = [];
 
-    const idempotencyKey =
-      definition.idempotency.kind === "idempotent" && definition.idempotency.key !== undefined
-        ? definition.idempotency.key(input.input)
-        : digestJson({
+    // Two keys, because they are two contracts (ADR-0036). The invocation key fingerprints the
+    // *declared work* for the trace; the effect key is what an external system deduplicates on and
+    // is never derived by fallback. One value served both and was wrong for each: measured as a
+    // constant per stage for any stage whose input is `{}`, which is the correct design for a
+    // stage that resolves from the Run.
+    const invocationKey = deriveInvocationKey({
+      episodeId: input.manifest.episode.episodeId,
+      stageId: definition.id,
+      stageVersion: definition.version,
+      input: input.input,
+      configuration: input.configuration,
+      inputArtifacts: input.inputArtifacts,
+    });
+
+    const effectKey =
+      definition.idempotency.kind === "idempotent_external_effect"
+        ? definition.idempotency.effectKey({
+            episodeId: input.manifest.episode.episodeId,
             stageId: definition.id,
             stageVersion: definition.version,
             input: input.input,
             configuration: input.configuration,
-          });
+            inputArtifacts: input.inputArtifacts.map((artifact) => ({
+              artifactId: artifact.artifactId,
+              sha256: artifact.sha256,
+            })),
+          })
+        : undefined;
 
     const metadata: AttemptMetadata = {
       stageVersion: definition.version,
       configurationHash: input.configurationHash,
       configuration: redact(input.configuration) as Record<string, unknown>,
-      idempotencyKey,
-      idempotent: definition.idempotency.kind === "idempotent",
+      invocationKey,
+      ...(effectKey !== undefined ? { effectKey } : {}),
+      idempotent: definition.idempotency.kind !== "not_idempotent",
       ...(definition.idempotency.kind === "not_idempotent"
         ? { nonIdempotentReason: definition.idempotency.reason }
         : {}),
@@ -416,7 +437,7 @@ export class StageRunner {
     await this.#record(manifest, definition, base, metadata, {
       action: STAGE_EVENT_ACTIONS.attemptQueued,
       previousState: undefined,
-      idempotencyKey,
+      invocationKey,
     });
 
     const startedAt = this.#iso();
@@ -424,7 +445,7 @@ export class StageRunner {
     await this.#record(manifest, definition, running, metadata, {
       action: STAGE_EVENT_ACTIONS.attemptStarted,
       previousState: "queued",
-      idempotencyKey,
+      invocationKey,
     });
 
     // Cancellation is checked here as well as inside the stage: a stage that never looks at its
@@ -445,7 +466,8 @@ export class StageRunner {
       actor: this.#options.actor,
       configuration: input.configuration,
       configurationHash: input.configurationHash,
-      idempotencyKey,
+      invocationKey,
+      ...(effectKey !== undefined ? { effectKey } : {}),
       inputArtifacts: input.inputArtifacts,
       signal: controller.signal,
       recordOutput: (artifact) => {
@@ -510,7 +532,7 @@ export class StageRunner {
     if (controller.signal.aborted) {
       return this.#terminal(manifest, definition, settled, withNotes, {
         status: "cancelled",
-        idempotencyKey,
+        invocationKey,
         error: cancellationError(definition.id, ordinal),
       });
     }
@@ -528,14 +550,14 @@ export class StageRunner {
           },
           {
             status: "waiting_for_gate",
-            idempotencyKey,
+            invocationKey,
             gateId: thrown.gateId,
           },
         );
       }
       return this.#terminal(manifest, definition, settled, withNotes, {
         status: "failed",
-        idempotencyKey,
+        invocationKey,
         error: redactError(
           toStructuredError(thrown, {
             code: StageRunnerErrorCodes.STAGE_EXECUTION_FAILED,
@@ -566,7 +588,7 @@ export class StageRunner {
         },
         {
           status: "waiting_for_gate",
-          idempotencyKey,
+          invocationKey,
           gateId: outcome.gateId,
         },
       );
@@ -579,7 +601,7 @@ export class StageRunner {
       // runner crash — and it is recorded as one, with the outputs it did produce.
       return this.#terminal(manifest, definition, settled, withNotes, {
         status: "failed",
-        idempotencyKey,
+        invocationKey,
         error: {
           code: StageRunnerErrorCodes.STAGE_OUTPUT_INVALID,
           category: "validation",
@@ -594,7 +616,7 @@ export class StageRunner {
 
     return this.#terminal<O>(manifest, definition, settled, withNotes, {
       status: "succeeded",
-      idempotencyKey,
+      invocationKey,
       output: parsedOutput.data,
     });
   }
@@ -606,7 +628,7 @@ export class StageRunner {
     metadata: AttemptMetadata,
     settle: {
       status: "succeeded" | "failed" | "cancelled" | "waiting_for_gate";
-      idempotencyKey: string;
+      invocationKey: string;
       output?: O;
       gateId?: string;
       error?: StructuredError;
@@ -621,7 +643,7 @@ export class StageRunner {
     await this.#record(manifest, definition, final, metadata, {
       action: actionFor(settle.status),
       previousState: "running",
-      idempotencyKey: settle.idempotencyKey,
+      invocationKey: settle.invocationKey,
       ...(settle.error !== undefined ? { error: settle.error } : {}),
     });
 
@@ -652,7 +674,7 @@ export class StageRunner {
     options: {
       action: string;
       previousState: StageStatus | undefined;
-      idempotencyKey: string;
+      invocationKey: string;
       error?: StructuredError;
     },
   ): Promise<void> {
@@ -678,7 +700,7 @@ export class StageRunner {
       resultingState: attempt.status,
       inputRefs: attempt.inputArtifacts.map((artifact) => artifact.artifactId),
       outputRefs: attempt.outputArtifacts.map((artifact) => artifact.artifactId),
-      idempotencyKey: options.idempotencyKey,
+      invocationKey: options.invocationKey,
       ...(options.error !== undefined ? { error: options.error } : {}),
       details: details as unknown as Record<string, unknown>,
     };

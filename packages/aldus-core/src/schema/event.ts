@@ -71,6 +71,26 @@ export const aldusEventSchema = z
      */
     idempotencyKey: nonEmptyString.optional(),
     /**
+     * Fingerprint of the declared work of a stage attempt (§20; ADR-0036).
+     *
+     * Distinct from {@link idempotencyKey}, which conflated this with an external deduplication
+     * guarantee and was measured as a constant per stage for any stage resolving its inputs from
+     * the Run. This identifies episode, stage, version, input, configuration and declared input
+     * artifact digests — and identifies only what the stage declared.
+     *
+     * Optional: `0.1.0` records predate it, and events that are not stage attempts have no
+     * declared work to fingerprint.
+     */
+    invocationKey: nonEmptyString.optional(),
+    /**
+     * The key an external system deduplicated this effect on (§19.1; ADR-0036).
+     *
+     * Present only where a stage declared `idempotent_external_effect` and supplied a derivation.
+     * Absence means no deduplicable external effect was declared — never that one was needed and
+     * defaulted, which is the distinction ADR-0036 exists to make recordable.
+     */
+    effectKey: nonEmptyString.optional(),
+    /**
      * Per-run monotonic ordinal, where a store provides one.
      *
      * Optional by deliberate choice (ADR-0004). §6.4 does not require it, and Core's ULIDs

@@ -88,8 +88,33 @@ export interface AttemptMetadata {
   configurationHash: string;
   /** The configuration itself, redacted (contract §19.2). */
   configuration: Record<string, unknown>;
-  /** Deduplication key for external side effects (contract §19.1). */
-  idempotencyKey: string;
+  /**
+   * Fingerprint of the declared work (contract §20; ADR-0036).
+   *
+   * Identifies episode, stage, version, validated input, configuration and the digests of
+   * declared input artifacts. **Not** `runId`: two Runs doing the same declared work share a
+   * fingerprint, which is what makes it one.
+   *
+   * Identifies only what Aldus can see. A stage that reads files by path or convention without
+   * declaring them as input artifacts has content this does not cover, and this key must never be
+   * offered to an external system as a deduplication guarantee.
+   *
+   * Optional only because a cache written before ADR-0036 has no such field. Every attempt this
+   * runtime records has one. The old `idempotencyKey` is deliberately not migrated into it: that
+   * value was measured as a constant per stage, and carrying a wrong answer forward under a
+   * better name is what this change exists to prevent.
+   */
+  invocationKey?: string | undefined;
+  /**
+   * The key an external system deduplicates the stage's effect on (contract §19.1; ADR-0036).
+   *
+   * Present only when the stage declared `idempotent_external_effect`, in which case the
+   * derivation was required. Absent means the stage declared no deduplicable external effect —
+   * never that one was needed and defaulted.
+   */
+  effectKey?: string | undefined;
+  /** Retained so `0.1.0` attempt records stay readable (ADR-0003, ADR-0036). */
+  idempotencyKey?: string | undefined;
   /** Whether the stage declared itself idempotent, and why not when it did not (contract §11). */
   idempotent: boolean;
   /** Reason the stage is not idempotent, when it declared itself so. */
@@ -129,7 +154,13 @@ const attemptMetadataSchema = z.object({
   stageVersion: z.string(),
   configurationHash: z.string(),
   configuration: z.record(z.string(), z.unknown()),
-  idempotencyKey: z.string(),
+  // `invocationKey` and `effectKey` are current; `idempotencyKey` is optional so a cache written
+  // by 0.1.0 still parses (ADR-0036). The old value is not migrated into the new field: it was
+  // measured as a constant per stage, and carrying a wrong answer forward under a better name is
+  // the one thing this change exists to prevent.
+  invocationKey: z.string().optional(),
+  effectKey: z.string().optional(),
+  idempotencyKey: z.string().optional(),
   idempotent: z.boolean(),
   nonIdempotentReason: z.string().optional(),
   gateId: z.string().optional(),
