@@ -46,6 +46,14 @@ export const TtsLedgerErrorCodes = {
   LEXICON_CONFLICT: "ALDUS_TTS_LEXICON_CONFLICT",
   /** A decision was recorded on a take that already carries one. */
   TAKE_ALREADY_DECIDED: "ALDUS_TTS_TAKE_ALREADY_DECIDED",
+  /**
+   * A non-human actor tried to decide a take (contract §13.3).
+   *
+   * §13.3 keeps final performance approval human-owned until a scoped evaluator is demonstrably
+   * reliable. Gates enforce this through `permittedActorKinds`; takes did not, and accepting a
+   * take *is* the human-ear judgement for an adopter who reviews per segment (#64).
+   */
+  TAKE_ACTOR_NOT_PERMITTED: "ALDUS_TTS_TAKE_ACTOR_NOT_PERMITTED",
 } as const;
 
 /** @see TtsLedgerErrorCodes */
