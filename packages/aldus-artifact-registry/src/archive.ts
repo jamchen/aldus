@@ -24,7 +24,7 @@
 
 import { copyFile, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { sha256Bytes, sha256File, normaliseDigest } from "./digest.js";
 import { ArtifactRegistryErrorCodes, artifactRegistryError } from "./errors.js";
@@ -360,11 +360,24 @@ export class MemoryArtifactArchive implements ArtifactArchive {
   }
 }
 
-/** Extract a filesystem path from a `file:` URI, or return `undefined` for any other scheme. */
+/**
+ * Extract a filesystem path from a `file:` URI, or return `undefined` for any other scheme.
+ *
+ * `fileURLToPath` and not `URL.pathname`, because `pathname` is **percent-encoded** (#103). For an
+ * ASCII path the two are byte-identical, which is why this read correctly for as long as every
+ * path anyone tried was ASCII. For anything else the caller was handed a literal `%E7%A4%BE…`
+ * string naming a file that does not exist — and the failure surfaced as "the bytes could not be
+ * read", which is true and points at the wrong layer.
+ *
+ * `fileURLToPath` also rejects a `file:` URI with a non-empty, non-`localhost` host, which
+ * `URL.pathname` silently accepted by returning a path on this machine for a URI naming another
+ * one. The `catch` now carries that too, and `undefined` keeps its meaning: not local bytes this
+ * process can reach.
+ */
 export function localPathFromUri(uri: string): string | undefined {
   if (!uri.startsWith("file:")) return undefined;
   try {
-    return new URL(uri).pathname;
+    return fileURLToPath(uri);
   } catch {
     return undefined;
   }

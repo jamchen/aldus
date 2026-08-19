@@ -18,7 +18,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { LocalDirectoryArchive } from "../src/archive.js";
+import { LocalDirectoryArchive, localPathFromUri } from "../src/archive.js";
 import { planCleanup } from "../src/cleanup.js";
 import { ArtifactRegistryErrorCodes } from "../src/errors.js";
 import { objectRelativePath, readableFileName } from "../src/paths.js";
@@ -221,5 +221,89 @@ describe("the failure this package prevents", () => {
     expect(nameA).not.toBe(nameB);
     // Still recognisable to the person who has to listen to it.
     expect(nameA.endsWith("req-00.wav")).toBe(true);
+  });
+});
+
+describe("a working path that is not ASCII (#103)", () => {
+  /**
+   * `localPathFromUri` returned `URL.pathname`, which is percent-encoded. For an ASCII path the
+   * encoded and decoded forms are byte-identical, so it read correctly for as long as every path
+   * anyone tried was ASCII — and every fixture in this repository was.
+   *
+   * Reported by an adopter whose episode slugs carry their Han topic verbatim rather than
+   * transliterating it into something unrecognisable in a log line. Three of their seven episodes
+   * were affected, and the artifact that could not be archived was classified `irreplaceable`
+   * because the upstream collection it snapshots returns a different set when re-queried.
+   */
+  const HAN = "社宅監理/req-00.wav";
+
+  it("archives an artifact whose working path contains Han characters", async () => {
+    const path = await writeWorkingFile(workspace, HAN, EPISODE_A_AUDIO);
+    const record = await registry.register(
+      registration(path, { reconstructability: "irreplaceable", producerRunId: "run-a" }),
+    );
+
+    const archived = await registry.archiveArtifact(record.artifact.artifactId);
+
+    expect(archived.archive?.verified).toBe(true);
+    const bytes = await registry.archive.read(record.artifact.sha256);
+    expect(Buffer.from(bytes).toString("utf8")).toBe(EPISODE_A_AUDIO);
+  });
+
+  it("does not report a present non-ASCII file as already absent", async () => {
+    // The consequence the report did not name, and the worse of the two because it is silent.
+    // A mangled path throws ENOENT, which is exactly what a genuinely deleted file throws — so
+    // the absent/unreadable distinction added in #94 cannot see it. Cleanup reported
+    // `alreadyAbsent: 1` for a file that was on disk the whole time.
+    const path = await writeWorkingFile(workspace, HAN, EPISODE_A_AUDIO);
+    const record = await registry.register(
+      registration(path, { reconstructability: "reproducible", producerRunId: "run-a" }),
+    );
+    const plan = planCleanup([record.artifact.artifactId], await registry.list());
+
+    const outcome = await registry.executeCleanup(plan);
+
+    expect(outcome.removed).toHaveLength(1);
+    expect(outcome.alreadyAbsent).toEqual([]);
+    await expect(readFile(path, "utf8")).rejects.toThrow();
+  });
+
+  it.each([
+    ["Han", "社宅監理/req-00.wav"],
+    ["a space", "two words/req-00.wav"],
+    ["a hash", "chapter#3/req-00.wav"],
+    ["a question mark", "why not?/req-00.wav"],
+    ["a plus", "a+b/req-00.wav"],
+    ["an emoji", "🎙/req-00.wav"],
+    ["a percent sign", "100% done/req-00.wav"],
+  ])("round-trips a path containing %s", async (_label, relativePath) => {
+    // One awkward script proves one encoding. These are the characters a URI treats specially —
+    // `#` truncates at a fragment, `?` at a query, `%` starts an escape, `+` is not a space in a
+    // path but is easy to mishandle — plus a non-BMP emoji, which is where a surrogate-pair bug
+    // would show. The corpus is the point: #103 survived because every fixture was ASCII.
+    const path = await writeWorkingFile(workspace, relativePath, EPISODE_A_AUDIO);
+    const record = await registry.register(
+      registration(path, { reconstructability: "reproducible" }),
+    );
+    expect(localPathFromUri(record.artifact.uri)).toBe(path);
+  });
+
+  it("refuses at registration if a URI cannot lead back to its own file", async () => {
+    // The guard the reporter asked for. Every step before archival reads the path it was handed,
+    // so an encoding defect stays invisible until §8.1's precondition for cleanup — the last
+    // thing anyone does. This moves it to the first moment the URI exists.
+    const path = await writeWorkingFile(workspace, HAN, EPISODE_A_AUDIO);
+    const registered = await registry.register(
+      registration(path, { reconstructability: "reproducible" }),
+    );
+
+    // The round trip is the property; assert it directly so this fails if either half drifts.
+    //
+    // The *refusal* itself has no test, and cannot easily have one: it fires only when the
+    // runtime's own path handling is broken, which no caller can arrange through the public API.
+    // It is proven by mutation instead — reintroducing `URL.pathname` makes registration refuse
+    // with `ARTIFACT_URI_UNRESOLVABLE` rather than letting the defect reach archival. Stated
+    // because a guard nothing exercises should say how it was checked.
+    expect(localPathFromUri(registered.artifact.uri)).toBe(path);
   });
 });
