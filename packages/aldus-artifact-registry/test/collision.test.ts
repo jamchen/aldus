@@ -19,6 +19,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { LocalDirectoryArchive } from "../src/archive.js";
+import { planCleanup } from "../src/cleanup.js";
+import { ArtifactRegistryErrorCodes } from "../src/errors.js";
 import { objectRelativePath, readableFileName } from "../src/paths.js";
 import { ArtifactRegistry } from "../src/registry.js";
 import {
@@ -140,6 +142,77 @@ describe("the failure this package prevents", () => {
     await registry.archiveArtifact(b.artifact.artifactId);
     const archive = registry.archive as LocalDirectoryArchive;
     expect(await archive.locate(a.artifact.sha256)).toBe(await archive.locate(b.artifact.sha256));
+  });
+
+  it("refuses to execute a plan whose cleared path was rewritten after planning", async () => {
+    // The same failure arriving through cleanup instead of registration.
+    //
+    // Registration defends `req-00.wav` by identity: two takes, two artifactIds, both retained.
+    // A cleanup plan then reintroduces the loss by carrying a *path*. The plan clears take A —
+    // correctly, it is archived — and by the time it executes, the operator has re-recorded into
+    // the same generic name and registered take B, which is irreplaceable and unarchived.
+    //
+    // Deleting on the strength of the older plan discards bytes nothing ever examined, and for
+    // `irreplaceable` no re-run brings them back. `plan.safe` is true throughout and was never
+    // wrong about take A, which is what makes this hard to see.
+    const pathA = await writeWorkingFile(workspace, "takes/req-00.wav", EPISODE_A_AUDIO);
+    const a = await registry.register(
+      registration(pathA, { reconstructability: "irreplaceable", producerRunId: "run-a" }),
+    );
+    await registry.archiveArtifact(a.artifact.artifactId);
+
+    const plan = planCleanup([a.artifact.artifactId], await registry.list());
+    expect(plan.safe).toBe(true);
+
+    // The re-take, at the same generic path.
+    const pathB = await writeWorkingFile(workspace, "takes/req-00.wav", EPISODE_B_AUDIO);
+    const b = await registry.register(
+      registration(pathB, { reconstructability: "irreplaceable", producerRunId: "run-b" }),
+    );
+
+    await expect(registry.executeCleanup(plan)).rejects.toMatchObject({
+      code: ArtifactRegistryErrorCodes.CLEANUP_STALE_PLAN,
+    });
+
+    // The bytes are still there, and still take B's.
+    expect(await readFile(pathB, "utf8")).toBe(EPISODE_B_AUDIO);
+    expect((await registry.get(b.artifact.artifactId))?.artifact.sha256).toBe(b.artifact.sha256);
+  });
+
+  it("removes nothing at all when any one file in the plan is stale", async () => {
+    // Refusing per-file would leave a half-executed plan behind, and the operator would have to
+    // work out which half. The whole pass is checked before anything is unlinked.
+    const pathA = await writeWorkingFile(workspace, "takes/a.wav", EPISODE_A_AUDIO);
+    const pathB = await writeWorkingFile(workspace, "takes/b.wav", EPISODE_B_AUDIO);
+    const a = await registry.register(
+      registration(pathA, { reconstructability: "reproducible", producerRunId: "run-a" }),
+    );
+    const b = await registry.register(
+      registration(pathB, { reconstructability: "reproducible", producerRunId: "run-b" }),
+    );
+    const plan = planCleanup([a.artifact.artifactId, b.artifact.artifactId], await registry.list());
+    expect(plan.safe).toBe(true);
+
+    await writeWorkingFile(workspace, "takes/b.wav", "rewritten after planning");
+
+    await expect(registry.executeCleanup(plan)).rejects.toMatchObject({
+      code: ArtifactRegistryErrorCodes.CLEANUP_STALE_PLAN,
+    });
+    // The untouched file survives too: one stale entry voids the plan, it does not filter it.
+    expect(await readFile(pathA, "utf8")).toBe(EPISODE_A_AUDIO);
+  });
+
+  it("still cleans a plan whose files are unchanged", async () => {
+    // The guard must not make ordinary cleanup impossible.
+    const path = await writeWorkingFile(workspace, "takes/c.wav", EPISODE_A_AUDIO);
+    const record = await registry.register(
+      registration(path, { reconstructability: "reproducible", producerRunId: "run-c" }),
+    );
+    const plan = planCleanup([record.artifact.artifactId], await registry.list());
+
+    const outcome = await registry.executeCleanup(plan);
+    expect(outcome.removed).toHaveLength(1);
+    await expect(readFile(path, "utf8")).rejects.toThrow();
   });
 
   it("gives a human-readable export name that still cannot collide", () => {

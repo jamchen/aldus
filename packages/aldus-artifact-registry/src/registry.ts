@@ -25,7 +25,7 @@ import { WorkspaceLayout, type LockManager } from "@aldus-runtime/file-store";
 
 import { LocalDirectoryArchive, localPathFromUri, type ArtifactArchive } from "./archive.js";
 import { planCleanup, type CleanupPlan } from "./cleanup.js";
-import { digestFile, verifyFileDigest } from "./digest.js";
+import { digestFile, sha256File, verifyFileDigest } from "./digest.js";
 import { ArtifactRegistryErrorCodes, artifactRegistryError } from "./errors.js";
 import { LineageGraph } from "./lineage.js";
 import { ArtifactLayout } from "./paths.js";
@@ -324,16 +324,51 @@ export class ArtifactRegistry {
       );
     }
 
-    const removed: ArtifactRecord[] = [];
-    const alreadyAbsent: ArtifactRecord[] = [];
+    // Re-verify before deleting anything. `plan.safe` was computed against a records snapshot;
+    // the bytes are deleted now. A working path can be rewritten and re-registered in between —
+    // §8.1's `req-00.wav` case — and the plan would then clear a path holding bytes it never
+    // examined. Checked as a whole pass first, so a stale plan removes nothing rather than some.
+    const stale: { artifactId: string; path: string }[] = [];
+    const targets: { record: ArtifactRecord; path: string }[] = [];
     for (const record of plan.removable) {
       const path = localPathFromUri(record.artifact.uri);
-      if (path === undefined) {
+      if (path === undefined) continue;
+      let actual: string;
+      try {
+        actual = await sha256File(path);
+      } catch {
+        // Absent, or unreadable. Not the hazard: nothing is lost by not deleting it.
+        continue;
+      }
+      if (actual === record.artifact.sha256) targets.push({ record, path });
+      else stale.push({ artifactId: record.artifact.artifactId, path });
+    }
+
+    if (stale.length > 0) {
+      throw artifactRegistryError(
+        ArtifactRegistryErrorCodes.CLEANUP_STALE_PLAN,
+        `Cleanup refused: ${stale.length} working file(s) no longer hold the bytes this plan ` +
+          "cleared, so something rewrote them after the plan was made. Deleting them would " +
+          "discard bytes nothing ever examined. Re-plan against the current registry.",
+        {
+          category: "conflict",
+          retryable: true,
+          details: { stale: stale.map((entry) => entry.artifactId) },
+        },
+      );
+    }
+
+    const removed: ArtifactRecord[] = [];
+    const alreadyAbsent: ArtifactRecord[] = [];
+    const verified = new Map(targets.map((target) => [target.record.artifact.artifactId, target]));
+    for (const record of plan.removable) {
+      const target = verified.get(record.artifact.artifactId);
+      if (target === undefined) {
         alreadyAbsent.push(record);
         continue;
       }
       try {
-        await unlink(path);
+        await unlink(target.path);
         removed.push(record);
       } catch {
         alreadyAbsent.push(record);
