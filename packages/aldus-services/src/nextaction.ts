@@ -402,6 +402,23 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
     // `stale` is handled above with its own wording, and `blocked_upstream` is deliberately not
     // offered: deciding it now would be voided by the cascade (§13.1).
     if (gate === undefined || !DECIDABLE_STATES.has(gate.state) || gate.state === "stale") continue;
+    // Decidable by state, not yet decidable in fact: §13.2 requires an approval to bind every
+    // listed value, so approving this would be refused. Reported with what is missing rather than
+    // offered — recommending a command that will be rejected is the defect this whole path exists
+    // to avoid (#91, ADR-0030).
+    const missing = gate.missingSubjects ?? [];
+    if (missing.length > 0) {
+      blocked.push({
+        kind: "approve-gate",
+        summary: `Decide "${gate.gateId}"`,
+        reason:
+          `Nothing has supplied ${missing.map((key) => `"${key}"`).join(", ")}, which ` +
+          `"${gate.gateId}" binds. §13.2 requires an approval to cover every bound value, so it ` +
+          "cannot be decided until those exist — something must produce them first.",
+        gateId: gate.gateId,
+      });
+      continue;
+    }
     // No check that the gate is blocking: `blockerFor` only ever returns one that is, so an
     // advisory gate cannot reach this set. Asserted in the tests rather than re-checked here —
     // a second guard for a condition that cannot occur reads as load-bearing and is never
@@ -669,9 +686,16 @@ function blockerFor(
         gateId,
         kind: "gate",
         enforcement: "enforced",
+        // "Decide it first" is only true advice when it *can* be decided. A gate whose bound
+        // values nobody has supplied cannot be approved (§13.2), and telling an operator to
+        // decide it sends them to do something that will be refused (#91).
         reason:
-          `Gate "${gateId}" is ${gate.state} and is blocking (contract §13). Stage ` +
-          `"${stage.stageId}" requires it. Decide it first.`,
+          (gate.missingSubjects ?? []).length > 0
+            ? `Gate "${gateId}" is ${gate.state} and is blocking (contract §13). Stage ` +
+              `"${stage.stageId}" requires it, and it cannot be decided yet: nothing has ` +
+              `supplied ${(gate.missingSubjects ?? []).map((key) => `"${key}"`).join(", ")}.`
+            : `Gate "${gateId}" is ${gate.state} and is blocking (contract §13). Stage ` +
+              `"${stage.stageId}" requires it. Decide it first.`,
       };
     }
   }

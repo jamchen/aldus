@@ -73,6 +73,13 @@ export const GATE_STATES = [
 export type GateState = (typeof GATE_STATES)[number];
 
 /** The evaluated state of one gate. */
+/** `"a"`, `"a and b"`, `"a, b and c"` — for a sentence an operator reads, not a log line. */
+function formatKeys(keys: readonly string[]): string {
+  const quoted = keys.map((key) => `"${key}"`);
+  if (quoted.length <= 1) return quoted[0] ?? "";
+  return `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1] as string}`;
+}
+
 export interface GateStatus {
   gateId: string;
   state: GateState;
@@ -86,6 +93,17 @@ export interface GateStatus {
   drift?: SubjectDrift;
   /** Gates that blocked this one, when `state` is `blocked_upstream`. */
   blockedBy?: string[];
+  /**
+   * Bound values nobody has supplied yet, when the gate is otherwise decidable (#91).
+   *
+   * §13.2 requires an authorization to bind every listed value, so a gate whose subjects are
+   * only partly supplied cannot be approved — `assertSubjectsCover` refuses it. Reported here so
+   * that a caller can say why before offering the decision, rather than recommending a command
+   * that will be rejected.
+   *
+   * Absent when every bound value is present, which is the ordinary case.
+   */
+  missingSubjects?: string[];
   /** Operator-facing explanation of why work may not proceed past this gate. */
   explanation?: string;
   /**
@@ -314,12 +332,24 @@ export class GateEngine {
     // machines with disagreeing clocks must not be able to reorder which approval is current.
     const latest = [...decisions].reverse().find((entry) => entry.gateId === gate.gateId);
 
+    const suppliedKeys = new Set(subjects.map((entry) => entry.key));
+    const missingSubjects = gate.binds.filter((key) => !suppliedKeys.has(key));
+
     if (latest === undefined) {
       return {
         ...base,
         state: "pending",
         blocking: blocks("pending"),
-        explanation: `Gate "${gate.gateId}" has no recorded decision.`,
+        // Naming the missing values rather than only the absence of a decision: an operator told
+        // "no recorded decision" goes looking for who forgot to approve, when the answer is that
+        // nothing has produced what the approval would bind (§13.2).
+        explanation:
+          missingSubjects.length > 0
+            ? `Gate "${gate.gateId}" has no recorded decision, and ` +
+              `${formatKeys(missingSubjects)} ${missingSubjects.length === 1 ? "has" : "have"} ` +
+              "not been supplied, so it cannot be decided yet."
+            : `Gate "${gate.gateId}" has no recorded decision.`,
+        ...(missingSubjects.length > 0 ? { missingSubjects } : {}),
       };
     }
 
