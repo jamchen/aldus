@@ -52,7 +52,14 @@ describe("the generic boundary (§4.2)", () => {
     expect(files.length).toBeGreaterThan(0);
   });
 
-  it("names no provider, platform, or cloud service", () => {
+  it("contains no name from the forbidden list", () => {
+    // Named for what it establishes, not for what §4.2 requires. This matches a fixed list of
+    // known provider, platform and cloud names — so it proves no *listed* name appears, which is
+    // strictly weaker than "no provider is named". A provider nobody thought of passes.
+    //
+    // The distinction matters on the day it passes rather than the day it fails: a reader who
+    // takes "names no provider" at face value stops looking, and the check cannot support that
+    // reading. Keeping the weaker name is what keeps §4.2 a thing humans still review.
     const offenders: string[] = [];
     for (const path of files) {
       // This file necessarily contains the fragments, so exclude it by name rather than by
@@ -63,7 +70,11 @@ describe("the generic boundary (§4.2)", () => {
         if (contents.includes(name)) offenders.push(`${path}: ${name}`);
       }
     }
-    expect(offenders).toEqual([]);
+    expect(
+      offenders,
+      `no file may contain any of the ${FORBIDDEN.length} listed names; this does not establish ` +
+        "that no provider is named, only that none of these is",
+    ).toEqual([]);
   });
 
   it("uses only fictional identities in fixtures (§19.2)", () => {

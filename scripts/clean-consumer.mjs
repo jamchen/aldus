@@ -327,4 +327,9 @@ if (!keep) {
   console.log(`\nKept: ${consumerRoot}\nKept: ${tarballDir}`);
 }
 
-console.log(`\n✓ clean-consumer gate passed for ${packed.length} packages`);
+console.log(
+  `\n✓ clean-consumer gate: ${packed.length} packed tarballs installed into a fresh project\n` +
+    "  outside the monorepo, imported, and the CLI run.\n" +
+    "  Establishes: the published artifacts resolve and load in isolation.\n" +
+    "  Does not establish: that their behaviour is correct — that is what the test suite is for.",
+);
