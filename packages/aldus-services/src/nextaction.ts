@@ -396,7 +396,7 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
   const alreadyOffered = new Set(
     next.filter((action) => action.gateId !== undefined).map((action) => action.gateId),
   );
-  for (const gateId of gatesStandingInTheWay) {
+  for (const gateId of decidableRoots(gatesStandingInTheWay, gateById)) {
     if (alreadyOffered.has(gateId)) continue;
     const gate = gateById.get(gateId);
     // `stale` is handled above with its own wording, and `blocked_upstream` is deliberately not
@@ -545,6 +545,47 @@ export function gateBlockerFor(
  * The shared implementation behind both the display path and {@link orderingBlockerFor}, so
  * `status` and `runStage` cannot form different opinions about the same graph.
  */
+/**
+ * Resolve each gate to the gate an operator can actually decide (#86 residual, §13.1).
+ *
+ * A `blocked_upstream` gate must not be offered — deciding it now would be voided by the cascade.
+ * But the gate it is waiting on is often decidable, and is then the only thing anyone can do.
+ * Nothing offered it, because the recommendation only ever looked at gates a *stage* required,
+ * and a gate may be required by no stage at all: §13 gates authorize operations as well as
+ * stages, and a workflow mid-migration has stages that are declared but not yet implemented.
+ *
+ * ADR-0028's constraint survives the walk rather than being weakened by it. The rule is that a
+ * gate must not be urged while an unrun predecessor still has to produce what it binds — and the
+ * root of a dependency chain is precisely the gate with nothing upstream of it.
+ *
+ * `blockedBy` is adopter-supplied (§4.2), so a cycle is possible in bad data and must not hang
+ * the status command. A gate already visited is skipped, and the walk simply yields nothing for a
+ * chain that closes on itself — a cycle has no root, which is the honest answer.
+ */
+function decidableRoots(
+  gateIds: ReadonlySet<string>,
+  gateById: ReadonlyMap<string, GateStatus>,
+): ReadonlySet<string> {
+  const roots = new Set<string>();
+  for (const start of gateIds) {
+    const seen = new Set<string>();
+    const pending = [start];
+    while (pending.length > 0) {
+      const id = pending.pop() as string;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const gate = gateById.get(id);
+      if (gate === undefined) continue;
+      if (gate.state === "blocked_upstream") {
+        pending.push(...(gate.blockedBy ?? []));
+        continue;
+      }
+      roots.add(id);
+    }
+  }
+  return roots;
+}
+
 function orderingBlockerIn(
   stage: StageSnapshot,
   stages: readonly StageSnapshot[],
