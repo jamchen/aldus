@@ -134,7 +134,7 @@ describe("reconciliation", () => {
     expect(first.state).toBe("pending");
 
     // The destination finished processing after the fact, as an asynchronous platform would.
-    const key = deriveIdempotencyKey(bundle.bundleId, bundle.required[0]!);
+    const key = deriveIdempotencyKey(bundle.required[0]!);
     a.remote.set(key, { exists: true, remoteId: "remote-late" });
 
     const second = await executor.execute(bundle, { actor: OPERATOR });
@@ -161,15 +161,15 @@ describe("reconciliation", () => {
 describe("idempotency keys", () => {
   it("are stable across executions, so a resumed bundle recognises its own work", () => {
     const bundle = aMinimalBundle();
-    const first = deriveIdempotencyKey(bundle.bundleId, bundle.required[0]!);
-    const second = deriveIdempotencyKey(bundle.bundleId, bundle.required[0]!);
+    const first = deriveIdempotencyKey(bundle.required[0]!);
+    const second = deriveIdempotencyKey(bundle.required[0]!);
     expect(first).toBe(second);
   });
 
   it("change when what is released changes", () => {
     const bundle = aMinimalBundle();
-    const original = deriveIdempotencyKey(bundle.bundleId, bundle.required[0]!);
-    const edited = deriveIdempotencyKey(bundle.bundleId, {
+    const original = deriveIdempotencyKey(bundle.required[0]!);
+    const edited = deriveIdempotencyKey({
       ...bundle.required[0]!,
       inputHashes: ["c".repeat(64)],
     });
@@ -179,11 +179,11 @@ describe("idempotency keys", () => {
 
   it("ignore the order input hashes were listed in", () => {
     const bundle = aMinimalBundle();
-    const one = deriveIdempotencyKey(bundle.bundleId, {
+    const one = deriveIdempotencyKey({
       ...bundle.required[0]!,
       inputHashes: ["a".repeat(64), "b".repeat(64)],
     });
-    const other = deriveIdempotencyKey(bundle.bundleId, {
+    const other = deriveIdempotencyKey({
       ...bundle.required[0]!,
       inputHashes: ["b".repeat(64), "a".repeat(64)],
     });
@@ -192,8 +192,8 @@ describe("idempotency keys", () => {
 
   it("differ between destinations", () => {
     const bundle = aMinimalBundle();
-    const here = deriveIdempotencyKey(bundle.bundleId, bundle.required[0]!);
-    const there = deriveIdempotencyKey(bundle.bundleId, {
+    const here = deriveIdempotencyKey(bundle.required[0]!);
+    const there = deriveIdempotencyKey({
       ...bundle.required[0]!,
       destination: "destination-b",
     });
@@ -206,8 +206,6 @@ describe("idempotency keys", () => {
     const bundle = aMinimalBundle();
     await executor.execute(bundle, { actor: OPERATOR });
 
-    expect(a.executed[0]?.idempotencyKey).toBe(
-      deriveIdempotencyKey(bundle.bundleId, bundle.required[0]!),
-    );
+    expect(a.executed[0]?.idempotencyKey).toBe(deriveIdempotencyKey(bundle.required[0]!));
   });
 });

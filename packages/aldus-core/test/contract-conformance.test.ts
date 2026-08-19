@@ -77,7 +77,13 @@ const SANCTIONED_ADDITIONS: Partial<Record<SchemaName, readonly string[]>> = {
   // one gate are indistinguishable.
   GateDecision: ["schemaVersion", "decisionId"],
   // ADR-0003 plus §6: ReleaseReceipt is a child of a Run, and lineage queries need the edge.
-  ReleaseReceipt: ["schemaVersion", "runId"],
+  //
+  // `bundleId`: added at SCHEMA_VERSION 1.4 (ADR-0033). §17 describes a bundle as something a
+  // caller assembles, and nothing stores one — so a receipt could name the Run and the
+  // destination but never which release produced it, and two releases of one Run were
+  // indistinguishable afterwards. Optional, and deliberately absent from the idempotency key:
+  // keying on it is what made a reconstructed bundle re-execute every operation (#40).
+  ReleaseReceipt: ["schemaVersion", "runId", "bundleId"],
   // ADR-0026, both added at SCHEMA_VERSION 1.3.
   //
   // `goalStages`: §6.2 gives a Run a status but nothing that says what reaching the end would

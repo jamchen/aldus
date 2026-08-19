@@ -183,3 +183,57 @@ describe("derived status (§19.1)", () => {
     expect(a.executed).toEqual([]);
   });
 });
+
+describe("resuming from a bundle the caller reassembled (#40)", () => {
+  /**
+   * This file's own header said it: "resume will reach for a fresh bundle and publish twice by
+   * hand." That was true, and only the same-object case was tested.
+   *
+   * Nothing stores a `ReleaseBundle`, so a caller resuming after a crash rebuilds one. The
+   * idempotency key was derived from `bundleId` among other things, so a rebuilt bundle with a
+   * new id produced a new key for every operation, matched no receipt, and re-executed the lot —
+   * a second media upload and a second visibility transition against a live destination.
+   */
+  it("does not re-execute when an equivalent bundle carries a different bundleId", async () => {
+    const { executor, a } = harness();
+    await executor.execute(aBundle(), { actor: OPERATOR });
+    const afterFirst = a.executed.length;
+    expect(afterFirst).toBeGreaterThan(0);
+
+    // Same run, operations, destinations and digests. Only the id differs — which is exactly what
+    // reconstructing from memory produces, since there is nothing to reconstruct it from.
+    await executor.execute(aBundle({ bundleId: "bundle-reassembled" }), { actor: OPERATOR });
+
+    expect(a.executed.length).toBe(afterFirst);
+  });
+
+  it("still re-executes when what is released actually changes", async () => {
+    // The guard must not become "never do anything twice". A different digest is a different
+    // operation and must reach the destination.
+    const { executor, a } = harness();
+    await executor.execute(aBundle(), { actor: OPERATOR });
+    const afterFirst = a.executed.length;
+
+    const changed = aBundle();
+    const rewritten = {
+      ...changed,
+      required: changed.required.map((operation, index) =>
+        index === 0 ? { ...operation, inputHashes: ["f".repeat(64)] } : operation,
+      ),
+    };
+    await executor.execute(rewritten, { actor: OPERATOR });
+
+    expect(a.executed.length).toBeGreaterThan(afterFirst);
+  });
+
+  it("records which bundle produced each receipt", async () => {
+    // Keyed on what the operation does; *labelled* with the release it came from, so §20 can
+    // answer "which release produced this" — which receipts could not previously say.
+    const { executor, receipts } = harness();
+    await executor.execute(aBundle({ bundleId: "bundle-first" }), { actor: OPERATOR });
+
+    const stored = await receipts.list(RUN_ID);
+    expect(stored.length).toBeGreaterThan(0);
+    expect(stored.every((receipt) => receipt.bundleId === "bundle-first")).toBe(true);
+  });
+});

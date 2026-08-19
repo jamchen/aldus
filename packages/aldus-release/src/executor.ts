@@ -425,7 +425,7 @@ export class ReleaseExecutor {
     ];
     return entries.map((entry) => ({
       ...entry,
-      idempotencyKey: deriveIdempotencyKey(bundle.bundleId, entry.operation),
+      idempotencyKey: deriveIdempotencyKey(entry.operation),
     }));
   }
 
@@ -442,6 +442,9 @@ export class ReleaseExecutor {
       schemaVersion: SCHEMA_VERSION,
       releaseId: this.#nextReleaseId(),
       runId: bundle.runId,
+      // Recorded, never keyed on (ADR-0033). The trace can now say which release produced this
+      // receipt; matching still happens on what the operation does, so a resumed bundle finds it.
+      bundleId: bundle.bundleId,
       destination: operation.destination,
       operation: operation.kind,
       idempotencyKey,
