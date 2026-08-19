@@ -117,3 +117,57 @@ export function gatedStage(
       }),
   };
 }
+
+/** Options for {@link selfRegisteringStage}. */
+export interface SelfRegisteringStageOptions {
+  workingRoot: string;
+  relativePath: string;
+  contents: string;
+  kind: string;
+  mediaType: string;
+  reconstructability: "source" | "reproducible" | "irreplaceable";
+}
+
+/**
+ * A stage that registers its output through `context.registerOutput` rather than a closed-over
+ * registry (#39, ADR-0027).
+ *
+ * The distinction from {@link producingStage} is the whole point: this one names only what a
+ * stage knows — the path, kind, media type and reconstructability — and the runner supplies
+ * `producerRunId`, `producerStageId`, the code revision, the configuration digest and the sha256.
+ * A stage therefore cannot register an artifact whose provenance disagrees with the attempt that
+ * produced it, because the registration type has no field to write it in.
+ *
+ * It exists here because the closure form is what every other stage in this package uses, and a
+ * capability nothing exercises is a capability nobody notices is unwired: `registerOutput`
+ * refused for every stage the services ran, while all of these tests passed (#67).
+ */
+export function selfRegisteringStage(
+  id: string,
+  options: SelfRegisteringStageOptions,
+  version = "1",
+): StageDefinition<unknown, unknown> {
+  return {
+    id,
+    version,
+    inputSchema: anySchema,
+    outputSchema: anySchema,
+    requiredCapabilities: [],
+    idempotency: { kind: "idempotent" },
+    execute: async (context): Promise<StageOutcome<unknown>> => {
+      const path = join(options.workingRoot, options.relativePath);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, options.contents, "utf8");
+
+      const artifact = await context.registerOutput({
+        path,
+        kind: options.kind,
+        mediaType: options.mediaType,
+        reconstructability: options.reconstructability,
+      });
+
+      context.note("Registered through the stage context.", { artifactId: artifact.artifactId });
+      return { kind: "completed", output: { artifactId: artifact.artifactId } };
+    },
+  };
+}

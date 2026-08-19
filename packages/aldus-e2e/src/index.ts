@@ -20,7 +20,13 @@ export {
   type StageFactory,
 } from "./harness.js";
 
-export { gatedStage, producingStage, type ProducingStageOptions } from "./stages.js";
+export {
+  gatedStage,
+  producingStage,
+  selfRegisteringStage,
+  type ProducingStageOptions,
+  type SelfRegisteringStageOptions,
+} from "./stages.js";
 
 export {
   CONTENT_FREEZE_GATE,
