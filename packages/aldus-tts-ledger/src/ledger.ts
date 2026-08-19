@@ -17,7 +17,7 @@
  *   Nothing here deletes a take, and the store port has no delete to call.
  */
 
-import type { ActorRef, AldusEvent } from "@aldus-runtime/core";
+import type { ActorKind, ActorRef, AldusEvent } from "@aldus-runtime/core";
 import { SCHEMA_VERSION, newEventId, newId, redact } from "@aldus-runtime/core";
 
 import { digestText } from "./common.js";
@@ -56,6 +56,25 @@ export interface TtsLedgerOptions {
   lexicon?: LexiconStore;
   /** Consulted before a paid take may be recorded (contract §13.2). */
   authorizer?: SpendAuthorizer;
+  /**
+   * Actor kinds that may decide a take (contract §13.3). Defaults to `["human"]`.
+   *
+   * §13.3 keeps final performance approval human-owned **"until a scoped evaluator is
+   * demonstrably reliable"**, and the conditional is load-bearing. #100 enforced the clause as an
+   * absolute — `kind !== "human"` refused, always — which protected the supervised case and made
+   * the "until" unreachable: there was no way to declare that an evaluator had been demonstrated,
+   * so the condition could never be satisfied by anyone.
+   *
+   * Gates already had the right shape one package over. `GateDefinition.permittedActorKinds`
+   * defaults to human-only for a `human_oracle` gate and is overridable where an adopter states
+   * it, so the same contract clause was configurable there and absolute here.
+   *
+   * The default stays human-only because the failure modes are asymmetric: a supervised show that
+   * accidentally permits agents loses its human-ear guarantee silently, while an automated show
+   * that accidentally forbids them fails loudly on its first take. Opt out deliberately, never by
+   * omission (ADR-0034).
+   */
+  permittedDecisionActorKinds?: readonly ActorKind[];
   /** Injected for deterministic tests. Defaults to the real clock. */
   now?: () => Date;
   /** Injected for deterministic tests. Defaults to freshly minted ULID-based ids. */
@@ -101,6 +120,7 @@ export class TtsLedger {
   readonly #authorizer: SpendAuthorizer | undefined;
   readonly #now: () => Date;
   readonly #newTakeId: () => string;
+  readonly #permittedDecisionActorKinds: readonly ActorKind[];
 
   constructor(options: TtsLedgerOptions) {
     this.#takes = options.takes;
@@ -111,6 +131,19 @@ export class TtsLedger {
     this.#authorizer = options.authorizer;
     this.#now = options.now ?? (() => new Date());
     this.#newTakeId = options.newTakeId ?? (() => newId("art"));
+
+    const permitted = options.permittedDecisionActorKinds ?? ["human"];
+    // An empty list would refuse every actor, which is not a policy but a workflow with no way
+    // out — the same refusal `validateGateDefinition` makes for a gate nobody can decide.
+    if (permitted.length === 0) {
+      throw ttsLedgerError(
+        TtsLedgerErrorCodes.TAKE_ACTOR_NOT_PERMITTED,
+        "`permittedDecisionActorKinds` is empty, so no actor could ever decide a take and every " +
+          "Run would stall at its first acceptance. Omit it for the human-only default (§13.3).",
+        { category: "validation", retryable: false, details: { permitted: [] } },
+      );
+    }
+    this.#permittedDecisionActorKinds = permitted;
   }
 
   /* ---------------------------------------------------------------------------------------
@@ -373,16 +406,23 @@ export class TtsLedger {
     // `permittedActorKinds`; takes did not, and for an adopter who reviews per segment, accepting
     // a take *is* the human-ear judgement — so the protection was applied to the gate while the
     // value it binds could be determined by an agent (#64).
-    if (decidedBy.kind !== "human") {
+    if (!this.#permittedDecisionActorKinds.includes(decidedBy.kind)) {
       throw ttsLedgerError(
         TtsLedgerErrorCodes.TAKE_ACTOR_NOT_PERMITTED,
-        `Take "${takeId}" may only be decided by a human, but "${decidedBy.id}" is a ` +
+        `Take "${takeId}" accepts decisions from ` +
+          `[${this.#permittedDecisionActorKinds.join(", ")}], but "${decidedBy.id}" is a ` +
           `${decidedBy.kind}. Contract §13.3 keeps final performance approval human-owned until ` +
-          "a scoped evaluator is demonstrably reliable.",
+          "a scoped evaluator is demonstrably reliable; declare " +
+          "`permittedDecisionActorKinds` if that is the case here.",
         {
           category: "policy",
           retryable: false,
-          details: { runId, takeId, actorKind: decidedBy.kind },
+          details: {
+            runId,
+            takeId,
+            actorKind: decidedBy.kind,
+            permitted: [...this.#permittedDecisionActorKinds],
+          },
         },
       );
     }

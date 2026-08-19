@@ -393,6 +393,60 @@ describe("who may decide a take, and what the trace records (§13.3, #64)", () =
     expect((await ledger.listTakes(RUN_ID))[0]?.decision).toBeUndefined();
   });
 
+  it("permits an agent when the adopter has declared that it may", async () => {
+    // §13.3 keeps performance approval human-owned "until a scoped evaluator is demonstrably
+    // reliable". #100 enforced that as an absolute, which protected the supervised case and made
+    // the "until" unreachable — nothing could declare that the condition had been met.
+    //
+    // A fully automatic show is not hypothetical: an adopter runs one today where the script is
+    // written, synthesised and published without a person auditioning it. Refusing to record its
+    // take decisions does not make that show supervised; it makes the ledger unable to describe
+    // what happened (ADR-0034).
+    const ledger = new TtsLedger({
+      takes: new MemoryTakeStore(),
+      plans: new MemoryPlanStore(),
+      scripts: new MemoryScriptStore(),
+      events: new MemoryLedgerEventSink(),
+      authorizer: new ApprovingAuthorizer(),
+      now: () => new Date(AT),
+      permittedDecisionActorKinds: ["human", "agent"],
+    });
+    await ledger.recordPlan(plan(), EPISODE_ID, OPERATOR);
+    const take = await ledger.recordTake({
+      runId: RUN_ID,
+      planId: PLAN_ID,
+      segmentId: "seg-1",
+      take: paidTake(plan(), { takeId: "take-auto" }),
+      episodeId: EPISODE_ID,
+      actor: WORKER,
+    });
+
+    const decided = await ledger.decideTake(
+      RUN_ID,
+      take.takeId,
+      { decision: "accepted", decidedBy: "gemini", decidedAt: AT },
+      EPISODE_ID,
+      { kind: "agent", id: "gemini" },
+    );
+
+    expect(decided.decision?.decision).toBe("accepted");
+  });
+
+  it("refuses a configuration in which nobody could ever decide", () => {
+    // An empty list is not a strict policy, it is a Run that stalls at its first acceptance with
+    // no way out — the same refusal validateGateDefinition makes for an undecidable gate.
+    expect(
+      () =>
+        new TtsLedger({
+          takes: new MemoryTakeStore(),
+          plans: new MemoryPlanStore(),
+          scripts: new MemoryScriptStore(),
+          events: new MemoryLedgerEventSink(),
+          permittedDecisionActorKinds: [],
+        }),
+    ).toThrow(/no actor could ever decide/);
+  });
+
   it("records the actor it was given, not one it assumed", async () => {
     // The half the report did not name, and the worse of the two. The ledger built the trace
     // event with `{ kind: "human", id: decision.decidedBy }` — asserting a human had decided
