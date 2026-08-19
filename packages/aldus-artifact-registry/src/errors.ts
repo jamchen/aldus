@@ -37,6 +37,15 @@ export const ArtifactRegistryErrorCodes = {
    * cleaned." This is the refusal that makes that ordering real rather than advisory.
    */
   CLEANUP_BLOCKED: "ALDUS_CLEANUP_BLOCKED",
+  /**
+   * A cleanup plan cleared a file, and the bytes at that path are no longer the bytes it cleared.
+   *
+   * The plan is computed from a records snapshot; the delete happens later. Between the two, a
+   * working path can be rewritten and re-registered — §8.1's `req-00.wav` case exactly. Executing
+   * the stale plan would delete bytes nothing ever cleared, which for an `irreplaceable` artifact
+   * is unrecoverable.
+   */
+  CLEANUP_STALE_PLAN: "ALDUS_CLEANUP_STALE_PLAN",
   /** A lineage query found a cycle in recorded edges, which cannot occur in correct data. */
   LINEAGE_CYCLE: "ALDUS_LINEAGE_CYCLE",
 } as const;
