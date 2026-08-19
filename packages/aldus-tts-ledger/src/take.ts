@@ -126,9 +126,22 @@ export const takeDecisionSchema = z
     /**
      * Who decided (contract §19.2).
      *
-     * §13.3 keeps final performance approval human-owned, so a decision recorded by an agent is
-     * a decision the ledger can hold but a Human Ear gate will not accept — the gate engine
-     * enforces `permittedActorKinds`, and duplicating that check here would give two answers.
+     * A string rather than an `ActorRef`, which is the shape `GateDecision.decidedBy` uses. The
+     * difference is deliberate but it is **not** a claim that the kind goes unchecked: §13.3
+     * keeps final performance approval human-owned, and `TtsLedger.decideTake` refuses a
+     * non-human actor outright (`ALDUS_TTS_TAKE_ACTOR_NOT_PERMITTED`). The acting identity is
+     * carried separately and lands in the §20 trace, so once a decision exists this field names a
+     * human by construction.
+     *
+     * What is left is a redundancy rather than a gap — the record restates an identity the event
+     * log already holds with its kind. Typing it would be a MAJOR schema change under ADR-0003,
+     * making every stored decision unreadable, which is a large price for consistency where
+     * there is no authorization hole. Tracked in #64 as an owner decision, not a defect.
+     *
+     * An earlier version of this comment said a check here "would give two answers". That was
+     * true when nothing checked and false from the moment #64's enforcement landed — recorded
+     * here because ADR-0031 is about exactly this, and a stale comment beside correct code is
+     * the orientation that gets the code changed.
      */
     decidedBy: nonEmptyString,
     /** ISO-8601 with offset. */
