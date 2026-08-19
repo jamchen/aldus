@@ -46,6 +46,14 @@ export const ArtifactRegistryErrorCodes = {
    * is unrecoverable.
    */
   CLEANUP_STALE_PLAN: "ALDUS_CLEANUP_STALE_PLAN",
+  /**
+   * A working file exists but could not be read, so nothing can confirm what it holds.
+   *
+   * Distinct from absent. Deleting bytes that could not be verified is the risk the stale-plan
+   * check exists to remove, and an unreadable file is exactly the case where that check cannot
+   * do its job (#94).
+   */
+  CLEANUP_UNVERIFIABLE: "ALDUS_CLEANUP_UNVERIFIABLE",
   /** A lineage query found a cycle in recorded edges, which cannot occur in correct data. */
   LINEAGE_CYCLE: "ALDUS_LINEAGE_CYCLE",
 } as const;

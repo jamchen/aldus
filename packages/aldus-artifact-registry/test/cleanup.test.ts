@@ -8,7 +8,8 @@
  * that blocks everything gets bypassed.
  */
 
-import { access } from "node:fs/promises";
+import { access, chmod, readFile, rm, stat } from "node:fs/promises";
+import { dirname } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -276,5 +277,80 @@ describe("error codes", () => {
       expect(core.has(code), `${code} collides with a Core error code`).toBe(false);
       expect(code).toMatch(/^ALDUS_[A-Z0-9_]+$/);
     }
+  });
+});
+
+describe("a delete that did not happen is not an absence (#94)", () => {
+  /**
+   * `alreadyAbsent` is an affirmative claim: the working file is gone. Folding a failed delete
+   * into it tells the operator the opposite of what happened, and they have no reason to doubt a
+   * returned outcome (ADR-0031: the cost is set by which artifact the reader trusts).
+   *
+   * The failure is produced with real filesystem permissions rather than a stubbed error. A
+   * mocked `EACCES` would prove only that the code does what I assumed Node does.
+   */
+  it("reports a file it could not delete as failed, not as already absent", async () => {
+    const { record, path } = await registerAt("takes/locked.wav", "bytes", "reproducible");
+    const plan = planCleanup([record.artifact.artifactId], await registry.list());
+    expect(plan.safe).toBe(true);
+
+    // Removing write permission from the *directory* is what stops unlink; the file's own mode
+    // does not govern removal on POSIX.
+    const directory = dirname(path);
+    const original = (await stat(directory)).mode;
+    await chmod(directory, 0o500);
+    try {
+      const outcome = await registry.executeCleanup(plan);
+
+      expect(outcome.removed).toEqual([]);
+      expect(outcome.alreadyAbsent).toEqual([]);
+      expect(outcome.failed).toHaveLength(1);
+      expect(outcome.failed[0]?.record.artifact.artifactId).toBe(record.artifact.artifactId);
+      // §19.2: the reason names the error code, never the path.
+      expect(outcome.failed[0]?.reason).not.toContain("locked.wav");
+    } finally {
+      await chmod(directory, original);
+    }
+
+    // The bytes are still there, which is the fact the old outcome denied.
+    expect(await readFile(path, "utf8")).toBe("bytes");
+  });
+
+  it("still reports a file that vanished before the check as already absent", async () => {
+    // Precise about which path this covers: the file is gone before `executeCleanup` runs, so the
+    // *pre-check* classifies it and the unlink is never attempted. Over-reporting this as a
+    // failure would make an operator chase a delete that had nothing to do — ADR-0030's bound on
+    // this whole class of message.
+    const { record, path } = await registerAt("takes/gone.wav", "bytes", "reproducible");
+    const plan = planCleanup([record.artifact.artifactId], await registry.list());
+    await rm(path);
+
+    const outcome = await registry.executeCleanup(plan);
+    expect(outcome.alreadyAbsent).toHaveLength(1);
+    expect(outcome.failed).toEqual([]);
+  });
+
+  it("refuses before deleting anything when a file exists but cannot be read", async () => {
+    // Unverifiable is not the same as absent: there is no way to confirm the bytes are the ones
+    // the plan cleared, which is precisely what the stale-plan check exists to establish.
+    const a = await registerAt("takes/readable.wav", "bytes a", "reproducible");
+    const b = await registerAt("takes/unreadable.wav", "bytes b", "reproducible");
+    const plan = planCleanup(
+      [a.record.artifact.artifactId, b.record.artifact.artifactId],
+      await registry.list(),
+    );
+
+    const original = (await stat(b.path)).mode;
+    await chmod(b.path, 0o000);
+    try {
+      await expect(registry.executeCleanup(plan)).rejects.toMatchObject({
+        code: ArtifactRegistryErrorCodes.CLEANUP_UNVERIFIABLE,
+      });
+    } finally {
+      await chmod(b.path, original);
+    }
+
+    // Nothing was deleted, including the file that was perfectly readable.
+    expect(await readFile(a.path, "utf8")).toBe("bytes a");
   });
 });
