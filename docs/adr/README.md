@@ -47,3 +47,4 @@ Rules:
 | [0028](0028-workflow-stage-ordering.md)                 | A workflow graph declares stage ordering, separately from gating                           | Accepted | #55               |
 | [0029](0029-config-sees-the-invocation.md)              | A config module is given the invocation it is configuring                                  | Accepted | —                 |
 | [0030](0030-diagnostic-distance.md)                     | Rank diagnostic work by distance from symptom to cause                                     | Accepted | —                 |
+| [0031](0031-derive-prose-from-the-program.md)           | Derive prose about the program from the program                                            | Accepted | —                 |

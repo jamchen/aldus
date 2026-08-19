@@ -1,0 +1,95 @@
+# ADR-0031: Derive prose about the program from the program
+
+- Status: Accepted
+- Date: 2026-08-19
+- Relates to: §20 Production trace, §24 V1 definition of done, ADR-0003, ADR-0030
+
+## Context
+
+ADR-0030 is about a runtime that holds a fact and either does not say it or says it wrongly, and
+what that costs an operator. This ADR is the same failure aimed at a different reader: a
+**maintainer**, misled by a comment or a document rather than by a message.
+
+It was deferred until a second instance existed. Five arrived together.
+
+The first came out of the `registerOutput` migration. The adopter's comment said their digest
+comparison "keys on `sha256`" — ambiguous between _hashes the bytes_ and _reads the digest off the
+record_. I read it the second way and warned them their cross-check had become a check of the
+registry against itself. The code had always hashed the bytes independently; the comment was
+wrong, and it was wrong in three separate documents. I inferred behaviour from prose instead of
+code and was wrong, which is the mistake this ADR exists to make less available.
+
+Searching for more of it in the adopter's repository found four, all the same class — **true when
+written, quietly false later**:
+
+| Statement                                               | Why it went false                           |
+| ------------------------------------------------------- | ------------------------------------------- |
+| README and RUNBOOK: "the pin is `0.1.0`"                | the pin moved                               |
+| Upgrade report: "once #45 lands"                        | #45 landed                                  |
+| Upgrade report: "a 1.3 record read by this 1.2 runtime" | the runtime was 1.3, restamping to 1.4      |
+| AF-3 and INVENTORY: shadow comparison "keys on sha256"  | ambiguous from the start, then read wrongly |
+
+Note which way round the failure runs. In every case **the code was correct and its description
+was not**, which is the more expensive orientation: a maintainer reconciling the two has no reason
+to assume the prose is the broken half, and the repair they reach for is to change the code.
+
+## Decision
+
+**A statement about the program's behaviour that the program can compute MUST be computed, not
+restated.**
+
+The distinguishing observation, and the reason this is a rule rather than an exhortation:
+
+> The drift was in the strings that were hardcoded, and absent from the strings that were
+> computed.
+
+Once the adopter's upgrade report drew its version strings from `SCHEMA_VERSION`, it became unable
+to describe an upgrade that had already happened. Not because anyone remembered to update it —
+because the sentence no longer contained a fact anyone could forget.
+
+This gives a sharper rule than "keep documentation current", which is a request for diligence and
+therefore fails on exactly the days it matters:
+
+1. **Prose rots at the rate you restate facts the program already knows.** Version numbers,
+   dependency pins, issue states, counts, file paths, and enumerations of supported values are all
+   facts with an owner in the code. Restating one creates a second owner and no mechanism to keep
+   them agreeing.
+2. **Where a fact cannot be computed into the prose, assert it in a test.** The ADR index test,
+   the licensing test, the release-metadata test, and the package-dependency test all exist for
+   this reason: each pins a statement made in prose to the state it describes. That is the same
+   move as interpolation, taken where interpolation is not available.
+3. **A comment that explains _why_ something is safe outranks one that restates _what_ the code
+   does.** The restatement is the part that goes stale and the part the code already says. The
+   reason is the part that is nowhere else, and it is what stops a later contributor "fixing" a
+   correct implementation.
+
+## Consequences
+
+- Some prose becomes less readable to gain this. A sentence carrying an interpolated constant
+  reads worse than one carrying a literal. That is the trade, and it is worth it wherever the
+  literal would otherwise outlive its truth.
+- This does not license removing explanation. The target is **restatement of computable facts**,
+  not exposition. An ADR explaining a decision, a comment giving a rationale, and a runbook
+  describing intent are all outside it.
+- It applies to this repository's own documents. `docs/ALDUS-ARCHITECTURE.md` is checked against
+  the implemented schemas by `contract-conformance.test.ts` precisely because a contract restated
+  in prose would otherwise drift from the code claiming to implement it — that test is this ADR
+  applied before this ADR was written.
+- The failure mode has no detector of its own. Nothing here proposes one, because a general "is
+  this comment still true" check is not a thing that can be written. What is available is
+  narrowing the surface: fewer restated facts means fewer places for the drift to live.
+
+## Alternatives considered
+
+- **A documentation review step before release.** Rejected as a substitute rather than as a bad
+  idea. Every one of the five statements above would have passed a review by whoever wrote it,
+  because each was true when written and the reviewer's memory of writing it is the thing that
+  went stale.
+- **Treat this as part of ADR-0030.** Rejected deliberately, and the boundary is the reader. ADR-0030
+  is about an operator acting on what the runtime tells them at the moment they act; this is about
+  a maintainer acting on what a document tells them long after it was written. Folding them
+  together would blur an ADR that currently states one thing clearly, and the fixes differ:
+  ADR-0030's is to say more, this one's is to restate less.
+- **Ban comments describing behaviour.** Rejected as over-correction. A comment stating what
+  non-obvious code does is worth its maintenance cost; the rule is that a fact the program can
+  produce should be produced rather than transcribed.
