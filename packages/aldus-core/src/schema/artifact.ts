@@ -69,6 +69,22 @@ export const artifactRefSchema = z
      *
      * This is the edge that makes the lineage queries of contract §20 answerable, and what lets
      * contract §13.1 invalidate downstream approvals when an upstream input changes.
+     *
+     * It also answers a question a `SubjectsProvider` needs and nothing else can answer: **is
+     * this report a report of the thing being approved?** A gate that binds a review — a QA
+     * report, a checkup, a lint result — is otherwise satisfiable by a review of an earlier
+     * draft: the reviewed document changes, the report does not, and the gate stays satisfied on
+     * a judgement about bytes that no longer exist.
+     *
+     * Publishing such a report as a subject only when its `inputHashes` name the current document
+     * closes that, and does so **without the report's cooperation**. The digest lives here rather
+     * than inside the report, so it works for a format that has nowhere to put one — a Markdown
+     * review written by an agent cannot state what it reviewed, but the stage that produced it
+     * declared what it read. A report that asserts its own subject digest can drift from the
+     * bytes it describes; this cannot, because it is not the report making the claim.
+     *
+     * An adopter arrived at this after solving the same problem twice, the second time worse, and
+     * the property is recorded here rather than left to be rediscovered a third time.
      */
     inputHashes: z.array(sha256Hex).max(4096),
     /** How recoverable this artifact is. @see RECONSTRUCTABILITY */
