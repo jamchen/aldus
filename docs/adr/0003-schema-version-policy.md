@@ -94,6 +94,33 @@ no fixture in this repository exercises, because every fixture is older than the
 A rule validated against real data is a different claim from a rule asserted, and this note exists
 so a future reader can tell which one this is.
 
+### Amendment, 2026-08-19: mixed-version state, and a fixture for it
+
+After the adopter completed the upgrade, their store became something no fixture in this
+repository had ever constructed: **records at two versions in one workspace set**, read in a
+single pass. One workspace re-initialised after the bump stamps `1.3`; five still stamp `1.2`;
+all six inventory cleanly.
+
+That is what an incremental upgrade actually leaves behind, and it is precisely the case a
+single-version corpus cannot produce — every earlier check here was all-old or all-new. Core now
+carries the regression fixture for it (`packages/aldus-file-store/test/stores.test.ts`, "a store
+holding records at more than one schema version"): a run store and an event log each holding one
+older-minor record and one current record, read together, with the stamps asserted individually.
+
+**The load-bearing assertion is the third one — that reading does not restamp.** A runtime that
+silently migrated records on read would pass every other check in this note while destroying the
+evidence a rollback depends on. The fixture is mutation-proven against exactly that: a type-clean
+read-time migration inserted into `FileRunStore.get` is caught, as is the opposite failure of
+refusing any record not stamped at the current version.
+
+This has a consequence worth stating plainly, because it is a trap for whoever reads the fixture
+next. **If read-time migration is ever adopted deliberately, this check stops being able to detect
+it and must be replaced rather than kept.** A passing test whose premise has been removed is worse
+than no test, and this one would keep passing.
+
+The adopter's own framing, which is the reason it is recorded rather than assumed: a pass "only
+means something because the stamps stayed where they were."
+
 ## Consequences
 
 - One constant to reason about. A reader checks one field per document and knows whether the
