@@ -45,6 +45,15 @@ export const ArtifactRegistryErrorCodes = {
    * the stale plan would delete bytes nothing ever cleared, which for an `irreplaceable` artifact
    * is unrecoverable.
    */
+  /**
+   * A URI built for an artifact does not resolve back to the file it was built from (#103).
+   *
+   * An internal defect, not a caller error: everything that later resolves the URI — archival
+   * above all — would look in a place the bytes are not. Checked at registration because every
+   * earlier step reads the path it was handed, so the failure would otherwise appear at the last
+   * step §8.1 requires before cleanup.
+   */
+  ARTIFACT_URI_UNRESOLVABLE: "ALDUS_ARTIFACT_URI_UNRESOLVABLE",
   CLEANUP_STALE_PLAN: "ALDUS_CLEANUP_STALE_PLAN",
   /**
    * A working file exists but could not be read, so nothing can confirm what it holds.

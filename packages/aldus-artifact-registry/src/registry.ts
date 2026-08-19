@@ -136,13 +136,42 @@ export class ArtifactRegistry {
    */
   async register(input: RegisterArtifactInput): Promise<ArtifactRecord> {
     const { sha256, sizeBytes } = await digestFile(input.path);
+
+    // The URI must lead back to the bytes it was built from, checked here rather than trusted.
+    //
+    // #103 was a percent-encoding bug in `localPathFromUri`, invisible for every ASCII path and
+    // therefore invisible until an adopter whose episode slugs carry Han characters tried to
+    // archive. What made it expensive is *when* it surfaced: registration, digesting and
+    // reporting all read the path they were handed, so a Run completed and reported clean, and
+    // the failure appeared at archival — §8.1's precondition for cleanup, and the last thing
+    // anyone does.
+    //
+    // Round-tripping at registration moves that to the first moment the URI exists. This costs
+    // one string comparison and would have caught #103 on the first non-ASCII artifact ever
+    // registered, rather than after a release.
+    const uri = input.uri ?? pathToUri(input.path);
+    if (input.uri === undefined && localPathFromUri(uri) !== input.path) {
+      throw artifactRegistryError(
+        ArtifactRegistryErrorCodes.ARTIFACT_URI_UNRESOLVABLE,
+        "The URI built for this artifact does not lead back to the file it was built from, so " +
+          "nothing that later resolves the URI — archival above all — would reach these bytes. " +
+          "This is a defect in the runtime's path handling, not in the artifact.",
+        {
+          category: "internal",
+          retryable: false,
+          // §19.2: the artifact id and the mismatch, never the paths themselves — a working path
+          // carries an adopter's episode naming.
+          details: { sha256, resolved: localPathFromUri(uri) !== undefined },
+        },
+      );
+    }
     const provenance = artifactProvenanceSchema.parse(input.provenance);
 
     const artifact: ArtifactRef = {
       schemaVersion: SCHEMA_VERSION,
       artifactId: input.artifactId ?? newArtifactId(),
       kind: input.kind,
-      uri: input.uri ?? pathToUri(input.path),
+      uri,
       sha256,
       mediaType: input.mediaType,
       sizeBytes,
