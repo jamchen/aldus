@@ -105,6 +105,38 @@ their side: _the path nobody takes is the one that is wrong, and a test that tak
 path is what lets it stay wrong._ A hand-built fixture is not a weaker version of the real
 composition — it is a different composition, and it is the one where the wiring bug cannot occur.
 
+### The second detection question: do the fixtures disagree with anyone?
+
+#80 is the same family reached by a different route, and it needs its own question because the
+first one would not have found it.
+
+`status` recommended `aldus run <stage> --run <id>`, and that command refused for any stage whose
+`inputSchema` was object-shaped — which is every realistic stage. The path was exercised. The
+composed stack was exercised. What was not exercised was the **shape**: every stage in this
+repository's CLI and e2e tests declared a schema accepting anything, `undefined` included, because
+that is what is convenient to write when the stage's input is not what the test is about.
+
+So the tests agreed with each other, and none of them agreed with an adopter. The adopter's
+statement of the general case:
+
+> A test suite written entirely from the inside converges on the shapes convenient to the
+> implementation, and the first real adopter is the first thing that disagrees.
+
+This is invisible to the measurements normally reached for. A test count does not show it and
+coverage does not show it, because the line that would fail is covered — by a fixture built
+precisely to avoid needing the behaviour that is broken. The gap is in the _inputs_ the suite
+chose, not in the code it reached.
+
+The correction is to make the realistic shape the default fixture rather than the exotic one.
+`objectInputStage` exists for that reason: an adopter's stage declares a real schema, so the
+repository's stages should too, and the always-accepting stub should be the one a test reaches for
+deliberately.
+
+Two questions, then, for a capability that a real user exercises and the suite does not:
+
+1. **Does the composed stack exercise this, or only a hand-built one?** (#67 — wrong path.)
+2. **Do the fixtures disagree with anyone, or only agree with each other?** (#80 — wrong shape.)
+
 ### The recommendation form of the same defect
 
 The original text treats the failure as **a fact the runtime holds and does not say.** Ordering
