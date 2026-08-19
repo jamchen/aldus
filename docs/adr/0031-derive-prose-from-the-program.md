@@ -63,6 +63,54 @@ therefore fails on exactly the days it matters:
    reason is the part that is nowhere else, and it is what stops a later contributor "fixing" a
    correct implementation.
 
+## Amendment, 2026-08-19: which artifact the reader trusts
+
+The rule above is stated for prose, because that is where all five instances lived. Two things
+found immediately afterwards show the class is wider, and give it a sharper edge.
+
+### The cost is set by trust, not by wrongness
+
+Two failures on the same axis, from the same week:
+
+- I read a failing test as a possible runtime finding. My test was wrong — deterministic builders
+  collided on an id and the store correctly refused to overwrite an append-only record. Had I
+  believed myself, I would have gone and changed a correct runtime.
+- The adopter had a comment that was wrong about correct code. A maintainer reconciling the two
+  reaches for the code, because prose is not what they distrust.
+
+The adopter's statement of what the two have in common:
+
+> The expensive direction is whichever artifact the reader trusts more, not whichever one is
+> wrong.
+
+That is the operative principle, and it is why "keep documentation current" is the wrong frame.
+The damage is not proportional to how false a statement is; it is proportional to the authority of
+the thing making it. A comment carries the authority of having been written by someone who knew.
+A passing test carries the authority of having run.
+
+### The stale artifact need not be prose
+
+#74 is a third instance, and the reader that was misled is a program rather than a person.
+`executeCleanup` trusted a `CleanupPlan` — computed correctly, `safe` honestly true, never wrong
+about the artifact it cleared — and deleted a working file the plan had never examined, because a
+re-take had been registered at the same path in between. The bytes were `irreplaceable`.
+
+The plan is the same failure as a comment that was true when written: an artifact describing the
+world, correct at the moment of writing, consulted after the world moved. The difference is the
+reader.
+
+> Programs do not notice the way a maintainer eventually does.
+
+A maintainer who reads a stale comment for long enough usually trips over the contradiction. A
+program re-reads a stale structure with undiminished confidence every time. So where the consumer
+is code, the mitigation cannot be clearer writing — the fact has to be **re-derived at the point
+of use**, which is what #74's fix does by re-hashing every file against its record immediately
+before deleting it.
+
+That is the same decision as the rule above, applied one level down: do not restate a fact the
+program can compute — and where the restatement is unavoidable because it was computed earlier,
+recompute it at the moment it is acted on.
+
 ## Consequences
 
 - Some prose becomes less readable to gain this. A sentence carrying an interpolated constant
