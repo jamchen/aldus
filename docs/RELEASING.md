@@ -90,8 +90,13 @@ in the publish set, stop — something has edited `NEVER_PUBLISH` in `scripts/pu
 
 Lockstep across every package including the root, and internal pins to the same exact version.
 
+Set it once and use it for the rest of this document. Every later step reads `${VERSION}` rather
+than naming a release, so this procedure cannot describe the version it was written during — the
+mistake ADR-0031 exists to prevent, and one this file had already made.
+
 ```bash
-npm version 0.1.0 --workspaces --include-workspace-root --no-git-tag-version
+VERSION=0.2.0-next.4   # the release you are cutting
+npm version "${VERSION}" --workspaces --include-workspace-root --no-git-tag-version
 ```
 
 Then update every internal dependency to the exact version. Verify:
@@ -107,7 +112,7 @@ Read what it prints; it names each problem.
 ### Step 4 — the version does not already exist
 
 ```bash
-npm view @aldus-runtime/core@0.1.0 version
+npm view "@aldus-runtime/core@${VERSION}" version
 ```
 
 An error here is what you want — it means the version is free. **If it prints a version, stop.**
@@ -117,7 +122,7 @@ That version is taken and cannot be reused; pick the next one.
 
 ```bash
 node scripts/pack.mjs --out /tmp/aldus-release
-tar -tzf /tmp/aldus-release/aldus-runtime-core-0.1.0.tgz | head -30
+tar -tzf "/tmp/aldus-release/aldus-runtime-core-${VERSION}.tgz" | head -30
 ```
 
 Check by eye: `package/LICENSE`, `package/NOTICE`, `package/dist/`, nothing from `src/`, no
@@ -144,8 +149,8 @@ release not yet promoted to `latest`.
 
 ```bash
 git add -A
-git commit -m "release: 0.1.0"
-git tag v0.1.0
+git commit -m "release: ${VERSION}"
+git tag "v${VERSION}"
 git push origin main --follow-tags
 ```
 
@@ -168,7 +173,10 @@ The workflow publishes with `--tag next --access public --provenance`. **It neve
 npm view @aldus-runtime/core dist-tags
 ```
 
-Expect `next: 0.1.0` and **no `latest`**. Then, in a scratch directory outside the repository:
+Expect `next` to be `${VERSION}`, and **`latest` to be unchanged** — it stays wherever the last
+deliberate promotion left it (ADR-0023). Compare it against the snapshot the workflow took, not
+against a value remembered from a previous release: `latest` moving is a release failure unless
+you are promoting on purpose. Then, in a scratch directory outside the repository:
 
 ```bash
 mkdir /tmp/aldus-check && cd /tmp/aldus-check && npm init -y
@@ -187,7 +195,7 @@ badge.
 
 ```bash
 for pkg in artifact-registry cli core file-store gate-engine mcp regression release services stage-runner testkit tts-ledger; do
-  npm dist-tag add "@aldus-runtime/${pkg}@0.1.0" latest
+  npm dist-tag add "@aldus-runtime/${pkg}@${VERSION}" latest
 done
 ```
 
@@ -224,8 +232,8 @@ Do this for **every** package, not just the broken one.
 ### 2. Deprecate the bad version
 
 ```bash
-npm deprecate "@aldus-runtime/<pkg>@0.1.0" \
-  "Broken: <one line on what breaks>. Use 0.1.1 or later."
+npm deprecate "@aldus-runtime/<pkg>@<broken-version>" \
+  "Broken: <one line on what breaks>. Use <fixed-version> or later."
 ```
 
 Anyone installing it now sees the warning. Deprecate every package at that version if the
