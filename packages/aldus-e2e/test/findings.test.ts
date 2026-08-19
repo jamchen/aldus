@@ -105,7 +105,12 @@ describe("only the gates a stage requires block it (§11, ADR-0021)", () => {
     // No workflow graph and no stage declaring its gates, so *nothing* is declared and every
     // blocking gate is assumed to gate every stage. Unchanged from before ADR-0021 — an adopter
     // who declares nothing loses nothing.
-    expect(status.data.focused?.plan.next).toEqual([]);
+    // No stage is offered, which is the conservative behaviour this test exists to pin. The
+    // gates themselves are now offered (#86): under the conservative reading every blocking gate
+    // gates every stage, so deciding one is exactly what moves the Run — and reporting "nothing
+    // is safe to do" while naming a gate as the blocker was a false statement, not a cautious one.
+    expect(status.data.focused?.plan.next.filter((a) => a.kind === "run-stage")).toEqual([]);
+    expect(status.data.focused?.plan.next.every((a) => a.kind === "approve-gate")).toBe(true);
     const blocked = status.data.focused?.plan.blocked.find((e) => e.stageId === NARRATION_STAGE);
     expect(blocked?.reason).toMatch(/is blocking/i);
     // The graph hint belongs only where a graph exists and this stage was left out of it.
