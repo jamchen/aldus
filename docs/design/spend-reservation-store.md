@@ -70,13 +70,31 @@ export interface SpendReservationTransition {
 
 export interface GrantReservationStream {
   grantId: string;
-  /** Number of transitions committed. The value a writer must expect to still be current. */
+  /**
+   * Number of **commits**, not of transitions.
+   *
+   * One commit may carry several transitions — `reservation.reconciled` must land atomically with
+   * the `settled` or `released` it justifies, or a reader could observe a reconciliation
+   * explaining a state that has not happened. So a commit is the unit of atomicity *and* the unit
+   * of revision: one immutable commit file advances the revision exactly once, whatever it
+   * contains.
+   *
+   * Defining this as `transitions.length` would make the CAS revision depend on batch sizes, so
+   * two writers proposing different batch shapes could compute the same expected revision from
+   * different histories.
+   */
   revision: number;
+  /** Every transition, flattened across commits, in commit order. For reduction only. */
   transitions: readonly SpendReservationTransition[];
 }
 
 export type CompareAndAppendResult =
-  { kind: "appended"; revision: number } | { kind: "conflict"; currentRevision: number };
+  /** This call created a new durable fact. */
+  | { kind: "appended"; revision: number }
+  /** These exact transitions were already committed — by an earlier attempt of this same call. */
+  | { kind: "already_present"; revision: number }
+  /** Another commit won the successor of the expected revision. Re-read and recompute. */
+  | { kind: "conflict"; currentRevision: number };
 
 export interface SpendReservationStore {
   readGrant(grantId: string): Promise<GrantReservationStream>;
@@ -104,6 +122,41 @@ export interface SpendReservationStore {
 API a future caller reaches for at 5pm, and the unsafe path must be unrepresentable rather than
 discouraged. `LockManager` is an implementation detail of the file adapter and appears in no
 service signature.
+
+**A commit is a batch.** `compareAndAppend` takes several transitions because some facts must land
+together: `reservation.reconciled` must be atomic with the `settled` or `released` it justifies, or
+a reader could observe a reconciliation explaining a state that has not happened.
+
+### Decision order, so a retry is deterministic
+
+1. **Every** supplied transition identity already present with byte-identical contents →
+   `already_present`.
+2. Any supplied `transitionId` present with **different** contents → refuse, identity conflict.
+   Two different facts under one identity is the defect this repository has removed four times.
+3. Otherwise, `expectedRevision` stale → `conflict`.
+4. Otherwise, attempt the conditional commit.
+
+**Rule 1 outranks rule 3, and that is what makes a lost response recoverable.** A caller that
+committed successfully and never saw the answer retries with the same identities; its commit has
+advanced the stream past the revision it still expects, so evaluating the revision first would
+return `conflict` and send it looping to rediscover its own success — with the retry bound deciding
+whether it ever learned the truth.
+
+**`already_present` is never reported as `appended`.** A replay is not a newly committed fact, and
+in this domain the fact is money.
+
+### Who owns what
+
+The store owns **durability**: transition schema validation, `transitionId` uniqueness,
+expected-revision atomicity, the durable commit.
+
+`SpendService` owns **policy**: lifecycle legality, scope, availability, and whether a proposed
+transition is legal for the current projection.
+
+The expected revision is what makes the service's decision safe: it validated against a revision it
+read, and if the state moved the commit conflicts rather than applying a decision made against a
+stream that no longer exists. **The reservation state machine does not move into a generic
+durability adapter** — a store that knew the lifecycle would be a store making policy.
 
 ## 2. Transitions
 
@@ -265,6 +318,29 @@ fsync the directory
 writer can create a given name**, so the interleaving in §0 ends differently: A resumes, attempts
 `link` to `000002.json`, gets `EEXIST`, and learns it lost — with B's transition intact.
 
+### Winning the revision and being durable are different facts
+
+```text
+link() success   = this writer won the revision
+directory fsync  = the winning revision may be acknowledged as durable
+```
+
+A commit is **not** reported as appended until the containing directory has been `fsync`ed. Between
+the two the writer has won and cannot prove it survived a power loss, and that window has its own
+rule:
+
+- **do not dispatch the paid effect** — an unacknowledged commit is not authorization;
+- do not report an ordinary success;
+- resolve by retrying with the **same stable transition identities**;
+- if the immutable commit exists with identical contents → complete the durability step and return
+  `already_present`;
+- if it does not exist → retry the conditional append;
+- if durability still cannot be established → fail closed with a structured indeterminate-storage
+  outcome.
+
+The stable identities are what make that recovery possible: without them a retry cannot tell its own
+earlier commit from somebody else's.
+
 `rename()` is what makes the first draft's design wrong: it replaces silently, so the loser
 overwrites the winner and neither is told. `open(…, "wx")` also refuses to clobber, but the write
 that follows is not atomic — a crash mid-write leaves a file that _exists_ and cannot be parsed,
@@ -288,16 +364,16 @@ reports `appended`. Turning a durable, immutable, provably-ours commit into an a
 because `withLock` complained on the way out would manufacture a reconciliation case out of a
 success.
 
-| requirement                   | how                                                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
-| lease namespace               | `spend-reservation:${grantId}` — canonical grant identity, so separate grants never contend             |
-| validate before acquiring     | grant exists, scope permits the operation, amount well-formed                                           |
-| revision re-check under lease | re-read the directory inside `withLock`; the `link` still decides                                       |
-| crash-safe append             | temp file, `fsync`, `link`, `fsync` directory                                                           |
-| stale writer                  | **cannot write over a winner** — `link` returns `EEXIST`. The lease does not provide this and never did |
-| bounded retry                 | small fixed cap, recomputing availability every pass, then `RESERVATION_CONTENDED`                      |
-| recovery after termination    | nothing to recover: committed files are immutable, and an orphaned temp file is unreferenced garbage    |
-| concurrent grants             | separate directories and separate lease resources                                                       |
+| requirement                   | how                                                                                                                                                                               |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| lease namespace               | `spend-reservation:${grantId}` — canonical grant identity, so separate grants never contend                                                                                       |
+| validate before acquiring     | grant exists, scope permits the operation, amount well-formed                                                                                                                     |
+| revision re-check under lease | re-read the directory inside `withLock`; the `link` still decides                                                                                                                 |
+| crash-safe append             | temp file, `fsync`, `link` (linearization), `fsync` directory (durability); a crash between the two is unacknowledged, undispatched, and resolved by retrying the same identities |
+| stale writer                  | **cannot write over a winner** — `link` returns `EEXIST`. The lease does not provide this and never did                                                                           |
+| bounded retry                 | small fixed cap, recomputing availability every pass, then `RESERVATION_CONTENDED`                                                                                                |
+| recovery after termination    | nothing to recover: committed files are immutable, and an orphaned temp file is unreferenced garbage                                                                              |
+| concurrent grants             | separate directories and separate lease resources                                                                                                                                 |
 
 ### What is still not claimed
 
@@ -308,23 +384,39 @@ a database transaction, or a service with compare-and-swap — behind the same p
 
 ## 7. Rebuildability
 
-The **transition stream is authoritative**. Revision is `transitions.length` — derived, never
-stored, so a gap is not representable and a duplicate cannot advance it.
+The **transition stream is authoritative**. Revision is the number of committed batches — derived
+from the directory, never stored — so a gap is not representable and a duplicate cannot advance it.
 
-`get(reservationId)` and `listByRun(runId)` need a cross-grant lookup, which the per-grant streams
-do not provide. The index that supplies it is a **hint, never a balance**: it maps
-`reservationId → grantId` and `runId → grantId[]`, and every authoritative read then goes to the
-grant stream and reduces it. A damaged or missing index is discarded and rebuilt by scanning; a
-stale index can only cause a slower correct answer, never a different one.
+### The index is a hint, and a hint cannot establish absence
+
+The first draft said a stale index "can only cause a slower correct answer, never a different one".
+That is false for the case that matters: **a syntactically valid but stale index is missing the
+newest reservation**, and "rebuild when damaged or missing" does not detect that, because nothing
+about it is damaged.
+
+So the index may narrow work, never conclude it:
+
+- **`get(reservationId)`** — an index hit is a _candidate_: read that grant's stream and confirm.
+  An index **miss must fall back to scanning the canonical streams** before returning `undefined`.
+  Absence is a claim about everything, and an index is a claim about what it happened to record.
+- **`listByRun(runId)`** — an index result is never treated as complete unless completeness is
+  proven against authoritative stream revisions: the index would have to record, per grant, the
+  revision it was built from, and every one of those would have to still be current. Without that
+  checkpoint, `listByRun` scans. The index may order or narrow candidate reads only where doing so
+  cannot omit a result.
 
 That is ADR-0008's rule applied to money: the log is sufficient, the projection is a convenience,
-and no cached figure is ever the answer to "how much is available".
+and no cached figure is ever the answer to "how much is available" — nor to "is there anything
+else".
 
 ## 8. Acceptance and mutation tests
 
 Acceptance: two writers reaching the commit primitive for the same revision and exactly one
 winning, with the loser's payload absent from the stream; a paused writer resuming after another
-committed and being refused rather than clobbering; two concurrent reservations against
+committed and being refused rather than clobbering; **a failure injected between `link()` and the
+directory `fsync`, after which the effect was not dispatched and a retry with the same identities
+returns `already_present` rather than committing twice**; an index missing the newest reservation,
+where `get` still finds it and `listByRun` still returns it; two concurrent reservations against
 insufficient headroom and only one succeeds; the
 same `effectKey` reserved twice returns one reservation; the same `effectKey` with different terms
 refuses; N billed effects create N reservations; no provider call before the reservation commits; a
@@ -350,7 +442,10 @@ Mutations that must fail:
 - an indeterminate dispatch window read as _not dispatched_;
 - a terminal reservation returned to active;
 - `billing_unknown` treated as releasing its amount;
-- the index consulted as authoritative rather than as a hint.
+- the index consulted as authoritative rather than as a hint;
+- an index miss returned as `undefined` without scanning the canonical streams;
+- a commit acknowledged before the directory `fsync`;
+- revision computed from `transitions.length` rather than the commit count.
 
 ## 9. Alternatives
 
