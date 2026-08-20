@@ -45,8 +45,9 @@ describe("every paid dispatch path reserves before the effect", () => {
   });
 
   it("SpendService exposes the lifecycle a paid path needs, and no more", () => {
-    // `reconcile` and operator status are step 5. Shipping them now would put unexercised contract
-    // in the published surface, which is how a seam nobody drives comes to look supported.
+    // `reconcile` and `status` arrived with step 5, which is why this assertion changed rather
+    // than the surface quietly growing past it. What stays out is `list` and `inspect`: the ruling
+    // permits them to wait, and shipping a seam nobody drives is how one comes to look supported.
     const spend = services.SpendService.prototype as unknown as Record<string, unknown>;
     for (const method of [
       "reserve",
@@ -55,9 +56,13 @@ describe("every paid dispatch path reserves before the effect", () => {
       "settle",
       "releaseBeforeDispatch",
       "markUnknown",
+      "reconcile",
+      "status",
     ]) {
       expect(typeof spend[method]).toBe("function");
     }
-    expect(spend["reconcile"]).toBeUndefined();
+    for (const notYet of ["list", "inspect"]) {
+      expect(spend[notYet]).toBeUndefined();
+    }
   });
 });
