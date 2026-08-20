@@ -1286,6 +1286,164 @@ describe("a reservation whose observations end differently", () => {
     ]);
   });
 
+  it("resumes a partially-resolving decision whose cost write failed", async () => {
+    // The retry the suite could not reach. A decision's transition is durable **before** its cost
+    // write — deliberately, so a human's finding survives the failure — which means every retry
+    // re-enters with its own observation already subtracted from the pending list. Deriving the
+    // covered observation from that recomputed list refused the decision the runtime had just
+    // accepted, and the charge it named could then never be recorded: resolving the *other*
+    // observation reached a terminal state carrying only that one, while the human's durable
+    // finding about the first was absent from the ledger.
+    const prepared = await twoUnwritten("effect-resume-partial");
+    const id = prepared.reservationId;
+    await expect(flakyFrom(1).settle(prepared, twoObservations, {})).rejects.toThrow();
+
+    // The decision lands; the cost write does not.
+    const failing = openOperatorConsole({
+      spend: new SpendService({
+        store,
+        costs: { list: costs.list, append: () => Promise.reject(new Error("cost store down")) },
+        now: () => new Date("2026-01-02T00:00:00.000Z"),
+      }),
+      actor: HUMAN,
+    });
+    const decision = {
+      evidenceRef: "provider-a invoice line 1",
+      decisionId: "dec-partial-a",
+      resolution: {
+        kind: "settled_with_amount" as const,
+        amount: { amount: "0.5000", currency: "USD" },
+        observationId: `${id}:cost:0`,
+      },
+    };
+    await expect(
+      failing.reconcile((await store.get(id)) as SpendReservationLike, decision),
+    ).rejects.toThrow(/cost store down/);
+    expect(costs.records.filter((record) => record.reservationId === id)).toHaveLength(0);
+
+    // The identical decision, retried against a working store, resumes rather than being refused.
+    const resumed = await console_.reconcile(
+      (await store.get(id)) as SpendReservationLike,
+      decision,
+    );
+
+    expect(resumed.costs.map((record) => record.costId)).toEqual([`${id}:cost:0`]);
+    expect(resumed.costs[0]?.provider).toBe("provider-a");
+    // A is now durable and B is still outstanding, so the reservation is not terminal.
+    expect(resumed.reservation.status).toBe("billing_unknown");
+    const [entry] = (await spend.status(RUN)).filter((item) => item.reservationId === id);
+    expect(entry?.pendingObservations.map((observation) => observation.observationId)).toEqual([
+      `${id}:cost:1`,
+    ]);
+
+    // And resolving B terminates carrying *both* — the lineage the defect dropped.
+    const final = await console_.reconcile((await store.get(id)) as SpendReservationLike, {
+      evidenceRef: "provider-b invoice line 2",
+      decisionId: "dec-partial-b",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.2500", currency: "USD" },
+        observationId: `${id}:cost:1`,
+      },
+    });
+    expect(final.reservation.status).toBe("settled");
+    expect([...final.reservation.costIds].sort()).toEqual([`${id}:cost:0`, `${id}:cost:1`]);
+  });
+
+  it("resumes a single-observation decision that named no provider", async () => {
+    // The dead end. The operator omits provider and operation exactly as the accepted #152 path
+    // does, because attribution comes from the named observation. When the cost write failed, the
+    // retry found nothing pending, no `unknown` record to take attribution from, and refused —
+    // while adding the provider changed the digest and a fresh decision id hit the
+    // already-recorded guard. No decision could ever reach a terminal state.
+    const outcome = await spend.reserve({
+      grant,
+      operation: "agent.execute",
+      runId: RUN,
+      stageId: "outline.draft",
+      attemptId: "att-1",
+      effectKey: "effect-resume-single",
+      expectation: { kind: "estimated", amount: { amount: "2.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+    const id = prepared.reservationId;
+    await expect(
+      flakyFrom(1).settle(prepared, [twoObservations[0] as never], {}),
+    ).rejects.toThrow();
+
+    const decision = {
+      evidenceRef: "provider statement line 4",
+      decisionId: "dec-single",
+      resolution: {
+        kind: "settled_with_amount" as const,
+        amount: { amount: "0.5000", currency: "USD" },
+        observationId: `${id}:cost:0`,
+      },
+    };
+    const failing = openOperatorConsole({
+      spend: new SpendService({
+        store,
+        costs: { list: costs.list, append: () => Promise.reject(new Error("cost store down")) },
+        now: () => new Date("2026-01-02T00:00:00.000Z"),
+      }),
+      actor: HUMAN,
+    });
+    await expect(
+      failing.reconcile((await store.get(id)) as SpendReservationLike, decision),
+    ).rejects.toThrow(/cost store down/);
+
+    const resumed = await console_.reconcile(
+      (await store.get(id)) as SpendReservationLike,
+      decision,
+    );
+
+    // Attribution from the observation, on the resume exactly as on the first attempt.
+    expect(resumed.costs[0]?.provider).toBe("provider-a");
+    expect(resumed.costs[0]?.operation).toBe("completion");
+    expect(resumed.costs[0]?.costId).toBe(`${id}:cost:0`);
+    expect(resumed.reservation.status).toBe("settled");
+  });
+
+  it("appends nothing extra when either resume runs on an advancing clock", async () => {
+    const prepared = await twoUnwritten("effect-resume-clock");
+    const id = prepared.reservationId;
+    await expect(flakyFrom(1).settle(prepared, twoObservations, {})).rejects.toThrow();
+
+    let tick = 0;
+    const advancing = new SpendService({
+      store,
+      costs,
+      now: () => new Date(Date.UTC(2026, 0, 3, 0, tick++)),
+    });
+    const operator = openOperatorConsole({ spend: advancing, actor: HUMAN });
+    const decision = {
+      evidenceRef: "provider-a invoice line 1",
+      decisionId: "dec-clock-partial",
+      resolution: {
+        kind: "settled_with_amount" as const,
+        amount: { amount: "0.5000", currency: "USD" },
+        observationId: `${id}:cost:0`,
+      },
+    };
+
+    await operator.reconcile((await store.get(id)) as SpendReservationLike, decision);
+    const before = await store.readGrant(grant.grantId);
+    const recordsBefore = costs.records.filter((record) => record.reservationId === id).length;
+
+    await operator.reconcile((await store.get(id)) as SpendReservationLike, decision);
+
+    const after = await store.readGrant(grant.grantId);
+    expect(after.transitions).toHaveLength(before.transitions.length);
+    expect(costs.records.filter((record) => record.reservationId === id)).toHaveLength(
+      recordsBefore,
+    );
+  });
+
   it("is byte-stable retrying the terminal decision of an N-observation sequence", async () => {
     // The sequence the previous retry test could not reach. With *two* observations pending, A is
     // resolved by `dec-a` and B terminally by `dec-b`. Once B is resolved nothing is pending, and

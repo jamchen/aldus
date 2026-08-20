@@ -650,20 +650,45 @@ export class SpendService {
     transitions: readonly SpendReservationTransition[],
     reservationId: string,
   ): readonly PendingObservation[] {
-    const mine = transitions.filter((transition) => transition.reservationId === reservationId);
-    const declared = mine
-      .filter((transition) => transition.kind === "reservation.billing_unknown")
-      .map((transition) => transition.detail["pendingObservations"])
-      .filter((value): value is PendingObservation[] => Array.isArray(value))
-      .at(-1);
-    if (declared === undefined) return [];
-    const settledIds = new Set(
-      mine
-        .filter((transition) => transition.kind === "reservation.reconciled")
+    const declared = this.#declaredObservations(transitions, reservationId);
+    const resolvedIds = new Set(
+      transitions
+        .filter(
+          (transition) =>
+            transition.reservationId === reservationId &&
+            transition.kind === "reservation.reconciled",
+        )
         .map((transition) => transition.detail["observationId"])
         .filter((value): value is string => typeof value === "string"),
     );
-    return declared.filter((observation) => !settledIds.has(observation.observationId));
+    return declared.filter((observation) => !resolvedIds.has(observation.observationId));
+  }
+
+  /**
+   * The observations the last `billing_unknown` declared unrecorded, **before** subtracting
+   * decisions (#152).
+   *
+   * The source of attribution for a resume. A decision's transition is durable before its cost
+   * write — deliberately, so the human's finding survives a failed write — which means every retry
+   * re-enters with its own observation already subtracted from the *pending* list. Deriving the
+   * covered observation from that recomputed list refused a decision the runtime had already
+   * accepted, and the charge it named could then never be recorded at all.
+   */
+  #declaredObservations(
+    transitions: readonly SpendReservationTransition[],
+    reservationId: string,
+  ): readonly PendingObservation[] {
+    return (
+      transitions
+        .filter(
+          (transition) =>
+            transition.reservationId === reservationId &&
+            transition.kind === "reservation.billing_unknown",
+        )
+        .map((transition) => transition.detail["pendingObservations"])
+        .filter((value): value is PendingObservation[] => Array.isArray(value))
+        .at(-1) ?? []
+    );
   }
 
   /**
@@ -979,7 +1004,32 @@ export class SpendService {
     }
 
     let covered: PendingObservation | undefined;
-    if (pending.length > 0) {
+    const alreadyNamed = priorDecision?.detail["observationId"];
+    if (typeof alreadyNamed === "string") {
+      // A resume. This decision already named its observation and that naming is durable, so the
+      // pending list has subtracted it — re-validating against that list refuses a decision the
+      // runtime accepted, and the charge it named could then never be recorded while the terminal
+      // projection still presented itself as the whole lineage.
+      //
+      // Reaching here with a prior decision means `priorById` matched *and* the digest matched, so
+      // this is the same decision rather than a different one wearing its id.
+      covered = this.#declaredObservations(stream.transitions, current.reservationId).find(
+        (entry) => entry.observationId === alreadyNamed,
+      );
+      if (covered === undefined) {
+        throw serviceError(
+          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+          `Reservation "${current.reservationId}" carries decision "${input.decisionId}" naming ` +
+            `observation "${alreadyNamed}", and no unrecorded observation by that identity was ` +
+            "ever declared. The decision and the reservation describe different charges (#152).",
+          {
+            category: "conflict",
+            retryable: false,
+            details: { reservationId: current.reservationId },
+          },
+        );
+      }
+    } else if (pending.length > 0) {
       const named = input.resolution.observationId;
       if (named === undefined) {
         throw serviceError(
