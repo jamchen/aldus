@@ -147,6 +147,8 @@ export {
   type ReserveInput,
   type ReserveOutcome,
   type SpendServiceOptions,
+  openOperatorConsole,
+  type OperatorSpendConsole,
   type ReconcileInput,
   type ReconciliationResolution,
   type ReservationStatus,

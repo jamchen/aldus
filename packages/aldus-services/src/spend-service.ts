@@ -28,6 +28,7 @@ import {
   type SpendGrant,
 } from "@aldus-runtime/gate-engine";
 import type { GrantReservationStream, SpendReservationStore } from "@aldus-runtime/file-store";
+import { digestJson } from "@aldus-runtime/stage-runner";
 
 import type { CostRecordStore } from "./cost-store.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
@@ -159,7 +160,11 @@ export interface ReservationStatus {
     evidenceRef: string;
     decidedBy: ActorRef | undefined;
     at: string;
-    outcome: "terminal" | "audit_only";
+    /**
+     * `audit_only` resolves nothing; `decision_recorded` is durable and unfinished;
+     * `completed` reached a terminal lifecycle state.
+     */
+    outcome: "audit_only" | "decision_recorded" | "completed";
   }[];
   /** Why this reservation is unresolved and non-retryable, in the operator's terms. */
   unresolvedReason?: string;
@@ -189,14 +194,20 @@ export function isIssuedOperatorAuthority(authority: OperatorAuthority): boolean
 /**
  * The only path to a reconciliation (#155 step 5).
  *
- * Constructed by the composition root with the actor it already trusts, so the decision's identity
- * comes from the invocation rather than from an argument. `reconcile` takes no actor: there is
- * nothing for a caller to claim.
+ * **Not publicly constructible.** The class value is deliberately unexported and only its type is
+ * published, so the sole way to obtain one is {@link openOperatorConsole}, which the composition
+ * root calls with the actor the invocation boundary already established.
+ *
+ * The first version exported a constructor taking an arbitrary `ActorRef`, which meant a caller
+ * could write `new OperatorSpendConsole({ actor: { kind: "human" } })` and receive a valid
+ * authority. That is not the `SynthesisPermit` pattern it claimed to be: a permit is minted *after*
+ * the ledger establishes authorization, whereas that console minted from the caller's assertion.
  */
-export class OperatorSpendConsole {
+class OperatorSpendConsole {
   readonly #spend: SpendService;
   readonly #actor: ActorRef;
 
+  /** @internal Reachable only through {@link openOperatorConsole}. */
   constructor(options: { spend: SpendService; actor: ActorRef }) {
     this.#spend = options.spend;
     this.#actor = options.actor;
@@ -216,6 +227,44 @@ export class OperatorSpendConsole {
   status(runId: string): Promise<readonly ReservationStatus[]> {
     return this.#spend.status(runId);
   }
+}
+
+/** @see OperatorSpendConsole */
+export type { OperatorSpendConsole };
+
+/**
+ * Open an operator console for an actor the **invocation boundary** established (#155 step 5).
+ *
+ * Called by the composition root with the identity the CLI or Remote Control authenticated, never
+ * with one a caller chose. It refuses a non-human actor here as well as at the decision, so a
+ * composition that wired an agent identity fails when the console is opened rather than when
+ * somebody tries to release authorization.
+ *
+ * @throws {AldusError} when no actor is established, or the established actor is not a human.
+ */
+export function openOperatorConsole(options: {
+  spend: SpendService;
+  /** From the trusted invocation boundary. Not a parameter a request body may set. */
+  actor: ActorRef | undefined;
+}): OperatorSpendConsole {
+  if (options.actor === undefined) {
+    throw serviceError(
+      ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+      "No actor identity is established for this invocation, so no reconciliation can be " +
+        "attributed to a human (§19.2).",
+      { category: "policy", retryable: false, details: {} },
+    );
+  }
+  if (options.actor.kind !== "human") {
+    throw serviceError(
+      ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+      `This invocation is attributed to a "${options.actor.kind}", and reconciliation is a human ` +
+        "decision. An agent that could reconcile could release authorization it had itself " +
+        "consumed (§13.3, §19.3).",
+      { category: "policy", retryable: false, details: {} },
+    );
+  }
+  return new OperatorSpendConsole({ spend: options.spend, actor: options.actor });
 }
 
 /** One human reconciliation decision. Carries no actor: see {@link OperatorSpendConsole}. */
@@ -437,11 +486,21 @@ export class SpendService {
       // to `billing_unknown` **before** the error propagates, so the state a human must act on
       // exists without anyone performing a repair step first. Left `reserved`, it reads as
       // "dispatch not begun", which is exactly the wrong thing to tell an operator here.
-      await this.markUnknown(reservation, [], {
-        reason:
-          "settlement persistence failed after dispatch: the provider may have charged and the " +
-          "cost record could not be written, so this is non-retryable until reconciled (#152)",
-      });
+      // Every record that *did* land is named. Passing an empty list dropped them from the
+      // reservation, so a later reconciliation had no way to know part of the charge was already
+      // durable — and could settle a total that double-counted it.
+      await this.markUnknown(
+        reservation,
+        written.map((record) => record.costId),
+        {
+          reason:
+            `settlement persistence failed after dispatch: ${written.length} of ` +
+            `${observations.length} billing observation(s) were recorded, and the remainder could ` +
+            "not be written. The provider may have charged for all of them, so this is " +
+            "non-retryable until reconciled; reconcile only the unrecorded portion (#152).",
+          unresolvedObservations: observations.length - written.length,
+        },
+      );
       throw thrown;
     }
 
@@ -488,13 +547,16 @@ export class SpendService {
   async markUnknown(
     reservation: SpendReservation,
     costIds: readonly string[] = [],
-    options: { reason?: string } = {},
+    options: { reason?: string; unresolvedObservations?: number } = {},
   ): Promise<SpendReservation> {
     return this.#appendOne(reservation, "reservation.billing_unknown", {
       costIds: [...costIds],
       // Why it is unresolved, in the operator's terms. `budget status` surfaces this, because
       // "non-retryable" with no reason gives a human nothing to act on.
       ...(options.reason === undefined ? {} : { reason: options.reason }),
+      ...(options.unresolvedObservations === undefined
+        ? {}
+        : { unresolvedObservations: options.unresolvedObservations }),
     });
   }
 
@@ -537,10 +599,15 @@ export class SpendService {
           evidenceRef: String(transition.detail["evidenceRef"] ?? ""),
           decidedBy: transition.detail["decidedBy"] as ActorRef | undefined,
           at: transition.at,
+          // A recorded decision is not a completed one. A terminal reconciliation whose cost write
+          // failed is durable and *not* finished — describing it as completed while the
+          // reservation is still `billing_unknown` would tell an operator the matter is closed.
           outcome:
-            transition.kind === "reservation.reconciled"
-              ? ("terminal" as const)
-              : ("audit_only" as const),
+            transition.kind === "reservation.investigation_recorded"
+              ? ("audit_only" as const)
+              : reservation.status === "billing_unknown"
+                ? ("decision_recorded" as const)
+                : ("completed" as const),
         }));
       const unresolvedReason = transitions
         .filter((transition) => transition.kind === "reservation.billing_unknown")
@@ -573,8 +640,10 @@ export class SpendService {
           (record) =>
             record.reservationId === reservation.reservationId &&
             record.billingStatus === "unknown" &&
-            record.actual === undefined &&
-            record.estimated === undefined,
+            // Regardless of an estimate. §19.3 is explicit that an estimate does not resolve an
+            // unknown charge, and requiring both to be absent counted an estimated-but-unknown
+            // record as quantified.
+            record.actual === undefined,
         ).length,
         reconciliationHistory: history,
         ...(unresolvedReason === undefined ? {} : { unresolvedReason }),
@@ -666,29 +735,67 @@ export class SpendService {
         transition.reservationId === current.reservationId &&
         transition.kind === "reservation.reconciled",
     );
-    if (priorDecision !== undefined && priorDecision.detail["decisionId"] !== input.decisionId) {
-      throw serviceError(
-        ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
-        `Reservation "${current.reservationId}" already carries reconciliation decision ` +
-          `"${String(priorDecision.detail["decisionId"])}". A second, different decision would ` +
-          "overwrite a human's recorded finding rather than adding to it (ADR-0044).",
-        {
-          category: "conflict",
-          retryable: false,
-          details: { reservationId: current.reservationId },
-        },
-      );
-    }
 
-    const decisionDetail: Record<string, unknown> = {
+    // Every field a decision consists of, canonicalised. Comparing only the id let a retry reuse
+    // one decision's identity while carrying a different amount — or turn `settled_with_amount`
+    // into `released_as_uncharged` — and the resume path would skip the durable append and execute
+    // the new payload. Same id and identical payload resumes; same id and anything changed
+    // conflicts.
+    const decisionDigest = digestJson({
       decisionId: input.decisionId,
       resolution: input.resolution.kind,
       evidenceRef: input.evidenceRef,
       decidedBy: { kind: authority.actor.kind, id: authority.actor.id },
+      amount: input.resolution.kind === "settled_with_amount" ? input.resolution.amount : null,
+      provider:
+        input.resolution.kind === "settled_with_amount"
+          ? (input.resolution.provider ?? null)
+          : null,
+      billedOperation:
+        input.resolution.kind === "settled_with_amount"
+          ? (input.resolution.billedOperation ?? null)
+          : null,
+    });
+
+    const decisionDetail: Record<string, unknown> = {
+      decisionId: input.decisionId,
+      decisionDigest,
+      resolution: input.resolution.kind,
+      evidenceRef: input.evidenceRef,
+      decidedBy: { kind: authority.actor.kind, id: authority.actor.id },
       ...(input.resolution.kind === "settled_with_amount"
-        ? { amount: input.resolution.amount }
+        ? {
+            amount: input.resolution.amount,
+            ...(input.resolution.provider === undefined
+              ? {}
+              : { provider: input.resolution.provider }),
+            ...(input.resolution.billedOperation === undefined
+              ? {}
+              : { billedOperation: input.resolution.billedOperation }),
+          }
         : {}),
     };
+
+    // Compared *before* any effect: a changed payload must be refused before a cost is written or
+    // a lifecycle transition appended.
+    if (priorDecision !== undefined) {
+      const priorId = priorDecision.detail["decisionId"];
+      const priorDigest = priorDecision.detail["decisionDigest"];
+      if (priorId !== input.decisionId || priorDigest !== decisionDigest) {
+        throw serviceError(
+          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+          `Reservation "${current.reservationId}" already carries reconciliation decision ` +
+            `"${String(priorId)}". A different decision — or the same identity carrying different ` +
+            "contents — would overwrite a human's recorded finding rather than resuming it " +
+            "(ADR-0044).",
+          {
+            category: "conflict",
+            retryable: false,
+            details: { reservationId: current.reservationId },
+          },
+        );
+      }
+    }
 
     if (input.resolution.kind === "investigation_ended") {
       // Its own non-terminal transition, and repeatable: recording an abandoned investigation on

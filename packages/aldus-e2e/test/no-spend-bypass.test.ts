@@ -66,3 +66,26 @@ describe("every paid dispatch path reserves before the effect", () => {
     }
   });
 });
+
+describe("the composed operator path (#155 step 5)", () => {
+  it("reaches reconcile and status through the published surface, not an internal import", async () => {
+    // The ruling's condition: unit tests using a relative internal import are not evidence that a
+    // supported composed path exists. This imports by package name, the way an adopter does.
+    expect(Object.hasOwn(services, "openOperatorConsole")).toBe(true);
+
+    // And the class itself is deliberately absent as a value: exporting it would expose the mint,
+    // letting a caller construct a console with an actor it chose.
+    expect(Object.hasOwn(services, "OperatorSpendConsole")).toBe(false);
+  });
+
+  it("refuses a console for an actor the invocation did not establish", () => {
+    // The hole the first version had: a public constructor taking an arbitrary ActorRef meant a
+    // caller could mint a valid authority from its own assertion.
+    expect(() =>
+      services.openOperatorConsole({
+        spend: undefined as never,
+        actor: { kind: "agent", id: "claude" },
+      }),
+    ).toThrow(/human decision/);
+  });
+});

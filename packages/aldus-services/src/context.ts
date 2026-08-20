@@ -23,7 +23,12 @@ import {
 } from "@aldus-runtime/artifact-registry";
 import { FileSpendReservationStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import type { CostRecordStore } from "./cost-store.js";
-import { SpendService } from "./spend-service.js";
+import {
+  openOperatorConsole,
+  SpendService,
+  type OperatorSpendConsole,
+  type ReservationStatus,
+} from "./spend-service.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   AdapterRegistry,
@@ -331,6 +336,25 @@ export class AldusContext {
    * wiring error it is. The adapter itself is never exposed by this class: the gateway is the only
    * thing that holds it, and the gateway authorizes before it calls.
    */
+  /**
+   * The operator console for this invocation's established identity (#155 step 5).
+   *
+   * The actor comes from the context — which the CLI and Remote Control set from the invocation
+   * they authenticated — and never from a caller. This is the only supported way to obtain a
+   * console: the class value is unexported, so a caller cannot construct one with an actor it
+   * chose.
+   *
+   * @throws {AldusError} when no actor is established, or the established actor is not a human.
+   */
+  operatorConsole(): OperatorSpendConsole {
+    return openOperatorConsole({ spend: this.#spend, actor: this.actor });
+  }
+
+  /** Reservation status for a Run, for readers that need it without a console. */
+  spendStatus(runId: string): Promise<readonly ReservationStatus[]> {
+    return this.#spend.status(runId);
+  }
+
   synthesisFor(plan: TtsRequestPlan): SynthesisGateway | undefined {
     if (this.#synthesisAdapter === undefined) return undefined;
     return new SynthesisGateway({

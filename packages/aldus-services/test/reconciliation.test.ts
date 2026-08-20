@@ -17,7 +17,7 @@ import { FileSpendReservationStore } from "@aldus-runtime/file-store";
 import { availableAuthorization, type SpendGrant } from "@aldus-runtime/gate-engine";
 
 import type { CostRecordStore } from "../src/cost-store.js";
-import { OperatorSpendConsole, SpendService } from "../src/spend-service.js";
+import { openOperatorConsole, SpendService } from "../src/spend-service.js";
 
 const HUMAN: ActorRef = { kind: "human", id: "operator-a" };
 const AGENT: ActorRef = { kind: "agent", id: "claude" };
@@ -47,7 +47,7 @@ function costStore(): CostRecordStore & { records: CostRecord[] } {
 
 let root: string;
 let spend: SpendService;
-let console_: OperatorSpendConsole;
+let console_: ReturnType<typeof openOperatorConsole>;
 let costs: ReturnType<typeof costStore>;
 let store: FileSpendReservationStore;
 
@@ -56,7 +56,7 @@ beforeEach(async () => {
   store = new FileSpendReservationStore({ root });
   costs = costStore();
   spend = new SpendService({ store, costs, now: () => new Date("2026-01-01T00:00:00.000Z") });
-  console_ = new OperatorSpendConsole({ spend, actor: HUMAN });
+  console_ = openOperatorConsole({ spend, actor: HUMAN });
 });
 
 afterEach(async () => {
@@ -86,18 +86,15 @@ async function unresolved(effectKey = "effect-a") {
 const evidence = "provider statement 2026-08, line 42";
 
 describe("who may reconcile", () => {
-  it("refuses an agent behind the console", async () => {
-    // An agent that could reconcile could release authorization it had itself consumed.
-    const reservation = await unresolved();
-    const agentConsole = new OperatorSpendConsole({ spend, actor: AGENT });
+  it("refuses to open a console for a non-human invocation", () => {
+    // Refused when the console is *opened* rather than when someone tries to use it: a
+    // composition that wired an agent identity is wrong at wiring time, and finding out at the
+    // moment authorization would be released is finding out late.
+    expect(() => openOperatorConsole({ spend, actor: AGENT })).toThrow(/human decision/);
+  });
 
-    await expect(
-      agentConsole.reconcile(reservation, {
-        evidenceRef: evidence,
-        decisionId: "dec-1",
-        resolution: { kind: "released_as_uncharged" },
-      }),
-    ).rejects.toThrow(/human decision/);
+  it("refuses to open a console when no actor is established", () => {
+    expect(() => openOperatorConsole({ spend, actor: undefined })).toThrow(/No actor identity/);
   });
 
   it("refuses a caller that fabricates a human authority", async () => {
@@ -182,7 +179,7 @@ it("does not settle when the cost record cannot be written", async () => {
   // every other test here — the requirement was in the ruling and in the code, and asserted by
   // nobody.
   const reservation = await unresolved("effect-write-fails");
-  const failing = new OperatorSpendConsole({
+  const failing = openOperatorConsole({
     spend: new SpendService({
       store,
       costs: {
@@ -457,7 +454,7 @@ describe("an abandoned investigation is not a dead end", () => {
     expect(entry?.reconciliationHistory.map((h) => h.outcome)).toEqual([
       "audit_only",
       "audit_only",
-      "terminal",
+      "completed",
     ]);
     expect(entry?.reconciliationHistory[0]?.evidenceRef).toContain("found nothing");
   });
@@ -529,7 +526,7 @@ describe("#152 — the provider may have executed and the cost write failed", ()
     expect(entry?.execution?.backendVersion).toBe("1.0.0");
 
     // A human resolves it from that surfaced state, through the operator console.
-    const operator = new OperatorSpendConsole({
+    const operator = openOperatorConsole({
       spend: new SpendService({ store, costs, now: () => new Date("2026-01-01T00:00:00.000Z") }),
       actor: HUMAN,
     });
@@ -567,7 +564,7 @@ describe("#152 — the provider may have executed and the cost write failed", ()
         return costs.append(runId, record);
       },
     };
-    const operator = new OperatorSpendConsole({
+    const operator = openOperatorConsole({
       spend: new SpendService({
         store,
         costs: flaky,
@@ -635,5 +632,176 @@ describe("#152 — the provider may have executed and the cost write failed", ()
         resolution: { kind: "released_as_uncharged" },
       }),
     ).rejects.toThrow(/only an unresolved charge/);
+  });
+});
+
+describe("a decision's identity is all of it, not just its id", () => {
+  const durableDecisionThenFailure = async (effectKey: string) => {
+    const reservation = await unresolved(effectKey);
+    const failing = openOperatorConsole({
+      spend: new SpendService({
+        store,
+        costs: {
+          list: () => costs.list(RUN),
+          append: () => Promise.reject(new Error("store down")),
+        },
+        now: () => new Date("2026-01-01T00:00:00.000Z"),
+      }),
+      actor: HUMAN,
+    });
+    const decision = {
+      evidenceRef: evidence,
+      decisionId: "dec-1",
+      resolution: {
+        kind: "settled_with_amount" as const,
+        amount: { amount: "0.5000", currency: "USD" },
+        provider: "provider-a",
+        billedOperation: "completion",
+      },
+    };
+    await expect(failing.reconcile(reservation, decision)).rejects.toThrow(/store down/);
+    const midway = await store.get(reservation.reservationId);
+    return { midway: midway as NonNullable<typeof midway>, decision };
+  };
+
+  it("refuses the same id carrying a different amount", async () => {
+    // The gap: comparing only the id let a retry reuse one decision's identity while carrying a
+    // different payload, and the resume path skipped the durable append and executed the new one.
+    const { midway, decision } = await durableDecisionThenFailure("effect-amount");
+
+    await expect(
+      console_.reconcile(midway, {
+        ...decision,
+        resolution: { ...decision.resolution, amount: { amount: "9.0000", currency: "USD" } },
+      }),
+    ).rejects.toThrow(/different contents/);
+  });
+
+  it("refuses the same id carrying a different resolution", async () => {
+    const { midway, decision } = await durableDecisionThenFailure("effect-resolution");
+
+    await expect(
+      console_.reconcile(midway, {
+        ...decision,
+        resolution: { kind: "released_as_uncharged" },
+      }),
+    ).rejects.toThrow(/different contents/);
+  });
+
+  it("refuses the same id carrying different evidence or a different provider", async () => {
+    const { midway, decision } = await durableDecisionThenFailure("effect-evidence");
+
+    await expect(
+      console_.reconcile(midway, { ...decision, evidenceRef: "a different story" }),
+    ).rejects.toThrow(/different contents/);
+    await expect(
+      console_.reconcile(midway, {
+        ...decision,
+        resolution: { ...decision.resolution, provider: "provider-z" },
+      }),
+    ).rejects.toThrow(/different contents/);
+  });
+
+  it("resumes the identical decision", async () => {
+    const { midway, decision } = await durableDecisionThenFailure("effect-identical");
+
+    const resumed = await console_.reconcile(midway, decision);
+
+    expect(resumed.reservation.status).toBe("settled");
+  });
+
+  it("reports a durable decision whose cost write failed as recorded, not completed", async () => {
+    const { midway } = await durableDecisionThenFailure("effect-recorded");
+
+    const [entry] = (await spend.status(RUN)).filter(
+      (item) => item.reservationId === midway.reservationId,
+    );
+
+    // Still waiting on someone. Calling this completed would tell an operator the matter is closed
+    // while the reservation is unresolved.
+    expect(entry?.status).toBe("billing_unknown");
+    expect(entry?.reconciliationHistory.at(-1)?.outcome).toBe("decision_recorded");
+    expect(entry?.requiresReconciliation).toBe(true);
+  });
+});
+
+describe("partial settlement keeps what it already wrote", () => {
+  it("names the durable cost ids and the unresolved remainder", async () => {
+    // Two observations, the second failing. Marking unknown with an empty list dropped the first
+    // from the reservation, so a later reconciliation had no way to know part of the charge was
+    // already durable — and could settle a total that double-counted it.
+    let appends = 0;
+    const partial = new SpendService({
+      store,
+      costs: {
+        list: () => costs.list(RUN),
+        append: (runId, record) => {
+          appends += 1;
+          return appends > 1
+            ? Promise.reject(new Error("store down"))
+            : costs.append(runId, record);
+        },
+      },
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    const outcome = await partial.reserve({
+      grant,
+      operation: "agent.execute",
+      runId: RUN,
+      stageId: "outline.draft",
+      attemptId: "att-1",
+      effectKey: "effect-partial",
+      expectation: { kind: "estimated", amount: { amount: "2.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await partial.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+
+    const charge = {
+      provider: "provider-a",
+      operation: "completion",
+      billingStatus: "charged" as const,
+      actual: { amount: "0.3000", currency: "USD" },
+    };
+    await expect(partial.settle(prepared, [charge, charge], {})).rejects.toThrow(/store down/);
+
+    const [entry] = (await partial.status(RUN)).filter(
+      (item) => item.reservationId === prepared.reservationId,
+    );
+
+    // The record that landed is named, so reconciliation can see it rather than re-counting it.
+    expect(entry?.costIds).toHaveLength(1);
+    expect(entry?.costIds[0]).toBe(`${prepared.reservationId}:cost:0`);
+    expect(entry?.unresolvedReason).toContain("1 of 2");
+    expect(entry?.requiresReconciliation).toBe(true);
+  });
+});
+
+describe("unknown billing is counted by the absence of an actual amount", () => {
+  it("counts an unknown record that carries only an estimate", async () => {
+    // §19.3: an estimate does not resolve an unknown charge. Requiring both fields to be absent
+    // counted an estimated-but-unknown record as quantified.
+    const reservation = await unresolved("effect-estimated");
+    await costs.append(RUN, {
+      schemaVersion: SCHEMA_VERSION,
+      costId: `${reservation.reservationId}:cost:0`,
+      runId: RUN,
+      reservationId: reservation.reservationId,
+      provider: "provider-a",
+      operation: "completion",
+      billingStatus: "unknown",
+      estimated: { amount: "0.5000", currency: "USD" },
+      recordedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const [entry] = (await spend.status(RUN)).filter(
+      (item) => item.reservationId === reservation.reservationId,
+    );
+
+    expect(entry?.unquantifiedUnknownBillingCount).toBe(1);
   });
 });
