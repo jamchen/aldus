@@ -34,6 +34,8 @@ export {
   deriveInvocationKey,
   resolveArtifactContract,
   checkArtifactContract,
+  asEnumeratedFinding,
+  countEvaluationEvidence,
   type ArtifactObligation,
   type ArtifactContractContext,
   type ArtifactContractBreach,
@@ -42,6 +44,9 @@ export {
   type StageEvaluationChannel,
   type StageEvaluationDeclaration,
   type EvaluationFinding,
+  type EvaluationEvidenceCount,
+  type AggregateReport,
+  type EvaluationObservation,
   type StageWorkerRequest,
 } from "./definition.js";
 

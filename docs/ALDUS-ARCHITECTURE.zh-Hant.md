@@ -442,6 +442,10 @@ Evaluator 無法執行、無法解析輸入、或無法產出有效報告時，�
 
 Evaluation result 是否阻擋工作，由該 finding class 的宣告 enforcement 與 §12.1 決定，永遠不由 evaluator 自己決定。Finding class 若沒有對應的宣告 enforcement，必須被拒絕，而不是套用預設值。
 
+Evaluation observation 必須說明它是**列舉出一個已識別的缺陷實例**，還是**只報告 evaluator 觸發了、但未列舉其內容**。Channel 必須宣告它發出哪一種形式；形式與其 channel 不符的 observation 必須被拒絕。
+
+一個 enumerated finding 計為一個 finding。一個 report 計為一次 evaluator 回報，不得計入缺陷數。Report 內沒有列舉出 finding，不得被讀成零缺陷：只有 report 時，缺陷數是**無法測量**的，既不是零也不是 report 的數量。當 report 無法對應到 subject scope 時，site-level 指標同樣是無法測量，而不是零。兩種形式都會觸發 channel 宣告的 enforcement——「能否被計數」與「是否阻擋工作」是兩個不同的問題。
+
 Evaluator 只有在與 human-labeled corpus 校準後才能升級成 blocking gate，且必須考慮 recall、false positive、嚴重度加權 false negative、不必要修正的傷害、scope 與已知盲點。
 
 Listening 評估應從聽眾體驗出發，涵蓋無視覺脈絡時的清晰度、資訊密度、節奏、轉場、人設、發音、情緒與修辭意圖。
