@@ -35,6 +35,7 @@ export {
   type EffectKeyContext,
   type StageEvaluationChannel,
   type StageEvaluationDeclaration,
+  type EvaluationFinding,
   type StageWorkerRequest,
 } from "./definition.js";
 

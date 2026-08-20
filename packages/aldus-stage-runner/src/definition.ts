@@ -277,8 +277,50 @@ export interface CostPolicy {
 }
 
 /** What a stage may hand back to the runner. */
+/**
+ * One thing an evaluator found (contract §12, §12.3; #115).
+ *
+ * Structured so the production trace can tell **"the evaluator found a defect"** from **"the
+ * evaluator failed"**. Those are different events with different responses, and an adopter whose
+ * linter crashed on every run had the crash counted as a soft finding for the length of a
+ * migration because nothing distinguished them.
+ */
+export interface EvaluationFinding {
+  /**
+   * Which declared channel this finding belongs to, e.g. `"error"`, `"warning"`.
+   *
+   * Matched against {@link StageEvaluationChannel.findingClass}. A finding whose class the stage
+   * never declared is refused rather than guessed at: its enforcement would otherwise be decided
+   * by a default nobody wrote down.
+   */
+  findingClass: string;
+  /** What was found. Operator-facing, and redacted before it reaches a record (§19.2). */
+  message: string;
+  /** Adopter-defined category, e.g. `"claim/unsupported"`. Open string — Core names none (§4.2). */
+  category?: string;
+  /** Where, in whatever terms the adopter's subject has. */
+  locator?: string;
+}
+
 export type StageOutcome<O> =
   | { kind: "completed"; output: O }
+  | {
+      /**
+       * The evaluator ran and reported (contract §12; #115).
+       *
+       * **Not a failure.** An evaluator that could not execute, parse its inputs or produce a
+       * valid report fails the stage in the ordinary way, by throwing; this is the outcome where
+       * it worked and has something to say. Conflating the two is how a crashed checker gets
+       * counted as a clean one.
+       *
+       * Whether any of it stops work is decided by the stage's declared channels, not here: a
+       * stage does not get to promote its own findings past the enforcement it declared, which is
+       * the whole point of declaring them (§12.1).
+       */
+      kind: "evaluated";
+      output: O;
+      findings: readonly EvaluationFinding[];
+    }
   | {
       kind: "gate_required";
       /** Gate that must be decided before this stage can continue (contract §13). */

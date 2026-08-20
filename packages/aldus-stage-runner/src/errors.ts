@@ -56,6 +56,15 @@ export const StageRunnerErrorCodes = {
    * class — is not a stricter policy but an unanswerable one.
    */
   STAGE_EVALUATION_INVALID: "ALDUS_STAGE_EVALUATION_INVALID",
+  /**
+   * An evaluator ran and found something its declared channels say stops work (§12).
+   *
+   * Deliberately distinct from a stage that failed. §12's four levels are about what a mechanism
+   * *decides*, and a checker reporting a defect is the mechanism working — an adopter whose
+   * linter crashed on every run had the crash counted as a soft finding for a whole migration
+   * because nothing told the two apart.
+   */
+  STAGE_EVALUATION_BLOCKED: "ALDUS_STAGE_EVALUATION_BLOCKED",
   STAGE_EFFECT_KEY_REQUIRED: "ALDUS_STAGE_EFFECT_KEY_REQUIRED",
   WORKER_NOT_REGISTERED: "ALDUS_WORKER_NOT_REGISTERED",
   /**

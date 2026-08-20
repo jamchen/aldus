@@ -47,6 +47,7 @@ import {
   type StageRunResult,
   deriveInvocationKey,
   type StageWorkerRequest,
+  type EvaluationFinding,
 } from "./definition.js";
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
 import { assertWorkerCapabilities, type WorkerRegistry, type WorkerResult } from "./worker.js";
@@ -589,10 +590,15 @@ export class StageRunner {
       outputArtifacts: [...outputs],
       finishedAt,
     };
-    const withNotes: AttemptMetadata = notes.length > 0 ? { ...metadata, notes } : metadata;
+    // A function rather than a snapshot: notes are appended right up to the point a stage settles,
+    // and a value captured earlier silently drops whatever came after it. An advisory evaluation
+    // finding lost that way would leave a green record that looks like semantic correctness, which
+    // is the one thing §12 says a green record never means.
+    const withNotes = (): AttemptMetadata =>
+      notes.length > 0 ? { ...metadata, notes: [...notes] } : metadata;
 
     if (controller.signal.aborted) {
-      return this.#terminal(manifest, definition, settled, withNotes, {
+      return this.#terminal(manifest, definition, settled, withNotes(), {
         status: "cancelled",
         invocationKey,
         error: cancellationError(definition.id, ordinal),
@@ -606,7 +612,7 @@ export class StageRunner {
           definition,
           settled,
           {
-            ...withNotes,
+            ...withNotes(),
             gateId: thrown.gateId,
             subjectHashes: [...thrown.subjectHashes],
           },
@@ -617,7 +623,7 @@ export class StageRunner {
           },
         );
       }
-      return this.#terminal(manifest, definition, settled, withNotes, {
+      return this.#terminal(manifest, definition, settled, withNotes(), {
         status: "failed",
         invocationKey,
         error: redactError(
@@ -642,7 +648,7 @@ export class StageRunner {
         definition,
         settled,
         {
-          ...withNotes,
+          ...withNotes(),
           gateId: outcome.gateId,
           ...(outcome.subjectHashes !== undefined
             ? { subjectHashes: [...outcome.subjectHashes] }
@@ -656,12 +662,77 @@ export class StageRunner {
       );
     }
 
+    // An evaluator that ran and found something. Whether any of it stops work is decided by the
+    // channels the stage declared, never by the stage itself: a finding cannot be promoted past
+    // the enforcement its class was declared under, which is what makes declaring it worth
+    // anything (§12.1, ADR pending on #115).
+    if (outcome.kind === "evaluated") {
+      const channels = definition.evaluation?.channels ?? [];
+      const blocking: EvaluationFinding[] = [];
+      for (const finding of outcome.findings) {
+        const channel = channels.find((entry) => entry.findingClass === finding.findingClass);
+        if (channel === undefined) {
+          // Refused rather than defaulted. A finding whose class the stage never declared would
+          // otherwise have its enforcement decided by a default nobody wrote down, and the safe
+          // default and the useful one point in opposite directions.
+          return this.#terminal(manifest, definition, settled, withNotes(), {
+            status: "failed",
+            invocationKey,
+            error: redactError(
+              toStructuredError(
+                stageRunnerError(
+                  StageRunnerErrorCodes.STAGE_EVALUATION_INVALID,
+                  `Stage "${definition.id}" reported a "${finding.findingClass}" finding and ` +
+                    "declares no channel for that class, so nothing says whether it stops work " +
+                    "(contract §12).",
+                  {
+                    category: "validation",
+                    retryable: false,
+                    details: { stageId: definition.id, findingClass: finding.findingClass },
+                  },
+                ),
+              ),
+            ),
+          });
+        }
+        if (channel.enforcement === "blocking") blocking.push(finding);
+      }
+
+      // Recorded either way — an advisory finding that vanished would make a green result look
+      // like semantic correctness, which §12 forbids.
+      for (const finding of outcome.findings) {
+        notes.push(`${finding.findingClass}: ${finding.message}`);
+      }
+
+      if (blocking.length > 0) {
+        return this.#terminal(manifest, definition, settled, withNotes(), {
+          status: "failed",
+          invocationKey,
+          error: redactError(
+            toStructuredError(
+              stageRunnerError(
+                StageRunnerErrorCodes.STAGE_EVALUATION_BLOCKED,
+                `Stage "${definition.id}" found ${blocking.length} blocking finding(s). This is ` +
+                  "the evaluator working, not the evaluator failing — the findings are recorded " +
+                  "and the stage stopped because their class is declared blocking (§12).",
+                {
+                  category: "policy",
+                  retryable: false,
+                  details: { stageId: definition.id, blockingFindings: blocking.length },
+                },
+              ),
+            ),
+          ),
+        });
+      }
+    }
+
     const parsedOutput = definition.outputSchema.safeParse(outcome.output);
     if (!parsedOutput.success) {
       // §11: a stage must "produce declared outputs or a structured failure". A value that is
       // neither is the stage breaking its own contract, so this is a stage failure rather than a
       // runner crash — and it is recorded as one, with the outputs it did produce.
-      return this.#terminal(manifest, definition, settled, withNotes, {
+      return this.#terminal(manifest, definition, settled, withNotes(), {
         status: "failed",
         invocationKey,
         error: {
@@ -676,7 +747,7 @@ export class StageRunner {
       });
     }
 
-    return this.#terminal<O>(manifest, definition, settled, withNotes, {
+    return this.#terminal<O>(manifest, definition, settled, withNotes(), {
       status: "succeeded",
       invocationKey,
       output: parsedOutput.data,
