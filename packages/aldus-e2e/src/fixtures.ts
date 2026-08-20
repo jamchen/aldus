@@ -89,8 +89,18 @@ export function aPlan(overrides: Partial<TtsRequestPlan> = {}): TtsRequestPlan {
     scriptSha256: "b".repeat(64),
     parameters: { provider: "provider-a", voice: "voice-a", model: "model-a" },
     segments: [
-      { segmentId: "seg-1", text: { raw: "The first line." } },
-      { segmentId: "seg-2", text: { raw: "The second line." } },
+      // A plan is a cost preview (§19.3), so a segment carries what it is expected to cost.
+      // Without it a reservation has no amount and the grant must permit unestimated dispatch.
+      {
+        segmentId: "seg-1",
+        text: { raw: "The first line." },
+        estimatedCost: { amount: "0.0100", currency: "USD" },
+      },
+      {
+        segmentId: "seg-2",
+        text: { raw: "The second line." },
+        estimatedCost: { amount: "0.0100", currency: "USD" },
+      },
     ],
     estimatedTotal: { amount: "0.0200", currency: "USD" },
     createdAt: "2026-01-01T00:00:00.000Z",

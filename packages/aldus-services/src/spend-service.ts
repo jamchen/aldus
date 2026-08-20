@@ -252,7 +252,7 @@ export class SpendService {
   async settle(
     reservation: SpendReservation,
     observations: readonly CostObservation[],
-    attribution: { authorizationId?: string },
+    attribution: { authorizationId?: string; takeId?: string },
   ): Promise<{ reservation: SpendReservation; costs: readonly CostRecord[] }> {
     const recordedAt = this.#now().toISOString();
     const written: CostRecord[] = [];
@@ -269,6 +269,7 @@ export class SpendService {
         ...(attribution.authorizationId === undefined
           ? {}
           : { authorizationId: attribution.authorizationId }),
+        ...(attribution.takeId === undefined ? {} : { takeId: attribution.takeId }),
         recordedAt,
       };
       await this.#costs.append(reservation.runId, record);

@@ -398,6 +398,7 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
         {
           segmentId: "seg-1",
           text: { raw: "The first line.", finalProviderText: "[tag] The first line." },
+          estimatedCost: { amount: "0.0100", currency: "USD" },
         },
       ],
     } as never);
@@ -546,7 +547,11 @@ describe("synthesis billing reaches a Runtime-owned cost record (#160)", () => {
     if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
 
     const records = await recordedCosts(harness);
-    expect(records[0]?.costId).toBe(`${result.data.take.takeId}:cost:0`);
+    // The evidence is that the cost record **names the take**, which is only possible if the take
+    // identity existed before the charge was written. The cost id itself is derived from the
+    // reservation, because settlement owns the ids and theirs are stable across a retry — a
+    // stronger property than deriving them from the take.
+    expect(records[0]?.takeId).toBe(result.data.take.takeId);
   });
 
   it("keeps credits as a quantity, and says the money amount is unknown", async () => {
@@ -585,5 +590,84 @@ describe("synthesis billing reaches a Runtime-owned cost record (#160)", () => {
     expect(record?.quantity).toEqual({ unit: "credits", amount: 1200 });
     expect(record?.actual).toBeUndefined();
     expect(record?.estimated).toBeUndefined();
+  });
+});
+
+describe("synthesis reserves before dispatch (#155 step 4)", () => {
+  it("commits a reservation before the adapter is called, and settles it after", async () => {
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.observation = {
+      costs: [
+        {
+          provider: "provider-a",
+          operation: "synthesis",
+          billingStatus: "charged",
+          actual: { amount: "0.0100", currency: "USD" },
+        },
+      ],
+    };
+
+    const result = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+
+    // The cost record names the reservation, which only exists if one was committed before the
+    // effect: the reservation is created before dispatch and its id is derived from nothing the
+    // adapter supplied.
+    const records = await harness.context.workspace.runs.listRecords(RUN_ID, "costs");
+    expect(records[0]?.reservationId).toBeTruthy();
+    expect(records[0]?.costId).toBe(`${records[0]?.reservationId}:cost:0`);
+  });
+
+  it("refuses before calling the adapter on a condition only the reservation checks", async () => {
+    // A refusal that arrives once the provider has been billed is not a refusal.
+    //
+    // The condition is deliberately one the *older* authorization path does not catch: an
+    // unestimated segment against a grant that does not permit unestimated dispatch. A test using
+    // an exhausted ceiling passed even with the reservation refusal disabled, because
+    // `authorizeSpend` refused it too — so it proved the old check, not the new one.
+    const plan = aPlan({
+      segments: [{ segmentId: "seg-1", text: { raw: "The first line." } }],
+    } as never);
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+
+    const result = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+
+    expect(result.outcome).toBe("refused");
+    expect(harness.synthesis.calls).toHaveLength(0);
+  });
+
+  it("leaves the reservation unresolved when the adapter reports no billing at all", async () => {
+    // Dispatched and told nothing is uncertainty, not zero. The reservation stays committed and
+    // the grant becomes indeterminate, which is what stops the next segment spending against a
+    // figure nobody can establish.
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.observation = { costs: [] };
+
+    const first = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    expect(first.outcome).toBe("ok");
+
+    const second = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    expect(second.outcome).toBe("refused");
   });
 });

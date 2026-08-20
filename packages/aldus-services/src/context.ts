@@ -13,14 +13,17 @@
  * constructor options.
  */
 
+import { join } from "node:path";
+
 import type { ActorRef } from "@aldus-runtime/core";
 import {
   ArtifactRegistry,
   stageArtifactRecorder,
   type ArtifactArchive,
 } from "@aldus-runtime/artifact-registry";
-import type { FileWorkspace } from "@aldus-runtime/file-store";
+import { FileSpendReservationStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import type { CostRecordStore } from "./cost-store.js";
+import { SpendService } from "./spend-service.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   AdapterRegistry,
@@ -152,6 +155,7 @@ export class AldusContext {
 
   readonly #synthesisAdapter: SynthesisAdapter | undefined;
   readonly #costs: CostRecordStore;
+  readonly #spend: SpendService;
   readonly #spendGrants: SpendGrantProvider | undefined;
   readonly #ledgerStores: ReturnType<typeof fileLedgerStores>;
 
@@ -191,6 +195,18 @@ export class AldusContext {
     this.#synthesisAdapter = options.synthesisAdapter;
     this.#spendGrants = options.spendGrants;
     this.#costs = new RunStoreCostRecordStore(this.workspace.runs);
+    // Reservations live beside the workspace rather than inside a Run: a grant is the contended
+    // budget pool and may be drawn on by several Runs, so partitioning them per Run would put
+    // competing writers in different files and lose the contention the protocol exists to manage
+    // (ADR-0044, #158).
+    this.#spend = new SpendService({
+      store: new FileSpendReservationStore({
+        root: join(this.workspace.layout.root, "spend", "reservations"),
+        locks: this.workspace.locks,
+      }),
+      costs: this.#costs,
+      now: () => this.now(),
+    });
 
     this.gates = new GateEngine({
       registry: this.gateRegistry,
@@ -324,6 +340,8 @@ export class AldusContext {
       // provider, so a composition that reached it without a cost store could report a charge
       // with nowhere to record it (#160).
       ...(this.#costs === undefined ? {} : { costs: this.#costs }),
+      ...(this.#spendGrants === undefined ? {} : { grants: this.#spendGrants }),
+      spend: this.#spend,
     });
   }
 

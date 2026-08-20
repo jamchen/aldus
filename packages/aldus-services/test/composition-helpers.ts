@@ -123,7 +123,15 @@ export function aPlan(overrides: Partial<TtsRequestPlan> = {}): TtsRequestPlan {
     scriptId: "script-a",
     scriptSha256: "b".repeat(64),
     parameters: { provider: "provider-a", voice: "voice-a", model: "model-a" },
-    segments: [{ segmentId: "seg-1", text: { raw: "The first line." } }],
+    segments: [
+      {
+        segmentId: "seg-1",
+        text: { raw: "The first line." },
+        // A plan is a cost preview (§19.3), so a segment carries what it is expected to cost.
+        // Without it a reservation has no amount and the grant must permit unestimated dispatch.
+        estimatedCost: { amount: "0.0100", currency: "USD" },
+      },
+    ],
     estimatedTotal: { amount: "0.0100", currency: "USD" },
     createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -144,11 +152,18 @@ export const SPEND_LIMITS_KEY = "spend-limits";
  * `grantTermsDigest` covers only the limits, never the grant's identity, which is why a template
  * grant can be digested before the decision it will cite even exists.
  */
-export function subjectsForPlan(plan: TtsRequestPlan, gateId = SYNTHESIS_GATE): SubjectsByGate {
+export function subjectsForPlan(
+  plan: TtsRequestPlan,
+  gateId = SYNTHESIS_GATE,
+  grant: SpendGrant = aGrant(),
+): SubjectsByGate {
   return {
     [gateId]: [
       ...Object.entries(planSubjectDigests(plan)).map(([key, sha256]) => ({ key, sha256 })),
-      { key: SPEND_LIMITS_KEY, sha256: grantTermsDigest(aGrant()) },
+      // The digest of the grant actually in force. A test that varies the grant's terms and binds
+      // the default one is approving something other than what it will use — and the approval
+      // correctly refuses, which reads as a broken fixture rather than the binding working.
+      { key: SPEND_LIMITS_KEY, sha256: grantTermsDigest(grant) },
     ],
   };
 }
