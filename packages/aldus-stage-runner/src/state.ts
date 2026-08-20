@@ -84,7 +84,20 @@ const LIFECYCLE_ACTIONS: ReadonlySet<string> = new Set<string>([
 export interface AttemptMetadata {
   /** Version of the stage definition that ran (contract §11, §20). */
   stageVersion: string;
-  /** Digest of the configuration used (contract §11, §20). */
+  /**
+   * Digest of the configuration **as supplied** (contract §11, §20; #114).
+   *
+   * Not of {@link AttemptMetadata.configuration} stored beside it, which is redacted (§19.2).
+   * Recomputing `digestJson(stored.configuration)` will therefore **not** reproduce this whenever
+   * the configuration contained anything redaction touches, and that is intended rather than a
+   * defect: the digest is an identity for the configuration that actually ran, so two attempts
+   * under the same real configuration agree even where redaction is lossy. Hashing the redacted
+   * form instead would make two configurations differing only in a secret collide.
+   *
+   * Written down because it cannot be derived from what is stored. Nothing recomputes this value,
+   * so a reader who tries and finds a mismatch has no way to tell a tampered record from lossy
+   * redaction — and §20's production trace is the first consumer that would try.
+   */
   configurationHash: string;
   /** The configuration itself, redacted (contract §19.2). */
   configuration: Record<string, unknown>;

@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { writeFile } from "node:fs/promises";
 
-import { readStageState } from "../src/state.js";
+import { digestJson, readStageState } from "../src/state.js";
 import { builders } from "@aldus-runtime/testkit";
 
 import { aStage, anArtifact, context, makeTempRun, type TempRun } from "./helpers.js";
@@ -483,5 +483,48 @@ describe("invocation key material and 0.1.0 compatibility (ADR-0036, #113)", () 
     expect(metadata?.invocationKey).toBeUndefined();
     expect(metadata?.effectKey).toBeUndefined();
     await temp.cleanup();
+  });
+});
+
+describe("configurationHash is of the configuration as supplied (#114)", () => {
+  it("does not reproduce from the redacted configuration stored beside it", async () => {
+    // The property that cannot be derived from the record, and is therefore written down.
+    // The digest identifies the configuration that actually ran; the value stored alongside is
+    // redacted (§19.2). A reader recomputing from the record gets a different answer, and nothing
+    // in the record says why — which is the whole reason the docstring exists.
+    harness.registry.register(aStage());
+    await harness.runner.run(
+      harness.manifest.runId,
+      "stage-a",
+      { topic: "t" },
+      { configuration: { voice: "voice-a", apiKey: "sk-live-0123456789abcdef0123456789abcdef" } },
+    );
+
+    const stored = await harness.runner.stageExecution(harness.manifest.runId, "stage-a");
+    const attemptId = stored?.execution.attempts.at(-1)?.attemptId ?? "";
+    const metadata = stored?.metadata[attemptId];
+
+    expect(metadata?.configurationHash).toBeTypeOf("string");
+    // Redaction happened, so the stored value is not what was hashed.
+    expect(JSON.stringify(metadata?.configuration)).not.toContain("sk-live-0123456789abcdef");
+    expect(digestJson(metadata?.configuration)).not.toBe(metadata?.configurationHash);
+  });
+
+  it("agrees for a configuration redaction does not touch", async () => {
+    // The other half: where redaction changes nothing, recomputation *does* reproduce it. Without
+    // this the first test would pass even if the hash were of something unrelated.
+    harness.registry.register(aStage({ id: "stage-b" }));
+    await harness.runner.run(
+      harness.manifest.runId,
+      "stage-b",
+      { topic: "t" },
+      { configuration: { voice: "voice-a" } },
+    );
+
+    const stored = await harness.runner.stageExecution(harness.manifest.runId, "stage-b");
+    const attemptId = stored?.execution.attempts.at(-1)?.attemptId ?? "";
+    const metadata = stored?.metadata[attemptId];
+
+    expect(digestJson(metadata?.configuration)).toBe(metadata?.configurationHash);
   });
 });
