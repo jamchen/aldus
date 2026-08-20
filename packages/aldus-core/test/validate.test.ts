@@ -170,8 +170,17 @@ describe("validateRecord (ADR-0003)", () => {
     if (result.ok) expect(result.compatibility).toBe("compatible");
   });
 
+  // Derived, not written down. This was the literal `"1.9"`, which was a *newer* minor until the
+  // release that made it current — at which point two tests asserting forward compatibility were
+  // asserting it against the version in the tree. A version literal in a version test goes stale
+  // on exactly the change it exists to cover (ADR-0031).
+  const NEWER_MINOR = (() => {
+    const [major, minor] = SCHEMA_VERSION.split(".").map(Number) as [number, number];
+    return `${major}.${minor + 1}`;
+  })();
+
   it("classifies a newer minor version as a forward read", () => {
-    const result = validateRecord("EpisodeRef", { ...episode, schemaVersion: "1.9" });
+    const result = validateRecord("EpisodeRef", { ...episode, schemaVersion: NEWER_MINOR });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.compatibility).toBe("forward");
   });
@@ -181,7 +190,7 @@ describe("validateRecord (ADR-0003)", () => {
     // change would break older readers.
     const result = validateRecord("EpisodeRef", {
       ...episode,
-      schemaVersion: "1.9",
+      schemaVersion: NEWER_MINOR,
       fieldFromTheFuture: { nested: true },
     });
     expect(result.ok).toBe(true);

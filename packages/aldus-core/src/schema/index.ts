@@ -95,3 +95,4 @@ export function isSchemaName(name: string): name is SchemaName {
 export function isVersionedSchemaName(name: string): name is VersionedSchemaName {
   return (VERSIONED_SCHEMA_NAMES as readonly string[]).includes(name);
 }
+export * from "./reservation.js";

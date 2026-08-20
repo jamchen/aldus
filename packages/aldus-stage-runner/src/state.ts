@@ -141,6 +141,25 @@ export interface AttemptMetadata {
   retrySafety?: string | undefined;
   /** Key scope of a declared deduplicated effect, where one was declared (§19.1; #148). */
   effectKeyScope?: string | undefined;
+  /**
+   * Every Worker invocation this attempt made, and what it declared (§19.1, §20; #148).
+   *
+   * Recorded for `none` as well as `deduplicated`. The ruling on #148 requires per-invocation
+   * declarations and keys to be preserved in structured trace data, and recording only the
+   * effectful ones would leave an auditor unable to tell **"this stage declared no effects"** from
+   * **"this stage predates the field"** — which is the readable-absence problem this repository
+   * has now fixed three times in other places.
+   *
+   * The key is caller-supplied, so it goes through `redact()` with everything else.
+   */
+  workerInvocations?:
+    | {
+        workerId: string;
+        workerVersion: string;
+        effect: string;
+        idempotencyKey?: string | undefined;
+      }[]
+    | undefined;
   /** Why the declared arm is sound, in the stage author's words. Surfaced, not filed. */
   retrySafetyReason?: string | undefined;
   /** Reason the stage is not idempotent, when it declared itself so. */
@@ -192,6 +211,16 @@ const attemptMetadataSchema = z.object({
   // declaration, which reads correctly as "nothing recorded which arm" rather than as an arm.
   retrySafety: z.string().optional(),
   effectKeyScope: z.string().optional(),
+  workerInvocations: z
+    .array(
+      z.object({
+        workerId: z.string(),
+        workerVersion: z.string(),
+        effect: z.string(),
+        idempotencyKey: z.string().optional(),
+      }),
+    )
+    .optional(),
   retrySafetyReason: z.string().optional(),
   nonIdempotentReason: z.string().optional(),
   gateId: z.string().optional(),

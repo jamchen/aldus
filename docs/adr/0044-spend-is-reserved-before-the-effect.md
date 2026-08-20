@@ -81,27 +81,77 @@ This over-reserves, and blocks concurrent work that would have fitted. That is t
 and the cost is stated rather than hidden: an operator who wants the concurrency raises the ceiling
 or supplies estimates.
 
-**5. An unknown charge blocks the grant, unless the backend enforces a ceiling.**
+**5. An unknown charge blocks the grant, unless _that execution_ was dispatched under an enforced
+ceiling.**
 
 #150's shipped behaviour is the default and stays: while an unresolved unknown charge stands, the
 grant is indeterminate and automatic spend is refused.
 
-A reservation adds something #150 did not have — an **upper bound**. Where the backend declares it
-`enforcesSpendCeiling`, the exposure of an unknown charge is bounded by what was reserved, and the
-grant may continue with that reservation retained. Where the backend does not, the bound is a hope
-and the whole grant stays indeterminate.
+A reservation adds something #150 did not have — an **upper bound**. But the bound is a fact about
+_the execution that happened_, not about the backend in general, and the two are not
+interchangeable. A backend that declares `enforcesSpendCeiling` today says nothing about a request
+dispatched last week by an earlier version, or about a request the Runtime never actually handed a
+ceiling to.
 
-That distinction rests on the capability declarations #107 established, and it is exactly ADR-0030's
-rule: a protection is claimed only where something enforces it.
+So the execution-time facts are persisted on the reservation and read from there:
 
-**6. The reservation supplies the currency an unknown charge lacks.** #150 had to add
-`unquantifiedUnknownBillingRecordCount` because an amount-less charge has no `Money` to derive a
-currency from. A reservation is denominated in the grant's currency, so once one exists the currency
-is known even when the amount is not. Reports keep the counter — pre-reservation records still
-exist — and gain a currency for reserved-but-unsettled spend.
+```ts
+ceilingEnforced: boolean;
+appliedCeiling?: Money;
+backendId: string;
+backendVersion: string;
+```
 
-**7. Reconciliation is linked by `providerRequestId`, captured before the write is attempted.**
-`SpendReservation.costIds` links settled records. The reservation must carry the provider request
+**Never re-read a backend's current capabilities to infer that an earlier request was bounded.**
+That is the ADR-0030 defect in its purest form — claiming a protection from a declaration that was
+not the one in force.
+
+The narrower behaviour applies only when every one of these holds:
+
+- a reservation existed **before** dispatch;
+- the reservation amount was passed as the execution ceiling;
+- **that exact backend version** declared `enforcesSpendCeiling`;
+- the Runtime recorded that the ceiling was applied;
+- the unresolved reservation is still active and still consuming its full reserved amount.
+
+If any fact is absent, the whole grant stays blocked.
+
+**6. A reservation supplies the _authorization_ currency, which is not the provider's billing
+currency.**
+
+The first draft of this ADR said a reservation "supplies the currency an unknown charge lacks".
+That was wrong, and wrong in the direction this repository keeps having to correct: it would have
+restated a fact about what Aldus authorized as a fact about what a provider charged.
+
+```text
+reservation currency  = the currency in which Aldus reserved authorization
+billing currency      = the currency the provider reports for the charge
+```
+
+An amount-less unknown observation may have **no known billing currency**, and its billing currency
+must not be populated or inferred from the reservation — unless the contract requires provider
+billing to use the grant currency and validates that before dispatch, which it does not.
+
+A report may truthfully say _"USD 2.00 remains reserved against this authorization because billing
+is unresolved."_ It must never restate that as _"the provider made an unknown USD charge."_
+
+Two fields, from two sources, kept apart:
+
+```ts
+reservedUnknownByCurrency: Record<string, string>; // derived from reservations
+unquantifiedUnknownBillingRecordCount: number; // the provider-billing fact from #150
+```
+
+When a provider later reports an amount, a currency mismatch against the reservation is **rejected
+or explicitly reconciled**, never implicitly converted.
+
+**7. Reconciliation is linked by `providerRequestId`, captured before the write is attempted, and
+lineage is navigable in both directions.**
+
+`SpendReservation.costIds` and `CostRecord.reservationId` are both recorded — one link is
+traversable in one direction, and reconciliation needs to start from either end. `reservationId` is
+optional **only** for records predating this protocol, and like `authorizationId` it is
+Runtime-supplied: a backend must never provide it. The reservation must carry the provider request
 identity _from the dispatch_, not from a cost record that may never have been written — which is
 #152's requirement, and the reason that issue is a required acceptance case rather than a
 follow-up.
@@ -119,6 +169,24 @@ them as settled charges, which they are. Same rule as `expectedArtifacts` and `r
 and its reason on the attempt because the ruling on #148 required the retry decision to _read_ them
 rather than file them. Reservations extend the same requirement: a `billing_unknown` reservation
 must appear in the refusal an operator sees and in `aldus budget status`, not only in the trace.
+
+### Settlement ordering fails closed
+
+A `CostRecord` and a reservation transition may not share one physical transaction, so the order is
+part of the contract rather than an implementation detail:
+
+1. append the `CostRecord`;
+2. append the reservation settlement transition;
+3. derive the reservation as inactive **only after both facts exist**.
+
+If step 1 succeeds and step 2 fails, the reservation stays active and authorization is
+conservatively double-counted until reconciliation. That is recoverable.
+
+**The reverse order is not.** Marking a reservation settled before the cost record is durable
+releases authorization while the charge is absent — money spent, budget restored, nothing recorded.
+
+If the `CostRecord` append fails, the reservation stays `reserved` or `billing_unknown`, the caller
+receives a non-retryable reconciliation outcome, and #152's path is what handles it.
 
 ### What a reservation does not prove
 

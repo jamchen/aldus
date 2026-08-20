@@ -17,7 +17,13 @@
  * operator re-approving it.
  */
 
-import type { CostRecord, Money } from "@aldus-runtime/core";
+import {
+  reservationExposureIsBounded,
+  reservationIsActive,
+  type CostRecord,
+  type Money,
+  type SpendReservation,
+} from "@aldus-runtime/core";
 
 import { digestSubjectValue } from "./binding.js";
 import {
@@ -175,6 +181,133 @@ export function computeLedger(grant: SpendGrant, costs: readonly CostRecord[]): 
     excluded,
     unresolvedUnknown,
     remainingIsDeterminate: unresolvedUnknown.length === 0,
+  };
+}
+
+/**
+ * Authorization available to commit, derived rather than maintained (ADR-0044; #155).
+ *
+ * ```text
+ * available = authorized maximum − settled charges − active reservations
+ * ```
+ *
+ * Derived on every read, never stored as a balance. A maintained counter is a second source of
+ * truth about money, reconciled by hand against the records it summarises — and every defect this
+ * repository has fixed in the cost path has been a value asserting more than what established it.
+ */
+export interface SpendAvailability {
+  /** The ceiling the operator approved. */
+  authorized: Money;
+  /** Charges already recorded against it. */
+  settled: Money;
+  /** Authorization committed to effects that have not settled. */
+  reserved: Money;
+  /**
+   * What may still be committed. Never negative.
+   *
+   * **Read {@link SpendAvailability.determinate} before spending against this.** The figure is the
+   * arithmetic over what is known, and while an unresolved charge of unknown size stands, what is
+   * known is not all there is.
+   */
+  available: Money;
+  /** Whether {@link SpendAvailability.available} is an amount anyone may commit against. */
+  determinate: boolean;
+  /**
+   * Why it is not, where it is not.
+   *
+   * Two independent sources, kept apart because they carry different evidence:
+   *
+   * - reservations in `billing_unknown` whose exposure is not bounded by an enforced ceiling;
+   * - cost records of unknown size with no reservation at all, which is every such record written
+   *   before this protocol existed (#150).
+   */
+  indeterminate: {
+    unboundedReservations: SpendReservation[];
+    unreservedUnknownCharges: CostRecord[];
+  };
+  /**
+   * Reserved-but-unsettled amounts, per **authorization** currency (ADR-0044).
+   *
+   * Not the provider's billing currency. This states what Aldus set aside; what a provider charged,
+   * and in what currency, is a separate fact that may not exist yet. A report may say "USD 2.00
+   * remains reserved because billing is unresolved"; it must never restate that as "the provider
+   * made an unknown USD charge".
+   */
+  reservedUnknownByCurrency: Record<string, string>;
+}
+
+/**
+ * Derive what a grant still authorizes (§19.3; ADR-0044).
+ *
+ * Composes with #150 rather than replacing it. A charge of unknown size still makes the grant
+ * indeterminate — what a reservation adds is the possibility of a *bound*, and only when the
+ * execution that produced the charge was actually dispatched under an enforced ceiling. A backend
+ * that declares enforcement today is not evidence about a request dispatched by an earlier version
+ * (ADR-0030).
+ */
+export function availableAuthorization(
+  grant: SpendGrant,
+  costs: readonly CostRecord[],
+  reservations: readonly SpendReservation[] = [],
+): SpendAvailability {
+  const currency = grant.maxTotal.currency;
+  const ledger = computeLedger(grant, costs);
+
+  const mine = reservations.filter(
+    (reservation) => reservation.authorizationId === grant.decisionId,
+  );
+  const active = mine.filter(reservationIsActive);
+
+  // Settled reservations are already represented by the cost records that settled them. Counting
+  // both would double-count the same money against the ceiling.
+  let reserved = zeroMoney(currency);
+  const reservedUnknownByCurrency = new Map<string, Money>();
+  for (const reservation of active) {
+    if (reservation.reserved.currency === currency) {
+      reserved = addMoney(reserved, reservation.reserved);
+    }
+    if (reservation.status === "billing_unknown") {
+      const running =
+        reservedUnknownByCurrency.get(reservation.reserved.currency) ??
+        zeroMoney(reservation.reserved.currency);
+      reservedUnknownByCurrency.set(
+        reservation.reserved.currency,
+        addMoney(running, reservation.reserved),
+      );
+    }
+  }
+
+  const unboundedReservations = active.filter(
+    (reservation) =>
+      reservation.status === "billing_unknown" && !reservationExposureIsBounded(reservation),
+  );
+  // #150's rule, narrowed by what a reservation can now establish. A record of unknown size whose
+  // reservation is bounded is accounted for; one with no reservation is not, and that is every
+  // such record written before this protocol.
+  const boundedReservationIds = new Set(
+    active
+      .filter((reservation) => reservationExposureIsBounded(reservation))
+      .map((reservation) => reservation.reservationId),
+  );
+  const unreservedUnknownCharges = ledger.counted.filter(
+    (record) =>
+      isUnresolvedUnknownCharge(record) &&
+      (record.reservationId === undefined || !boundedReservationIds.has(record.reservationId)),
+  );
+
+  const headroom = subtractMoney(subtractMoney(grant.maxTotal, ledger.consumed), reserved);
+  return {
+    authorized: grant.maxTotal,
+    settled: ledger.consumed,
+    reserved,
+    available: isNegativeMoney(headroom) ? zeroMoney(currency) : headroom,
+    determinate: unboundedReservations.length === 0 && unreservedUnknownCharges.length === 0,
+    indeterminate: { unboundedReservations, unreservedUnknownCharges },
+    reservedUnknownByCurrency: Object.fromEntries(
+      [...reservedUnknownByCurrency.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([code, money]) => [code, money.amount]),
+    ),
   };
 }
 

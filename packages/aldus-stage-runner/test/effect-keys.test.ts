@@ -273,6 +273,42 @@ describe("#148 — keys are scoped to the effect", () => {
     expect(result.error?.code).toBe("ALDUS_STAGE_EFFECT_UNDECLARED");
   });
 
+  it("every Worker invocation is recorded, including one declaring no effect", async () => {
+    // The ruling on #148 requires per-invocation declarations and keys in structured trace data.
+    // Recording only the effectful ones would leave an auditor unable to tell "this stage declared
+    // no effects" from "this stage predates the field" — found by the first adopter reading a real
+    // Run's attempt and 87 events and finding neither.
+    temp.registry.register(
+      aStage({
+        retrySafety: {
+          kind: "deduplicated_external_effects",
+          keyScope: "worker_invocation",
+          reason: "content-addressed objects",
+        },
+        execute: async (context) => {
+          await context.runWorker(call({ kind: "none" }) as never);
+          await context.runWorker(call({ kind: "deduplicated", idempotencyKey: "obj-a" }) as never);
+          return { kind: "completed", output: undefined };
+        },
+      }),
+    );
+
+    await temp.runner.run(temp.manifest.runId, "stage-a", {});
+
+    const stored = await temp.runner.stageExecution(temp.manifest.runId, "stage-a");
+    const attemptId = stored?.execution.attempts.at(-1)?.attemptId ?? "";
+    const recorded = stored?.metadata[attemptId]?.workerInvocations ?? [];
+
+    expect(recorded).toHaveLength(2);
+    expect(recorded[0]).toEqual({ workerId: "probe", workerVersion: "1", effect: "none" });
+    expect(recorded[1]).toEqual({
+      workerId: "probe",
+      workerVersion: "1",
+      effect: "deduplicated",
+      idempotencyKey: "obj-a",
+    });
+  });
+
   it("11. the retry decision reads the declaration and its reason", async () => {
     // The ruling is explicit that recording for a later audit is insufficient. This asserts the
     // declaration and reason are on the attempt where a retry decision can read them.
