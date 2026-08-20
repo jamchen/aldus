@@ -194,13 +194,18 @@ describe("known projection gaps (ADR-0002)", () => {
   it("confirms the gap is real: Ajv accepts a CostRecord that Zod rejects", () => {
     // Not a defect — a documented consequence. The test exists so the gap cannot widen or move
     // without someone noticing.
+    //
+    // `billingStatus: "charged"` rather than `"unknown"`: a charge that states it does not know
+    // the amount now carries billing evidence and is valid in both validators (#150). The gap this
+    // asserts is the refinement Ajv cannot see, so the case has to be one the refinement still
+    // refuses.
     const record = {
       schemaVersion: SCHEMA_VERSION,
       costId: "cost_1",
       runId: "run_1",
       provider: "provider-a",
       operation: "synthesize",
-      billingStatus: "unknown",
+      billingStatus: "charged",
       recordedAt: AT,
     };
     expect(compile("CostRecord")(record)).toBe(true);

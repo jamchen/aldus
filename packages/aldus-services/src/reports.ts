@@ -63,6 +63,23 @@ export interface CostSummary {
    * billing status", and a total that silently includes unconfirmed charges reads as settled.
    */
   currenciesWithUnknownBilling: string[];
+  /**
+   * How many records carry `billingStatus: "unknown"` (§19.3; #150).
+   *
+   * **Do not read `currenciesWithUnknownBilling` as the only unknown-billing signal.** A charge
+   * whose amount nobody knows has no `Money` to derive a currency from, so it cannot appear there
+   * — and an empty list would then read as "no unconfirmed billing" when a real charge stands.
+   */
+  unknownBillingRecordCount: number;
+  /**
+   * Of those, how many state no amount at all.
+   *
+   * These add nothing to `actualByCurrency` or `estimatedByCurrency`, because there is nothing to
+   * add and a fabricated zero would be a numerical assertion where the truth is an uncertainty
+   * state. Their consequence is that **settled totals may be understated**, and a reader must be
+   * told so rather than left to infer it from a count.
+   */
+  unquantifiedUnknownBillingRecordCount: number;
 }
 
 /** A Run's full situation (contract §24). */

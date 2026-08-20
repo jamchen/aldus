@@ -631,6 +631,18 @@ V1 local interactive execution 可以使用 file lock，但契約必須允許未
 - workspace/worktree binding 必須明確；
 - private Knowledge Pack 不能成為 Core test 或 distribution 的必要依賴。
 
+### 19.3 Cost Governance
+
+產生成本的 Stage 必須支援：dry-run／成本預覽、per-request 與 per-run 上限、明確的 spend authorization、實際成本記錄、stop-on-budget，以及對未知 provider billing status 的安全處理。
+
+Billing 記錄必須說明金額，或說明金額未知。`billingStatus` 為 `unknown` 且沒有金額，本身就是 billing evidence：provider 可能已對該請求計費卻延後或不揭露金額，而該事實必須能在不捏造數字的情況下被保存。不得以零代替——零是一個數值斷言，未知金額是一個不確定狀態，兩者不可互換。
+
+同一套 billing invariant 必須同時適用於回報的 observation 與由它衍生的 attributed record。回報一筆誠實的成本 observation，不得使一個已經完成的 provider 執行變成驗證失敗。
+
+只要有未解決的 unknown charge 掛在某個 authorization 上，剩餘預算即為**不確定**，不得被呈現為可動用的金額。對該 authorization 的後續自動支出必須被拒絕，直到金額被對帳、或由操作者發出新的 authorization。Estimate 不能解決 unknown charge。此類記錄不得被歸類為 free、voided 或零值扣減。
+
+成本報表必須揭露沒有金額的 unknown charge。這類記錄無法推導出幣別，因此僅以幣別為索引的訊號不得作為「billing 未確認」的唯一指示。
+
 有成本的 Stage 必須支援 cost preview、request/run limit、spend authorization、actual cost record 與 stop-on-budget。
 
 ---

@@ -1,5 +1,5 @@
 {
-  "note": "Fixtures are FROZEN: they are never edited to make a failing test pass. Each carries the schemaVersion of the release that introduced its type — the WP-01 corpus is pinned at 1.0 and AldusEvent at 1.1 — and every one of them must stay readable by the current build. That is the proof of ADR-0003's same-major rule, not an assertion of it: if a 1.0 fixture ever stops validating, the rule has been broken. A MAJOR bump revisits the whole corpus deliberately (ADR-0003). `jsonSchemaDetectable: false` marks a defect that only the normative Zod schema catches, because the constraint is a cross-field refinement JSON Schema cannot express (ADR-0002).",
+  "note": "Fixtures are FROZEN: they are never edited to make a failing test pass. Each carries the schemaVersion of the release that introduced its type \u2014 the WP-01 corpus is pinned at 1.0 and AldusEvent at 1.1 \u2014 and every one of them must stay readable by the current build. That is the proof of ADR-0003's same-major rule, not an assertion of it: if a 1.0 fixture ever stops validating, the rule has been broken. A MAJOR bump revisits the whole corpus deliberately (ADR-0003). `jsonSchemaDetectable: false` marks a defect that only the normative Zod schema catches, because the constraint is a cross-field refinement JSON Schema cannot express (ADR-0002).",
   "valid": [
     {
       "schema": "ActorRef",
@@ -11,13 +11,13 @@
       "schema": "ActorRef",
       "case": "full",
       "file": "valid/ActorRef.full.json",
-      "description": "Every optional traceability field populated (§10 backend and session refs)."
+      "description": "Every optional traceability field populated (\u00a710 backend and session refs)."
     },
     {
       "schema": "StructuredError",
       "case": "minimal",
       "file": "valid/StructuredError.minimal.json",
-      "description": "The four required fields of a persistable failure (§19.1)."
+      "description": "The four required fields of a persistable failure (\u00a719.1)."
     },
     {
       "schema": "StructuredError",
@@ -29,7 +29,7 @@
       "schema": "KnowledgePackRef",
       "case": "minimal",
       "file": "valid/KnowledgePackRef.minimal.json",
-      "description": "Identity, version, and authority only (§9.1)."
+      "description": "Identity, version, and authority only (\u00a79.1)."
     },
     {
       "schema": "KnowledgePackRef",
@@ -41,43 +41,43 @@
       "schema": "EpisodeRef",
       "case": "minimal",
       "file": "valid/EpisodeRef.minimal.json",
-      "description": "Durable content identity with no display or legacy metadata (§6.1)."
+      "description": "Durable content identity with no display or legacy metadata (\u00a76.1)."
     },
     {
       "schema": "EpisodeRef",
       "case": "full",
       "file": "valid/EpisodeRef.full.json",
-      "description": "Includes a title and a pointer to a pre-Aldus identity (§4.3)."
+      "description": "Includes a title and a pointer to a pre-Aldus identity (\u00a74.3)."
     },
     {
       "schema": "ArtifactRef",
       "case": "minimal",
       "file": "valid/ArtifactRef.minimal.json",
-      "description": "A source artifact with no declared inputs and unknown size (§8)."
+      "description": "A source artifact with no declared inputs and unknown size (\u00a78)."
     },
     {
       "schema": "ArtifactRef",
       "case": "full",
       "file": "valid/ArtifactRef.full.json",
-      "description": "An irreplaceable artifact with lineage inputs and a known size (§8.1)."
+      "description": "An irreplaceable artifact with lineage inputs and a known size (\u00a78.1)."
     },
     {
       "schema": "RunManifest",
       "case": "minimal",
       "file": "valid/RunManifest.minimal.json",
-      "description": "A freshly created Run with no stage entered and no packs resolved (§6.2)."
+      "description": "A freshly created Run with no stage entered and no packs resolved (\u00a76.2)."
     },
     {
       "schema": "RunManifest",
       "case": "full",
       "file": "valid/RunManifest.full.json",
-      "description": "A Run parked on a human gate, with a snapshotted pack set (§5.1, §9)."
+      "description": "A Run parked on a human gate, with a snapshotted pack set (\u00a75.1, \u00a79)."
     },
     {
       "schema": "StageAttempt",
       "case": "minimal",
       "file": "valid/StageAttempt.minimal.json",
-      "description": "A queued attempt that has not started and consumed nothing (§6.3)."
+      "description": "A queued attempt that has not started and consumed nothing (\u00a76.3)."
     },
     {
       "schema": "StageAttempt",
@@ -89,43 +89,49 @@
       "schema": "StageExecution",
       "case": "minimal",
       "file": "valid/StageExecution.minimal.json",
-      "description": "A stage that has not yet been attempted (§6.3)."
+      "description": "A stage that has not yet been attempted (\u00a76.3)."
     },
     {
       "schema": "StageExecution",
       "case": "full",
       "file": "valid/StageExecution.full.json",
-      "description": "Two append-only attempts with strictly ascending ordinals (§6.3)."
+      "description": "Two append-only attempts with strictly ascending ordinals (\u00a76.3)."
     },
     {
       "schema": "GateDecision",
       "case": "minimal",
       "file": "valid/GateDecision.minimal.json",
-      "description": "An approval bound to nothing, with invalidation explicitly declined (§13)."
+      "description": "An approval bound to nothing, with invalidation explicitly declined (\u00a713)."
     },
     {
       "schema": "GateDecision",
       "case": "full",
       "file": "valid/GateDecision.full.json",
-      "description": "A hash-bound decision that expires if any bound input changes (§13.2)."
+      "description": "A hash-bound decision that expires if any bound input changes (\u00a713.2)."
     },
     {
       "schema": "CostRecord",
       "case": "minimal",
       "file": "valid/CostRecord.minimal.json",
-      "description": "A pre-execution cost preview, with no actual charge yet (§19.3)."
+      "description": "A pre-execution cost preview, with no actual charge yet (\u00a719.3)."
     },
     {
       "schema": "CostRecord",
       "case": "full",
       "file": "valid/CostRecord.full.json",
-      "description": "A charged cost traced to its authorising decision and provider request (§13.2, §15)."
+      "description": "A charged cost traced to its authorising decision and provider request (\u00a713.2, \u00a715)."
+    },
+    {
+      "schema": "CostRecord",
+      "case": "unknown-billing-no-amount",
+      "file": "valid/CostRecord.unknown-billing-no-amount.json",
+      "description": "A provider charged the request and withheld the amount: `billingStatus: unknown` is itself the billing evidence, and a fabricated zero would assert a number where the truth is an uncertainty state (\u00a719.3, #150)."
     },
     {
       "schema": "ReleaseReceipt",
       "case": "minimal",
       "file": "valid/ReleaseReceipt.minimal.json",
-      "description": "An in-flight operation whose outcome is not yet known, awaiting reconciliation (§17)."
+      "description": "An in-flight operation whose outcome is not yet known, awaiting reconciliation (\u00a717)."
     },
     {
       "schema": "ReleaseReceipt",
@@ -137,7 +143,7 @@
       "schema": "AldusEvent",
       "case": "minimal",
       "file": "valid/AldusEvent.minimal.json",
-      "description": "Only the fields §6.4 requires unconditionally: identity, timing, scope, action, actor, and empty reference lists."
+      "description": "Only the fields \u00a76.4 requires unconditionally: identity, timing, scope, action, actor, and empty reference lists."
     },
     {
       "schema": "AldusEvent",
@@ -149,13 +155,13 @@
       "schema": "KnowledgePackManifest",
       "case": "minimal",
       "file": "valid/KnowledgePackManifest.minimal.json",
-      "description": "Only identity, version, and authority — the fields §9.1 requires unconditionally."
+      "description": "Only identity, version, and authority \u2014 the fields \u00a79.1 requires unconditionally."
     },
     {
       "schema": "KnowledgePackManifest",
       "case": "full",
       "file": "valid/KnowledgePackManifest.full.json",
-      "description": "Every optional field populated, including dependencies, declared claims, indexed resources, and §9.3 negative knowledge."
+      "description": "Every optional field populated, including dependencies, declared claims, indexed resources, and \u00a79.3 negative knowledge."
     }
   ],
   "invalid": [
@@ -171,7 +177,7 @@
       "schema": "ActorRef",
       "case": "empty-id",
       "file": "invalid/ActorRef.empty-id.json",
-      "description": "`id` empty; actor identity is required for every mutating action (§19.2).",
+      "description": "`id` empty; actor identity is required for every mutating action (\u00a719.2).",
       "expectedPath": "id",
       "jsonSchemaDetectable": true
     },
@@ -187,7 +193,7 @@
       "schema": "StructuredError",
       "case": "missing-retryable",
       "file": "invalid/StructuredError.missing-retryable.json",
-      "description": "`retryable` omitted; retry classification is required (§19.1).",
+      "description": "`retryable` omitted; retry classification is required (\u00a719.1).",
       "expectedPath": "retryable",
       "jsonSchemaDetectable": true
     },
@@ -195,7 +201,7 @@
       "schema": "KnowledgePackRef",
       "case": "unknown-authority",
       "file": "invalid/KnowledgePackRef.unknown-authority.json",
-      "description": "`authority` outside the closed PACK_AUTHORITIES enum (§9.1).",
+      "description": "`authority` outside the closed PACK_AUTHORITIES enum (\u00a79.1).",
       "expectedPath": "authority",
       "jsonSchemaDetectable": true
     },
@@ -219,7 +225,7 @@
       "schema": "EpisodeRef",
       "case": "missing-show-id",
       "file": "invalid/EpisodeRef.missing-show-id.json",
-      "description": "`showId` omitted; an Episode always belongs to a show (§6.1).",
+      "description": "`showId` omitted; an Episode always belongs to a show (\u00a76.1).",
       "expectedPath": "showId",
       "jsonSchemaDetectable": true
     },
@@ -227,7 +233,7 @@
       "schema": "ArtifactRef",
       "case": "malformed-sha256",
       "file": "invalid/ArtifactRef.malformed-sha256.json",
-      "description": "`sha256` is not a hex digest; hashes are load-bearing identity (§8.1).",
+      "description": "`sha256` is not a hex digest; hashes are load-bearing identity (\u00a78.1).",
       "expectedPath": "sha256",
       "jsonSchemaDetectable": true
     },
@@ -235,7 +241,7 @@
       "schema": "ArtifactRef",
       "case": "uppercase-sha256",
       "file": "invalid/ArtifactRef.uppercase-sha256.json",
-      "description": "`sha256` uppercase; two spellings of one digest would compare unequal (§8.1).",
+      "description": "`sha256` uppercase; two spellings of one digest would compare unequal (\u00a78.1).",
       "expectedPath": "sha256",
       "jsonSchemaDetectable": true
     },
@@ -251,7 +257,7 @@
       "schema": "ArtifactRef",
       "case": "unknown-reconstructability",
       "file": "invalid/ArtifactRef.unknown-reconstructability.json",
-      "description": "`reconstructability` outside the enum that governs archival (§8.1).",
+      "description": "`reconstructability` outside the enum that governs archival (\u00a78.1).",
       "expectedPath": "reconstructability",
       "jsonSchemaDetectable": true
     },
@@ -259,7 +265,7 @@
       "schema": "RunManifest",
       "case": "timestamp-without-offset",
       "file": "invalid/RunManifest.timestamp-without-offset.json",
-      "description": "`createdAt` has no UTC offset, so it is not comparable across machines (§5.1, §20).",
+      "description": "`createdAt` has no UTC offset, so it is not comparable across machines (\u00a75.1, \u00a720).",
       "expectedPath": "createdAt",
       "jsonSchemaDetectable": true
     },
@@ -267,7 +273,7 @@
       "schema": "RunManifest",
       "case": "unknown-status",
       "file": "invalid/RunManifest.unknown-status.json",
-      "description": "`status` outside the closed RUN_STATUSES enum (§6.2).",
+      "description": "`status` outside the closed RUN_STATUSES enum (\u00a76.2).",
       "expectedPath": "status",
       "jsonSchemaDetectable": true
     },
@@ -275,7 +281,7 @@
       "schema": "StageAttempt",
       "case": "attempt-zero",
       "file": "invalid/StageAttempt.attempt-zero.json",
-      "description": "`attempt` is 0; ordinals are 1-based so retry limits stay countable (§19.1).",
+      "description": "`attempt` is 0; ordinals are 1-based so retry limits stay countable (\u00a719.1).",
       "expectedPath": "attempt",
       "jsonSchemaDetectable": true
     },
@@ -283,7 +289,7 @@
       "schema": "StageAttempt",
       "case": "missing-actor",
       "file": "invalid/StageAttempt.missing-actor.json",
-      "description": "`actor` omitted; every mutating action records identity (§19.2).",
+      "description": "`actor` omitted; every mutating action records identity (\u00a719.2).",
       "expectedPath": "actor",
       "jsonSchemaDetectable": true
     },
@@ -291,7 +297,7 @@
       "schema": "StageExecution",
       "case": "non-ascending-attempts",
       "file": "invalid/StageExecution.non-ascending-attempts.json",
-      "description": "Attempt ordinals descend, meaning a writer overwrote history instead of appending (§6.3). Cross-field refinement — not expressible in JSON Schema.",
+      "description": "Attempt ordinals descend, meaning a writer overwrote history instead of appending (\u00a76.3). Cross-field refinement \u2014 not expressible in JSON Schema.",
       "expectedPath": "attempts",
       "jsonSchemaDetectable": false
     },
@@ -299,7 +305,7 @@
       "schema": "StageExecution",
       "case": "unknown-status",
       "file": "invalid/StageExecution.unknown-status.json",
-      "description": "`status` outside the closed STAGE_STATUSES enum (§6.3).",
+      "description": "`status` outside the closed STAGE_STATUSES enum (\u00a76.3).",
       "expectedPath": "status",
       "jsonSchemaDetectable": true
     },
@@ -307,7 +313,7 @@
       "schema": "GateDecision",
       "case": "unknown-decision",
       "file": "invalid/GateDecision.unknown-decision.json",
-      "description": "`decision` outside the four outcomes of §13.",
+      "description": "`decision` outside the four outcomes of \u00a713.",
       "expectedPath": "decision",
       "jsonSchemaDetectable": true
     },
@@ -315,7 +321,7 @@
       "schema": "GateDecision",
       "case": "missing-expires-on-change",
       "file": "invalid/GateDecision.missing-expires-on-change.json",
-      "description": "`expiresOnChange` omitted; the invalidation policy must be stated, not inherited (§13.1).",
+      "description": "`expiresOnChange` omitted; the invalidation policy must be stated, not inherited (\u00a713.1).",
       "expectedPath": "expiresOnChange",
       "jsonSchemaDetectable": true
     },
@@ -323,7 +329,7 @@
       "schema": "CostRecord",
       "case": "no-amounts",
       "file": "invalid/CostRecord.no-amounts.json",
-      "description": "Neither `estimated` nor `actual` present, so the record would under-report spend (§19.3). Cross-field refinement — not expressible in JSON Schema.",
+      "description": "Neither `estimated` nor `actual` present, so the record would under-report spend (\u00a719.3). Cross-field refinement \u2014 not expressible in JSON Schema.",
       "expectedPath": "actual",
       "jsonSchemaDetectable": false
     },
@@ -331,7 +337,7 @@
       "schema": "CostRecord",
       "case": "float-amount",
       "file": "invalid/CostRecord.float-amount.json",
-      "description": "`amount` is a number; money is a decimal string because IEEE-754 corrupts totals (§19.3).",
+      "description": "`amount` is a number; money is a decimal string because IEEE-754 corrupts totals (\u00a719.3).",
       "expectedPath": "estimated.amount",
       "jsonSchemaDetectable": true
     },
@@ -347,7 +353,7 @@
       "schema": "ReleaseReceipt",
       "case": "missing-idempotency-key",
       "file": "invalid/ReleaseReceipt.missing-idempotency-key.json",
-      "description": "`idempotencyKey` omitted; without it a partial release cannot be safely resumed (§17).",
+      "description": "`idempotencyKey` omitted; without it a partial release cannot be safely resumed (\u00a717).",
       "expectedPath": "idempotencyKey",
       "jsonSchemaDetectable": true
     },
@@ -355,7 +361,7 @@
       "schema": "ReleaseReceipt",
       "case": "unknown-status",
       "file": "invalid/ReleaseReceipt.unknown-status.json",
-      "description": "`status` outside the closed RELEASE_STATUSES enum (§17).",
+      "description": "`status` outside the closed RELEASE_STATUSES enum (\u00a717).",
       "expectedPath": "status",
       "jsonSchemaDetectable": true
     },
@@ -363,7 +369,7 @@
       "schema": "AldusEvent",
       "case": "missing-action",
       "file": "invalid/AldusEvent.missing-action.json",
-      "description": "`action` absent, so the event records that something changed without recording what (§6.4).",
+      "description": "`action` absent, so the event records that something changed without recording what (\u00a76.4).",
       "expectedPath": "action",
       "jsonSchemaDetectable": true
     },
@@ -387,7 +393,7 @@
       "schema": "KnowledgePackManifest",
       "case": "unknown-authority",
       "file": "invalid/KnowledgePackManifest.unknown-authority.json",
-      "description": "`authority` outside the closed PACK_AUTHORITIES enum of §9.1.",
+      "description": "`authority` outside the closed PACK_AUTHORITIES enum of \u00a79.1.",
       "expectedPath": "authority",
       "jsonSchemaDetectable": true
     },
@@ -395,7 +401,7 @@
       "schema": "KnowledgePackManifest",
       "case": "numeric-version",
       "file": "invalid/KnowledgePackManifest.numeric-version.json",
-      "description": "`version` is a number, as §9.1's own YAML example writes it. The schema requires a string so a manifest and the KnowledgePackRef snapshotted from it agree; parsePackManifest coerces this case before validation, but the raw document is invalid.",
+      "description": "`version` is a number, as \u00a79.1's own YAML example writes it. The schema requires a string so a manifest and the KnowledgePackRef snapshotted from it agree; parsePackManifest coerces this case before validation, but the raw document is invalid.",
       "expectedPath": "version",
       "jsonSchemaDetectable": true
     },
@@ -411,7 +417,7 @@
       "schema": "KnowledgePackManifest",
       "case": "non-integer-precedence",
       "file": "invalid/KnowledgePackManifest.non-integer-precedence.json",
-      "description": "`precedence` is fractional; §9.2 precedence is a discrete rung, not a continuum.",
+      "description": "`precedence` is fractional; \u00a79.2 precedence is a discrete rung, not a continuum.",
       "expectedPath": "precedence",
       "jsonSchemaDetectable": true
     }

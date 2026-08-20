@@ -1050,6 +1050,26 @@ Cost-incurring stages MUST support:
 - stop-on-budget behavior;
 - safe handling of unknown provider billing status.
 
+A billing record MUST state an amount or state that the amount is unknown. `billingStatus`
+`unknown` with no amount is itself the billing evidence: a provider MAY charge a request and
+withhold or delay the figure, and that fact MUST be preservable without a fabricated number. A
+zero MUST NOT be substituted — zero is a numerical assertion and an unknown amount is an
+uncertainty state, and they are not interchangeable.
+
+The same billing invariant MUST govern a reported observation and the attributed record derived
+from it. Reporting a truthful cost observation MUST NOT turn an already-completed provider
+execution into a validation failure.
+
+While an unresolved unknown charge stands against an authorization, remaining budget is
+**indeterminate** and MUST NOT be presented as an amount available to spend. Further automatic
+spend against that authorization MUST be refused until the amount is reconciled or an operator
+issues a new authorization. An estimate does not resolve an unknown charge. Such a record MUST NOT
+be classified as free, voided, or a zero-value draw.
+
+Cost reporting MUST surface an unknown charge that carries no amount. A currency cannot be derived
+from one, so a currency-keyed signal alone MUST NOT be the only indication that billing is
+unconfirmed.
+
 ---
 
 ## 20. Production trace and learning loop

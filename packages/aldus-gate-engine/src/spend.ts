@@ -109,6 +109,36 @@ export interface SpendLedger {
   counted: CostRecord[];
   /** Cost records excluded because they were voided. */
   excluded: CostRecord[];
+  /**
+   * Charges whose amount nobody knows yet (§19.3; #150).
+   *
+   * A provider may charge a request and withhold or delay the figure. While one of these stands
+   * against a grant, **Aldus cannot prove how much authorization remains** — the charge is real
+   * and its size is not yet a fact.
+   *
+   * A record here is never treated as free, voided, or a zero draw. Zero is a numerical assertion;
+   * this is an uncertainty state, and the two are not interchangeable.
+   */
+  unresolvedUnknown: CostRecord[];
+  /**
+   * Whether {@link SpendLedger.remaining} is a number anyone may spend against.
+   *
+   * `false` while any unresolved unknown charge stands. `remaining` still reports the arithmetic
+   * over what is known, because an operator wants the figure — but presenting it as headroom
+   * would state a safe amount that nothing establishes.
+   */
+  remainingIsDeterminate: boolean;
+}
+
+/**
+ * Whether a record is a charge of unknown size (§19.3; #150).
+ *
+ * An estimate does not resolve it. An estimate is evidence about what a request was expected to
+ * cost, and the ruling on #150 is explicit that it does not confirm the final charge — so a record
+ * carrying both an estimate and `billingStatus: "unknown"` is still unresolved.
+ */
+export function isUnresolvedUnknownCharge(record: CostRecord): boolean {
+  return record.billingStatus === "unknown";
 }
 
 /**
@@ -136,12 +166,15 @@ export function computeLedger(grant: SpendGrant, costs: readonly CostRecord[]): 
 
   const headroom = subtractMoney(grant.maxTotal, consumed);
   const overspent = isNegativeMoney(headroom);
+  const unresolvedUnknown = counted.filter(isUnresolvedUnknownCharge);
   return {
     consumed,
     remaining: overspent ? zeroMoney(currency) : headroom,
     overspent,
     counted,
     excluded,
+    unresolvedUnknown,
+    remainingIsDeterminate: unresolvedUnknown.length === 0,
   };
 }
 
@@ -155,7 +188,19 @@ export interface SpendRequest {
 
 /** Why a spend was refused. */
 export type SpendRefusalReason =
-  "per-request-limit" | "total-limit" | "already-overspent" | "negative-amount";
+  | "per-request-limit"
+  | "total-limit"
+  | "already-overspent"
+  | "negative-amount"
+  /**
+   * A charge of unknown size stands against this grant (§19.3; #150).
+   *
+   * Refused rather than allowed-with-a-warning: while the size of a real charge is unknown, the
+   * remaining headroom is not a fact, and spending against a figure nobody can establish is how a
+   * ceiling is exceeded without any single decision being wrong. Resolution is a reconciled amount
+   * or a new authorization under an explicit policy — both human acts.
+   */
+  | "billing-unconfirmed";
 
 /** The outcome of a stop-on-budget check. */
 export type SpendCheck =
@@ -194,6 +239,25 @@ export function checkSpend(
       explanation:
         `A spend of ${formatMoney(request.amount)} is negative. A refund is recorded as a voided ` +
         "cost record, not as a negative draw, so that the audit trail keeps the original charge.",
+    };
+  }
+
+  // Before the arithmetic, because the arithmetic is what cannot be trusted. While a charge of
+  // unknown size stands against this grant, `remaining` is the total over what is *known* — and
+  // spending against it would treat an unresolved charge as a zero draw, which is the one thing
+  // the ruling on #150 forbids (§19.3).
+  if (!ledger.remainingIsDeterminate) {
+    return {
+      allowed: false,
+      reason: "billing-unconfirmed",
+      ledger,
+      explanation:
+        `${ledger.unresolvedUnknown.length} charge(s) against this authorization have an ` +
+        "unconfirmed amount, so the remaining budget is indeterminate rather than " +
+        `${formatMoney(ledger.remaining)}. Automatic spend is refused until the amount is ` +
+        "reconciled or an operator issues a new authorization: an unknown charge is neither free " +
+        "nor zero, and drawing against a figure nobody can establish is how a ceiling is exceeded " +
+        "without any single decision being wrong (§19.3).",
     };
   }
 
