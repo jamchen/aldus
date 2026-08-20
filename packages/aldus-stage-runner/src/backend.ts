@@ -117,6 +117,18 @@ export interface AgentResult {
 export interface AgentBackend {
   /** Identity of this backend. An open string — Core names no backend (§4.2). */
   id: string;
+  /**
+   * Version of this backend, resolved exactly — never "latest" (§20; ADR-0044).
+   *
+   * Required because a spend reservation records **which version was dispatched under an enforced
+   * ceiling**, and that evidence must not be reconstructed by re-reading today's capabilities. A
+   * backend that enforces a ceiling now says nothing about a request an earlier version made, and
+   * inferring the second from the first is claiming a protection from a declaration that was not
+   * the one in force.
+   *
+   * The same rule `Worker.version` follows, for the same reason.
+   */
+  version: string;
   /** What this backend can do. */
   capabilities(): Promise<AgentCapabilities>;
   /** Execute a request. */

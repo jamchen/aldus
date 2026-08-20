@@ -6,7 +6,13 @@
  * be recorded at all. These cover the composition that closes it.
  */
 
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { FileSpendReservationStore } from "@aldus-runtime/file-store";
 
 import {
   SCHEMA_VERSION,
@@ -17,7 +23,9 @@ import {
 import { checkSpend, type SpendGrant } from "@aldus-runtime/gate-engine";
 import type { AgentBackend } from "@aldus-runtime/stage-runner";
 
-import { AgentExecutionService, type CostRecordStore } from "../src/agent-execution.js";
+import { AgentExecutionService } from "../src/agent-execution.js";
+import type { CostRecordStore } from "../src/cost-store.js";
+import { SpendService } from "../src/spend-service.js";
 import { summariseCosts } from "../src/costs.js";
 
 const ACTOR: ActorRef = { kind: "agent", id: "claude" };
@@ -28,7 +36,7 @@ const GRANT: SpendGrant = {
   runId: RUN,
   gateId: "performance.freeze",
   decisionId: "decision-7",
-  scope: { operations: ["tts.synthesize"] },
+  scope: { operations: ["agent.execute"] },
   maxTotal: { amount: "10.00", currency: "USD" },
   maxPerRequest: { amount: "2.00", currency: "USD" },
 };
@@ -63,6 +71,7 @@ function eventSink(): {
 function backend(overrides: Partial<AgentBackend> = {}): AgentBackend {
   return {
     id: "backend-a",
+    version: "1.0.0",
     capabilities: () => Promise.resolve({ offers: [], interactive: false, resumable: false }),
     execute: () => Promise.resolve({ ok: true }),
     ...overrides,
@@ -73,11 +82,20 @@ function serviceWith(options: {
   backend?: AgentBackend;
   costs?: ReturnType<typeof costStore>;
   events?: ReturnType<typeof eventSink>;
+  root?: string;
 }) {
   const costs = options.costs ?? costStore();
   const events = options.events ?? eventSink();
+  // A real store against a real filesystem: the reservation path is the thing under test, and a
+  // double that agreed with the runner would be a test asserting the double (ADR-0044).
+  const spend = new SpendService({
+    store: new FileSpendReservationStore({ root: options.root ?? tempRoot }),
+    costs,
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+  });
   const service = new AgentExecutionService({
     backend: options.backend ?? backend(),
+    spend,
     costs,
     events,
     now: () => new Date("2026-01-01T00:00:00.000Z"),
@@ -86,11 +104,24 @@ function serviceWith(options: {
       return () => `cost-${(n += 1)}`;
     })(),
   });
-  return { service, costs, events };
+  return { service, costs, events, spend };
 }
+
+let tempRoot: string;
+
+beforeEach(async () => {
+  tempRoot = await mkdtemp(join(tmpdir(), "aldus-agent-spend-"));
+});
+
+afterEach(async () => {
+  await rm(tempRoot, { recursive: true, force: true });
+});
 
 const base = {
   runId: RUN,
+  operation: "agent.execute",
+  effectKey: "effect-a",
+  expectation: { kind: "estimated", amount: { amount: "0.0100", currency: "USD" } } as const,
   episodeId: "episode-a",
   stageId: "outline.draft",
   attemptId: "att-1",
@@ -206,7 +237,10 @@ describe("an agent execution's cost is recorded with the runtime's attribution",
     const event = events.events.at(-1);
     expect(event?.action).toBe("agent.executed");
     expect(event?.attemptId).toBe("att-1");
-    expect((event?.details as { costIds?: string[] })?.costIds).toEqual(["cost-1"]);
+    const linked = (event?.details as { costIds?: string[] })?.costIds ?? [];
+    // Derived from the reservation, so they are stable across settlement retries (ADR-0044).
+    expect(linked).toHaveLength(1);
+    expect(linked[0]).toMatch(/^res_[A-Z0-9]+:cost:0$/);
   });
 });
 
@@ -242,7 +276,12 @@ describe("an unattributed charge is invisible to the budget", () => {
     expect(recorded.authorizationId).toBe(GRANT.decisionId);
     // And therefore it counts: a second execution estimating more than the remainder is refused.
     await expect(
-      service.execute({ ...base, grant: GRANT, estimated: { amount: "8.00", currency: "USD" } }),
+      service.execute({
+        ...base,
+        grant: GRANT,
+        effectKey: "effect-second",
+        expectation: { kind: "estimated", amount: { amount: "8.00", currency: "USD" } },
+      }),
     ).rejects.toMatchObject({ code: "ALDUS_SPEND_NOT_AUTHORIZED" });
   });
 });
@@ -251,7 +290,10 @@ describe("spend is checked before the effect, not after", () => {
   it("refuses an estimate with no grant to check it against", async () => {
     const { service } = serviceWith({});
     await expect(
-      service.execute({ ...base, estimated: { amount: "1.00", currency: "USD" } }),
+      service.execute({
+        ...base,
+        expectation: { kind: "estimated", amount: { amount: "1.00", currency: "USD" } },
+      }),
     ).rejects.toMatchObject({ code: "ALDUS_SPEND_NOT_AUTHORIZED" });
   });
 
@@ -286,7 +328,11 @@ describe("spend is checked before the effect, not after", () => {
     });
 
     await expect(
-      service.execute({ ...base, grant: GRANT, estimated: { amount: "1.00", currency: "USD" } }),
+      service.execute({
+        ...base,
+        grant: GRANT,
+        expectation: { kind: "estimated", amount: { amount: "1.00", currency: "USD" } },
+      }),
     ).rejects.toMatchObject({ code: "ALDUS_SPEND_NOT_AUTHORIZED" });
     expect(dispatched).toBe(false);
   });
@@ -315,10 +361,24 @@ describe("spend is checked before the effect, not after", () => {
       },
     });
 
-    await serviceWith({ backend: enforcing }).service.execute({ ...base, grant: GRANT });
-    await serviceWith({ backend: ignoring }).service.execute({ ...base, grant: GRANT });
+    // Distinct effect keys, because one effect resolves to one reservation: reusing the key would
+    // correctly return the first execution's settled reservation, which is idempotency working
+    // rather than a second dispatch.
+    await serviceWith({ backend: enforcing }).service.execute({
+      ...base,
+      grant: GRANT,
+      effectKey: "effect-enforcing",
+    });
+    await serviceWith({ backend: ignoring }).service.execute({
+      ...base,
+      grant: GRANT,
+      effectKey: "effect-ignoring",
+    });
 
-    expect(seen[0]?.["maxSpend"]).toEqual({ amount: "2.00", currency: "USD" });
+    // What is passed is the amount actually **reserved**, not the grant's per-request maximum.
+    // The reservation is what this execution is authorized to spend, and a ceiling wider than the
+    // commitment would let a provider charge past what was set aside (ADR-0044).
+    expect(seen[0]?.["maxSpend"]).toEqual({ amount: "0.0100", currency: "USD" });
     expect(seen[1]?.["maxSpend"]).toBeUndefined();
   });
 });

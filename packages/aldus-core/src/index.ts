@@ -97,6 +97,7 @@ export {
   newArtifactId,
   newCostId,
   newEventId,
+  newSpendReservationId,
   newGateDecisionId,
   newGateId,
   newId,

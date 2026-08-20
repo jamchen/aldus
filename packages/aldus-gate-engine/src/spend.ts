@@ -31,6 +31,7 @@ import {
   compareMoney,
   formatMoney,
   isNegativeMoney,
+  isPositiveMoney,
   subtractMoney,
   zeroMoney,
 } from "./money.js";
@@ -73,6 +74,20 @@ export interface SpendGrant {
   scope: {
     operations: readonly string[];
   };
+  /**
+   * Whether an execution with no estimate may be dispatched (§13.2, §19.3; ADR-0044).
+   *
+   * Operator-approved policy, so it lives on the grant and is bound by
+   * {@link grantTermsDigest} — changing it invalidates the approval exactly as changing a ceiling
+   * or the scope does. It must never be supplied by an execution input or an adapter: a caller
+   * that could assert its own permission is the shape #107 exists to prevent.
+   *
+   * A closed pair rather than a boolean. `permitUnestimated: true` invites being flipped in a
+   * config file; naming the reservation it implies makes the consequence part of the decision.
+   *
+   * Absent reads as `"refuse"`.
+   */
+  unestimatedExecution?: "refuse" | "reserve_max_per_request";
   /** Maximum total spend authorized across the Run (§13.2 "maximum authorized cost"). */
   maxTotal: Money;
   /** Maximum spend authorized for any single request (§19.3 "per-request ... limits"). */
@@ -94,6 +109,7 @@ export function grantTermsDigest(grant: SpendGrant): string {
     // Sorted, because the *set* of authorized operations is the term, not the order an adopter
     // listed them in — the same reason ADR-0033 sorts release input hashes.
     scope: { operations: [...grant.scope.operations].sort() },
+    unestimatedExecution: grant.unestimatedExecution ?? "refuse",
     maxTotal: grant.maxTotal,
     maxPerRequest: grant.maxPerRequest ?? null,
   });
@@ -334,6 +350,44 @@ export function availableAuthorization(
         .map(([code, money]) => [code, money.amount]),
     ),
   };
+}
+
+/**
+ * Whether a grant can truthfully permit an unestimated execution (ADR-0044; #155).
+ *
+ * `reserve_max_per_request` promises to reserve the per-request ceiling. A grant that permits it
+ * and states no such ceiling promises an amount it does not have — and reserving zero instead
+ * would make unestimated executions invisible to concurrency control, which is the case most
+ * likely to be dispatched in a loop.
+ *
+ * Checked at decode **and** before dispatch: a grant assembled from configuration never passes
+ * through the constructor that would have caught it.
+ */
+export function unestimatedPolicyIsSatisfiable(grant: SpendGrant): string | undefined {
+  if ((grant.unestimatedExecution ?? "refuse") !== "reserve_max_per_request") return undefined;
+  const ceiling = grant.maxPerRequest;
+  if (ceiling === undefined) {
+    return (
+      `Grant "${grant.grantId}" permits unestimated execution by reserving its per-request ` +
+      "ceiling, and states no ceiling. There is no truthful amount to reserve, so this cannot be " +
+      "dispatched (§13.2, §19.3)."
+    );
+  }
+  if (!isPositiveMoney(ceiling)) {
+    return (
+      `Grant "${grant.grantId}" permits unestimated execution by reserving its per-request ` +
+      `ceiling, and that ceiling is ${formatMoney(ceiling)}. Reserving zero would make an ` +
+      "unestimated execution invisible to concurrency control."
+    );
+  }
+  if (ceiling.currency !== grant.maxTotal.currency) {
+    return (
+      `Grant "${grant.grantId}" states a per-request ceiling in ${ceiling.currency} and a total ` +
+      `in ${grant.maxTotal.currency}. A reservation is denominated in the grant's currency, and ` +
+      "converting implicitly is not something this runtime does (ADR-0044)."
+    );
+  }
+  return undefined;
 }
 
 /** Why a grant does not authorize an operation. */

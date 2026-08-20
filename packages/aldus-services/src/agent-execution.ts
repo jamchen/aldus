@@ -24,18 +24,13 @@ import {
   type AldusEvent,
   type CostObservation,
   type CostRecord,
-  type Money,
 } from "@aldus-runtime/core";
-import { checkSpend, type SpendGrant } from "@aldus-runtime/gate-engine";
+import type { SpendGrant } from "@aldus-runtime/gate-engine";
 import type { AgentBackend, AgentRequest, AgentResult } from "@aldus-runtime/stage-runner";
 
+import type { CostRecordStore } from "./cost-store.js";
+import type { CostExpectation, SpendService } from "./spend-service.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
-
-/** Where cost records are read and appended. */
-export interface CostRecordStore {
-  list(runId: string): Promise<CostRecord[]>;
-  append(runId: string, record: CostRecord): Promise<void>;
-}
 
 /** What the caller must state about an execution before it is dispatched. */
 export interface AgentExecutionInput {
@@ -48,6 +43,13 @@ export interface AgentExecutionInput {
   /** The request handed to the backend. */
   request: AgentRequest;
   /**
+   * What the grant must authorize, e.g. `"agent.execute"` (§4.2).
+   *
+   * Checked against the grant's declared scope before reserving, so passing a synthesis grant to
+   * an agent execution cannot authorize it.
+   */
+  operation: string;
+  /**
    * The grant this execution spends against, from the decision that authorized dispatch.
    *
    * Supplied by the runtime rather than by the backend or the adopter's stage code. Absent means
@@ -56,13 +58,21 @@ export interface AgentExecutionInput {
    */
   grant?: SpendGrant;
   /**
-   * What this execution is expected to cost, where the caller knows before dispatching.
+   * What the Runtime expects this execution to cost (ADR-0044; #155).
    *
-   * §13.2's check happens here, before the effect. An execution with no estimate is dispatched and
-   * its actual cost recorded — the alternative, refusing anything unestimated, would forbid every
-   * backend that can only report after the fact.
+   * Required and closed. It replaced `estimated?: Money`, where absence meant both *"nobody
+   * stated one"* and *"nothing will be charged"* — so an unestimated execution dispatched with no
+   * spend check at all. Declaring `free` is now a statement someone makes, not a field they
+   * omitted.
    */
-  estimated?: Money;
+  expectation: CostExpectation;
+  /**
+   * Identity of the independently billed effect (ADR-0043).
+   *
+   * Retrying the same effect resolves to the same reservation rather than committing authorization
+   * twice.
+   */
+  effectKey: string;
 }
 
 /** What happened, including what it cost. */
@@ -84,6 +94,8 @@ export interface AgentExecutionResult {
 /** Dependencies, injected so a composition supplies them once. */
 export interface AgentExecutionOptions {
   backend: AgentBackend;
+  /** Reserves before dispatch and settles after (ADR-0044). */
+  spend: SpendService;
   costs: CostRecordStore;
   events: { append(runId: string, event: AldusEvent): Promise<unknown> };
   now?: () => Date;
@@ -97,7 +109,9 @@ export interface AgentExecutionOptions {
  * the estimate, or is already exhausted or overspent.
  */
 export class AgentExecutionService {
-  readonly #options: Required<Pick<AgentExecutionOptions, "backend" | "costs" | "events">> & {
+  readonly #options: Required<
+    Pick<AgentExecutionOptions, "backend" | "costs" | "events" | "spend">
+  > & {
     now: () => Date;
     newCostId: () => string;
   };
@@ -105,6 +119,7 @@ export class AgentExecutionService {
   constructor(options: AgentExecutionOptions) {
     this.#options = {
       backend: options.backend,
+      spend: options.spend,
       costs: options.costs,
       events: options.events,
       now: options.now ?? (() => new Date()),
@@ -115,50 +130,45 @@ export class AgentExecutionService {
   async execute(input: AgentExecutionInput): Promise<AgentExecutionResult> {
     const capabilities = await this.#options.backend.capabilities();
 
-    // §13.2, before the effect. Checked here rather than after, because a refusal that arrives
-    // once the provider has been billed is not a refusal.
-    if (input.estimated !== undefined) {
-      if (input.grant === undefined) {
-        throw serviceError(
-          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
-          `Stage "${input.stageId}" expects to spend ${input.estimated.amount} ` +
-            `${input.estimated.currency} and no spend grant authorizes it. §13.2 requires an ` +
-            "operator's approval before paid work, and an estimate with nothing to check it " +
-            "against is not an authorization.",
-          {
-            category: "policy",
-            retryable: false,
-            details: { runId: input.runId, stageId: input.stageId },
-          },
-        );
-      }
-
-      const existing = await this.#options.costs.list(input.runId);
-      const check = checkSpend(input.grant, existing, { amount: input.estimated });
-      if (!check.allowed) {
-        throw serviceError(
-          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
-          `Refused before dispatch: ${check.explanation}`,
-          {
-            category: "policy",
-            retryable: false,
-            details: {
-              runId: input.runId,
-              stageId: input.stageId,
-              reason: check.reason,
-              grantId: input.grant.grantId,
-            },
-          },
-        );
-      }
+    // The single authoritative pre-dispatch decision (ADR-0044). `checkSpend` is deliberately NOT
+    // called first: its answer is stale the moment another writer moves the stream, and only the
+    // committed answer protects anything.
+    const outcome = await this.#options.spend.reserve({
+      grant: input.grant,
+      operation: input.operation,
+      runId: input.runId,
+      stageId: input.stageId,
+      attemptId: input.attemptId,
+      effectKey: input.effectKey,
+      expectation: input.expectation,
+    });
+    if (outcome.reserved === false && outcome.reason === "refused") {
+      throw serviceError(ServiceErrorCodes.SPEND_NOT_AUTHORIZED, outcome.explanation, {
+        category: "policy",
+        retryable: false,
+        details: { runId: input.runId, stageId: input.stageId },
+      });
     }
+    let reservation = outcome.reserved ? outcome.reservation : undefined;
 
     // A ceiling only where the backend says it enforces one. Passing a limit to a backend that
     // ignores it would record a protection that does not exist (ADR-0030).
+    const enforces = capabilities.enforcesSpendCeiling === true;
+    const ceiling = reservation?.reserved;
     const request: AgentRequest =
-      capabilities.enforcesSpendCeiling === true && input.grant?.maxPerRequest !== undefined
-        ? { ...input.request, maxSpend: input.grant.maxPerRequest }
-        : input.request;
+      enforces && ceiling !== undefined ? { ...input.request, maxSpend: ceiling } : input.request;
+
+    // Before the provider call, so the window in which dispatch may have begun is visible rather
+    // than inferred (ADR-0044). What is recorded is what was true of *this* execution: a
+    // backend's current capabilities are not evidence about an earlier request.
+    if (reservation !== undefined) {
+      reservation = await this.#options.spend.prepareDispatch(reservation, {
+        backendId: this.#options.backend.id,
+        backendVersion: this.#options.backend.version,
+        ceilingEnforced: enforces && ceiling !== undefined,
+        ...(enforces && ceiling !== undefined ? { appliedCeiling: ceiling } : {}),
+      });
+    }
 
     let result: AgentResult;
     try {
@@ -167,6 +177,11 @@ export class AgentExecutionService {
       // A backend that threw may still have been billed, and it cannot tell us. Recorded as an
       // unconfirmed outcome rather than as free, because assuming a failed request cost nothing
       // is how a budget is quietly exceeded (§19.3).
+      // A backend that threw may still have been billed, and it cannot tell us. The reservation
+      // stays committed and the effect becomes non-retryable: assuming a failed request cost
+      // nothing is how a budget is quietly exceeded (§19.3), and after `dispatch_prepared` a
+      // failure is not proof of no charge (ADR-0044).
+      if (reservation !== undefined) await this.#options.spend.markUnknown(reservation);
       await this.#emit(input, [], { threw: true });
       throw thrown;
     }
@@ -174,7 +189,36 @@ export class AgentExecutionService {
     // Costs are recorded whether or not the execution succeeded. A provider may charge for a
     // request that fails, and a channel surviving only success loses exactly the spend an
     // operator most needs to see.
-    const records = await this.#record(input, result.costs ?? []);
+    //
+    // Through the reservation where one exists, so the cost record is durable *before* the
+    // reservation stops consuming authorization. The reverse would release authorization while
+    // the charge is absent (ADR-0044).
+    const observations = result.costs ?? [];
+    let records: CostRecord[];
+    if (reservation !== undefined) {
+      const settled = await this.#options.spend.settle(reservation, observations, {
+        ...(input.grant === undefined ? {} : { authorizationId: input.grant.decisionId }),
+      });
+      records = [...settled.costs];
+    } else {
+      // Declared free. A charge reported anyway is an unauthorized divergence: it is recorded so
+      // §20 can answer what it cost, and it is not laundered through a grant nobody consulted.
+      records = await this.#record(input, observations);
+      if (records.length > 0) {
+        await this.#emit(input, records, { ok: result.ok, unauthorizedDivergence: true });
+        throw serviceError(
+          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+          `Stage "${input.stageId}" declared this execution free and the provider reported a ` +
+            "charge. The charge is recorded, and no grant is credited with authorizing it — " +
+            "attaching one after the fact would invent an approval nobody gave (§13.2, §19.3).",
+          {
+            category: "policy",
+            retryable: false,
+            details: { runId: input.runId, stageId: input.stageId },
+          },
+        );
+      }
+    }
     await this.#emit(input, records, { ok: result.ok });
 
     return {
