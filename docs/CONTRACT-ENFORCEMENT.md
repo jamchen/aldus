@@ -86,29 +86,32 @@ list.
 | §19.2 private packs never required by Core tests     | `core:knowledge`                        | boundary test                | `packages/aldus-e2e/test/boundary.test.ts`                   |
 | §19.3 a backend can report what it was charged       | `core:costObservationSchema`            | `core:costObservationSchema` | `packages/aldus-core/test/cost-observation.test.ts`          |
 | §19.3 a paid Worker reserves before it is dispatched | `stage-runner:PaidDispatchController`   | `stage-runner:StageRunner`   | `packages/aldus-e2e/test/paid-worker-dispatch.test.ts`       |
+| §10 a Stage dispatches an agent execution explicitly | `stage-runner:StageAgentDispatcher`     | `stage-runner:StageRunner`   | `packages/aldus-e2e/test/agent-dispatch.test.ts`             |
 | §13.2 a grant's per-request ceiling is enforced      | `gate-engine:SpendGrant`                | `services:SpendService`      | `packages/aldus-e2e/test/paid-worker-dispatch.test.ts`       |
 
-**Not yet enforced:** §19.3's composed path, for **agent executions only**. `AgentExecutionService`
-dispatches `AgentBackend.execute()` and writes attributed `CostRecord`s, and no composition
-constructs it — `AldusConfig.agentBackend` reaches `StageRunner`, which uses it for
-`assertCapabilities` and nothing else, and `StageContext` exposes no member that reaches a backend.
-Being importable from the package entry point is not being wired, and `public-surface.test.ts` asks
-only the first question. A separate proposal for an explicit composed dispatch surface is open
-(#107); until it exists, #107's composed acceptance is unmet for that path.
+**Now enforced on both dispatch paths.** §19.3's composed path was the standing gap: the contract
+existed and the composition did not.
 
-The Worker path was the same shape and is closed: `StageContext.runWorker` now reserves before
-dispatch, refuses an undeclared or unauthorized invocation without reaching the Worker, and
-persists what it reports (ADR-0046).
+- **`StageContext.runWorker`** reserves before dispatch, refuses an undeclared or unauthorized
+  invocation without reaching the Worker, and persists what it reports (ADR-0046).
+- **`StageContext.runAgent`** does the same through `AgentExecutionService`, and a configured
+  backend dispatches only when a Stage asks — wiring one is a capability declaration, never an
+  instruction (ADR-0047).
+
+**Not yet enforced:** resumption. An agent session that pauses has no supported path onward — V1 is
+single-shot by decision rather than by omission, and a pause is surfaced as an explicit outcome
+rather than inferred from a nullable field (ADR-0047). Recorded here because a matrix listing only
+what works reads as complete.
 
 ## Composition reachability
 
 Not a §-clause, but the shape that produced two of the four gaps.
 
-| Property                                                       | Proven by                                                                                                    |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| every adopter-supplied capability has an `AldusConfig` field   | `packages/aldus-cli/test/config-reach.test.ts`                                                               |
-| `loadConfig` accepts every key `AldusConfig` declares          | compile-time, plus `packages/aldus-cli/test/operator-entry-point.test.ts`                                    |
-| every seam is reachable from the published package entry point | `packages/aldus-e2e/test/public-surface.test.ts`                                                             |
-| documentation names symbols that exist                         | `packages/aldus-core/test/doc-links.test.ts`                                                                 |
-| the operator's actual command reaches the composition          | `packages/aldus-cli/test/operator-entry-point.test.ts`                                                       |
-| a configured capability reaches a dispatch point               | `packages/aldus-e2e/test/paid-worker-dispatch.test.ts` (Workers); **nothing** for `agentBackend` — see above |
+| Property                                                       | Proven by                                                                                                |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| every adopter-supplied capability has an `AldusConfig` field   | `packages/aldus-cli/test/config-reach.test.ts`                                                           |
+| `loadConfig` accepts every key `AldusConfig` declares          | compile-time, plus `packages/aldus-cli/test/operator-entry-point.test.ts`                                |
+| every seam is reachable from the published package entry point | `packages/aldus-e2e/test/public-surface.test.ts`                                                         |
+| documentation names symbols that exist                         | `packages/aldus-core/test/doc-links.test.ts`                                                             |
+| the operator's actual command reaches the composition          | `packages/aldus-cli/test/operator-entry-point.test.ts`                                                   |
+| a configured capability reaches a dispatch point               | `packages/aldus-e2e/test/paid-worker-dispatch.test.ts`, `packages/aldus-e2e/test/agent-dispatch.test.ts` |

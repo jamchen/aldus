@@ -62,3 +62,4 @@ Rules:
 | [0043](0043-an-effect-key-belongs-to-the-effect.md)                                         | An effect key belongs to the effect, not to the attempt containing it                      | Accepted | #148, #149        |
 | [0044](0044-spend-is-reserved-before-the-effect.md)                                         | Spend is reserved before the effect, and settled from what the provider reports            | Accepted | #155              |
 | [0046](0046-a-worker-is-a-paid-gateway.md)                                                  | A Worker is a paid gateway and reserves like one                                           | Accepted | #107              |
+| [0047](0047-a-stage-dispatches-an-agent-explicitly.md)                                      | A Stage dispatches an agent execution explicitly, and only single-shot                     | Accepted | #107              |

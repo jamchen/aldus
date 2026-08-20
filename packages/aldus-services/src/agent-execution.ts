@@ -26,7 +26,12 @@ import {
   type CostRecord,
 } from "@aldus-runtime/core";
 import type { SpendGrant } from "@aldus-runtime/gate-engine";
-import type { AgentBackend, AgentRequest, AgentResult } from "@aldus-runtime/stage-runner";
+import {
+  isChargeBearing,
+  type AgentBackend,
+  type AgentRequest,
+  type AgentResult,
+} from "@aldus-runtime/stage-runner";
 
 import type { CostRecordStore } from "./cost-store.js";
 import type { CostExpectation, SpendService } from "./spend-service.js";
@@ -194,8 +199,46 @@ export class AgentExecutionService {
     // reservation stops consuming authorization. The reverse would release authorization while
     // the charge is absent (ADR-0044).
     const observations = result.costs ?? [];
+    // Billing semantics, not array length. `free` and `voided` are a provider stating that nothing
+    // is owed — evidence of no spend rather than a charge to account for. The same predicate the
+    // Worker path uses, so the two cannot answer this differently (ADR-0046).
+    const charges = observations.filter((observation) =>
+      isChargeBearing(observation.billingStatus),
+    );
     let records: CostRecord[];
     if (reservation !== undefined) {
+      // One `effectKey` names one independently billed effect and commits one reservation for it.
+      // `AgentResult.costs` is plural because one execution may incur several model, provider or
+      // tool charges — and settling several *independent* charges against one authorization would
+      // let a single approval cover N (ADR-0043, ADR-0046).
+      //
+      // The money is already spent, so the facts are persisted and attributed and the reservation
+      // is retained unresolved. What is withheld is the claim that it covered them.
+      if (charges.length > 1) {
+        const written = await this.#record(input, observations);
+        await this.#options.spend.markUnknown(
+          reservation,
+          written.map((record) => record.costId),
+          {
+            reason:
+              `the backend reported ${charges.length} independently billed charges against one ` +
+              "declared billing effect; one reservation authorizes one charge",
+          },
+        );
+        await this.#emit(input, written, { ok: result.ok, billingCardinalityExceeded: true });
+        throw serviceError(
+          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+          `Stage "${input.stageId}" declared one billing effect and the backend reported ` +
+            `${charges.length} independent charges. They are recorded and the reservation is ` +
+            "left unresolved: settling them against one authorization would let a single " +
+            "approval cover several charges (§13.2, §19.3).",
+          {
+            category: "conflict",
+            retryable: false,
+            details: { runId: input.runId, stageId: input.stageId },
+          },
+        );
+      }
       const settled = await this.#options.spend.settle(reservation, observations, {
         ...(input.grant === undefined ? {} : { authorizationId: input.grant.decisionId }),
       });
@@ -203,8 +246,10 @@ export class AgentExecutionService {
     } else {
       // Declared free. A charge reported anyway is an unauthorized divergence: it is recorded so
       // §20 can answer what it cost, and it is not laundered through a grant nobody consulted.
+      // A `free` or `voided` observation is not one — that is the backend truthfully saying
+      // nothing was owed, which is what the declaration claimed.
       records = await this.#record(input, observations);
-      if (records.length > 0) {
+      if (charges.length > 0) {
         await this.#emit(input, records, { ok: result.ok, unauthorizedDivergence: true });
         throw serviceError(
           ServiceErrorCodes.SPEND_NOT_AUTHORIZED,

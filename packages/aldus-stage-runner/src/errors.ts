@@ -141,6 +141,13 @@ export const StageRunnerErrorCodes = {
    * the reservation is left unresolved, because the money is already spent.
    */
   WORKER_SPEND_CARDINALITY: "ALDUS_WORKER_SPEND_CARDINALITY",
+  /**
+   * A stage called `runAgent` in a composition that wired no agent dispatcher (§10, ADR-0047).
+   *
+   * A configured `agentBackend` is not a dispatcher. Something has to resolve the grant, reserve
+   * against it and attribute the charge, and dispatching with none of that would be #107 again.
+   */
+  AGENT_DISPATCH_UNAVAILABLE: "ALDUS_AGENT_DISPATCH_UNAVAILABLE",
   /** The stage's retry budget was exhausted without a success (contract §19.1). */
   STAGE_RETRIES_EXHAUSTED: "ALDUS_STAGE_RETRIES_EXHAUSTED",
   /** Execution was cancelled by an operator or a supervising runtime (contract §19.1). */

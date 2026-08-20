@@ -49,6 +49,8 @@ export {
   type AggregateReport,
   type EvaluationObservation,
   type StageWorkerRequest,
+  type StageAgentRequest,
+  type StageAgentOutcome,
 } from "./definition.js";
 
 export {
@@ -117,3 +119,9 @@ export type {
   PaidDispatchReservation,
   PaidDispatchReserveInput,
 } from "./paid-dispatch.js";
+
+export type {
+  StageAgentDispatcher,
+  StageAgentDispatchInput,
+  StageOwnedAgentRequest,
+} from "./agent-dispatch.js";

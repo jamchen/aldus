@@ -25,6 +25,7 @@ import { FileSpendReservationStore, type FileWorkspace } from "@aldus-runtime/fi
 import type { CostRecordStore } from "./cost-store.js";
 import { SpendService } from "./spend-service.js";
 import { RuntimePaidDispatchController, type DispatchSpendGrantProvider } from "./paid-dispatch.js";
+import { RuntimeStageAgentDispatcher } from "./agent-dispatch.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   AdapterRegistry,
@@ -172,6 +173,7 @@ export class AldusContext {
   readonly #spend: SpendService;
   readonly #spendGrants: SpendGrantProvider | undefined;
   readonly #paidDispatch: RuntimePaidDispatchController;
+  readonly #agentDispatch: RuntimeStageAgentDispatcher | undefined;
   readonly #ledgerStores: ReturnType<typeof fileLedgerStores>;
 
   constructor(options: AldusContextOptions) {
@@ -231,6 +233,18 @@ export class AldusContext {
       grants: options.dispatchSpendGrants ?? (() => undefined),
       now: () => this.now(),
     });
+
+    this.#agentDispatch =
+      this.backend === undefined
+        ? undefined
+        : new RuntimeStageAgentDispatcher({
+            backend: this.backend,
+            spend: this.#spend,
+            costs: this.#costs,
+            events: { append: (runId, event) => this.workspace.events.append(runId, event) },
+            grants: options.dispatchSpendGrants ?? (() => undefined),
+            now: () => this.now(),
+          });
 
     this.gates = new GateEngine({
       registry: this.gateRegistry,
@@ -311,6 +325,10 @@ export class AldusContext {
       // when no grant is in force, and a reservation for an unauthorized operation is refused
       // there rather than by the absence of a controller.
       paidDispatch: this.#paidDispatch,
+      // Only where a backend is configured. Wiring a dispatcher *because* a backend exists is not
+      // the same as dispatching because it exists — the stage still has to ask (ADR-0047).
+      ...(this.#agentDispatch === undefined ? {} : { agentDispatch: this.#agentDispatch }),
+
       now: this.now,
     });
   }
