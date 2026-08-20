@@ -16,7 +16,7 @@ checked `kind === "human"`, and added the resulting token to a `WeakSet` that `r
 tested for membership. The membership test is real — a caller cannot forge it with an object
 literal — but it proves the token came from the constructor, which proves nothing about who was at
 the keyboard. It was described as the `SynthesisPermit` pattern and was not: a permit is minted
-*after* the ledger establishes authorization, whereas this minted from the caller's own assertion.
+_after_ the ledger establishes authorization, whereas this minted from the caller's own assertion.
 
 **A public factory.** `openOperatorConsole({ spend, actor })` moved the same parameter one function
 outward. Any consumer could still call it with `{ kind: "human", id: "whoever" }`.
@@ -28,9 +28,9 @@ The composed path did not repair either, and the reason is the substance of this
 > ordinary commands, but it is not evidence that a human performed the money-releasing act.
 
 That is correct, and it generalises past this feature. **Aldus has no boundary that authenticates
-an operator.** Every actor in the system is self-declared. For recording *who did what* that is
+an operator.** Every actor in the system is self-declared. For recording _who did what_ that is
 adequate and honest — an audit trail records claims, and §19.2 asks for attribution. For deciding
-*whether an act is permitted* it is not evidence at all.
+_whether an act is permitted_ it is not evidence at all.
 
 The distinction was invisible because both uses read the same field.
 
