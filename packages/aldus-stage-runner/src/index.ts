@@ -86,3 +86,11 @@ export {
   type WorkerRequest,
   type WorkerResult,
 } from "./worker.js";
+
+export {
+  recordingWorker,
+  failingWorker,
+  cancellableWorker,
+  type RecordingWorker,
+  type RecordingWorkerOptions,
+} from "./doubles.js";

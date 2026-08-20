@@ -1126,6 +1126,26 @@ Dependencies: WP-04, WP-05, WP-08.
 
 Dependencies: WP-03, WP-04, WP-05.
 
+### WP-13 Worker seam
+
+- `Worker` contract with stable id and exactly-resolved version;
+- capability declaration and a pre-execution check that fails closed;
+- `WorkerRegistry`, with no implicit latest-version selection;
+- a runtime-owned path from a Stage to a registered Worker;
+- Worker id, version and checked capabilities in production trace;
+- test doubles and adopter-facing testkit helpers.
+
+§3.2 makes "Worker before Agent" design principle #2 and §4.1 assigns the interface to Core, but
+no work package claimed it, so only the Agent half was built. The contract told adopters to prefer
+the seam that did not exist. Added after the first adopter reached the point where it decided a
+month of their work (#111).
+
+A Worker performs a declared operation. Validation, gates, retry, idempotency, cost authorization,
+artifact provenance and attempt state stay with the Stage — a Worker that acquired them would be a
+second workflow abstraction competing with the first (ADR-0035).
+
+Dependencies: WP-01, WP-04.
+
 ---
 
 ## 23. V1 priority order
@@ -1140,6 +1160,7 @@ Dependencies: WP-03, WP-04, WP-05.
 8. Regression harness.
 9. Production MCP and Remote Control workflows.
 10. Release receipts and resumable publishing.
+11. Worker seam, so deterministic operations have the seam §3.2 tells adopters to prefer.
 
 Web UI and autonomous scheduling are not V1 priorities.
 
@@ -1160,6 +1181,10 @@ Aldus V1 is complete when:
 - Claude Code Remote Control can inspect and operate the Runtime safely;
 - a representative defect corpus is executed during regression testing;
 - release operations produce resumable receipts;
+- a deterministic operation can be implemented as a Worker and invoked by a Stage through the
+  runtime, with its id, version and checked capabilities in the trace;
+- every capability an adopter is expected to supply is reachable from a config module, not only
+  from a directly constructed runtime object;
 - Aldus Core imports no adopter-specific implementation;
 
 ---
