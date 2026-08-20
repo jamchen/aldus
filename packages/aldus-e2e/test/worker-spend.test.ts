@@ -311,3 +311,138 @@ describe("a Worker declared free that charges anyway", () => {
     expect(records[0]?.authorizationId).toBeUndefined();
   });
 });
+
+describe("billing semantics, not array length", () => {
+  // `free` still states an amount. §19.3 forbids an amount-less charge, and here zero is a real
+  // numerical assertion — the provider is saying this cost nothing — rather than a stand-in for
+  // an unknown one.
+  const freeObservation: readonly CostObservation[] = [
+    {
+      provider: "provider-a",
+      operation: "render",
+      billingStatus: "free",
+      actual: { amount: "0.0000", currency: "USD" },
+    },
+  ];
+  const voidedObservation: readonly CostObservation[] = [
+    {
+      provider: "provider-a",
+      operation: "render",
+      billingStatus: "voided",
+      actual: { amount: "1.0000", currency: "USD" },
+    },
+  ];
+
+  it("a free declaration reporting a free charge is not an unauthorized charge", async () => {
+    // `free` is a provider stating that nothing is owed — evidence of no spend, not a violation.
+    // Branching on `costs.length > 0` recorded a Worker doing exactly what it was asked as an
+    // unauthorized charge.
+    const paying = payingWorker({ costs: freeObservation });
+    const result = await run({
+      spend: { expectation: { kind: "free" } },
+      worker: paying.worker,
+    });
+
+    expect(result.outcome).toBe("ok");
+  });
+
+  it("a free declaration reporting a voided charge is not an unauthorized charge", async () => {
+    const paying = payingWorker({ costs: voidedObservation });
+    const result = await run({
+      spend: { expectation: { kind: "free" } },
+      worker: paying.worker,
+    });
+
+    expect(result.outcome).toBe("ok");
+  });
+
+  it("a paid invocation reporting only free charges releases rather than settling", async () => {
+    // `settle` recognised all-`voided` as released and not all-`free`, so an execution that cost
+    // nothing was recorded as money spent and accounted for (ADR-0044).
+    const paying = payingWorker({ costs: freeObservation });
+    const result = await run({
+      spend: {
+        expectation: { kind: "estimated", amount: { amount: "1.0000", currency: "USD" } },
+        operation: OPERATION,
+        billingEffectKey: "render:take-1",
+      },
+      worker: paying.worker,
+    });
+
+    expect(result.outcome).toBe("ok");
+    const records = await costRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.billingStatus).toBe("free");
+  });
+});
+
+describe("one declared billing effect cannot cover several charges", () => {
+  it("refuses a plural independent-charge result and records every charge", async () => {
+    // One `billingEffectKey` commits one reservation. Settling two independent charges against it
+    // would let one approval cover both, which is what per-charge identity exists to prevent.
+    const paying = payingWorker({
+      costs: [
+        {
+          provider: "provider-a",
+          operation: "render",
+          billingStatus: "charged",
+          actual: { amount: "0.5000", currency: "USD" },
+        },
+        {
+          provider: "provider-b",
+          operation: "encode",
+          billingStatus: "charged",
+          actual: { amount: "0.2500", currency: "USD" },
+        },
+      ],
+    });
+    const result = await run({
+      spend: {
+        expectation: { kind: "estimated", amount: { amount: "1.0000", currency: "USD" } },
+        operation: OPERATION,
+        billingEffectKey: "render:take-1",
+      },
+      worker: paying.worker,
+    });
+
+    expect(result.outcome).not.toBe("ok");
+
+    // The money is already spent, so both charges are durable and attributed. What is withheld is
+    // the claim that one reservation covered them.
+    const records = await costRecords();
+    expect(records.map((record) => record.provider).sort()).toEqual(["provider-a", "provider-b"]);
+    expect(records.every((record) => record.authorizationId === grant.decisionId)).toBe(true);
+  });
+
+  it("accepts one charge alongside free observations", async () => {
+    // Free observations are not independent charges, so a result carrying one charge and two
+    // free lines is within the declared cardinality.
+    const paying = payingWorker({
+      costs: [
+        {
+          provider: "provider-a",
+          operation: "warmup",
+          billingStatus: "free",
+          actual: { amount: "0.0000", currency: "USD" },
+        },
+        {
+          provider: "provider-a",
+          operation: "render",
+          billingStatus: "charged",
+          actual: { amount: "0.5000", currency: "USD" },
+        },
+      ],
+    });
+    const result = await run({
+      spend: {
+        expectation: { kind: "estimated", amount: { amount: "1.0000", currency: "USD" } },
+        operation: OPERATION,
+        billingEffectKey: "render:take-1",
+      },
+      worker: paying.worker,
+    });
+
+    expect(result.outcome).toBe("ok");
+    expect(await costRecords()).toHaveLength(2);
+  });
+});

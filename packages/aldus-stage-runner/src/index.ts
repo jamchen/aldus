@@ -108,6 +108,9 @@ export {
   type RecordingWorkerOptions,
 } from "./doubles.js";
 
+export { isChargeBearing } from "./worker-spend.js";
+export { recordingSpendController, type RecordingSpendController } from "./doubles.js";
+
 export type {
   WorkerDispatchEvidence,
   WorkerSpendController,

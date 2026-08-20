@@ -126,9 +126,26 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
     return settled.costs;
   }
 
-  async markUnknown(reservation: WorkerSpendReservation, reason: string): Promise<void> {
+  async markUnknown(
+    reservation: WorkerSpendReservation,
+    reason: string,
+    observations: readonly CostObservation[] = [],
+  ): Promise<readonly CostRecord[]> {
     const held = this.#require(reservation);
-    await this.#spend.markUnknown(held.reservation, [], { reason });
+    // Records first, then the unresolved state — the same ordering settlement uses, and for the
+    // same reason: a reservation that stops describing the charge before the charge is durable
+    // leaves the money invisible.
+    const written = await this.#write(held.reservation, observations, {
+      ...(held.reservation.authorizationId === undefined
+        ? {}
+        : { authorizationId: held.reservation.authorizationId }),
+    });
+    await this.#spend.markUnknown(
+      held.reservation,
+      written.map((record) => record.costId),
+      { reason },
+    );
+    return written;
   }
 
   async releaseBeforeDispatch(reservation: WorkerSpendReservation, reason: string): Promise<void> {
@@ -146,6 +163,17 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
     },
     observations: readonly CostObservation[],
   ): Promise<readonly CostRecord[]> {
+    // No `authorizationId`, deliberately and permanently. Nothing authorized this, and a record
+    // naming a grant would make an unapproved charge look approved.
+    return this.#write(input, observations, {});
+  }
+
+  /** Write attributed records. Attribution is the Runtime's; the facts are the provider's. */
+  async #write(
+    input: { runId: string; stageId: string; attemptId: string; reservationId?: string },
+    observations: readonly CostObservation[],
+    attribution: { authorizationId?: string },
+  ): Promise<readonly CostRecord[]> {
     const recordedAt = this.#now().toISOString();
     const written: CostRecord[] = [];
     for (const observation of observations) {
@@ -156,8 +184,10 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
         runId: input.runId,
         stageId: input.stageId,
         attemptId: input.attemptId,
-        // No `authorizationId`, deliberately and permanently. Nothing authorized this, and a
-        // record naming a grant would make an unapproved charge look approved.
+        ...(input.reservationId === undefined ? {} : { reservationId: input.reservationId }),
+        ...(attribution.authorizationId === undefined
+          ? {}
+          : { authorizationId: attribution.authorizationId }),
         recordedAt,
       };
       await this.#costs.append(input.runId, record);

@@ -38,6 +38,7 @@ import {
 import type { EventStore, LockManager, RunStore } from "@aldus-runtime/file-store";
 
 import { assertCapabilities, type AgentBackend } from "./backend.js";
+import { isChargeBearing } from "./worker-spend.js";
 import type { WorkerSpendController, WorkerSpendReservation } from "./worker-spend.js";
 import {
   isGateRequiredSignal,
@@ -675,21 +676,27 @@ export class StageRunner {
 
         const paid = expectation.kind !== "free";
         const spendController = this.#options.workerSpend;
+        // Required for **every** Worker dispatch, not only a paid one. A free declaration is a
+        // belief about a provider, and the case that matters is when the belief is wrong: without
+        // a sink the unexpected charge has nowhere durable to go, and the refusal below used to
+        // tell the operator "the charge is recorded" while `recordUnauthorized` had silently done
+        // nothing. Refusing beforehand is the only way that message can be true.
+        if (spendController === undefined) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_SPEND_UNAVAILABLE,
+            `Stage "${definition.id}" invoked Worker "${request.workerId}" and no spend ` +
+              "controller is wired. A paid invocation could not be reserved, and a free one could " +
+              "not durably record a charge it did not expect — so neither can be dispatched " +
+              "truthfully (§13.2, §19.3).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { stageId: definition.id, workerId: request.workerId },
+            },
+          );
+        }
         let reservation: WorkerSpendReservation | undefined;
         if (paid) {
-          if (spendController === undefined) {
-            throw stageRunnerError(
-              StageRunnerErrorCodes.WORKER_SPEND_UNAVAILABLE,
-              `Stage "${definition.id}" invoked Worker "${request.workerId}" with a paid cost ` +
-                "expectation, and no spend controller is wired. Dispatching anyway would make " +
-                "the budget check depend on the configuration meant to enforce it (§13.2).",
-              {
-                category: "validation",
-                retryable: false,
-                details: { stageId: definition.id, workerId: request.workerId },
-              },
-            );
-          }
           const paidDeclaration = declaration as unknown as {
             operation: string;
             billingEffectKey: string;
@@ -716,7 +723,7 @@ export class StageRunner {
         const enforcesCeiling = workerCapabilities.enforcesSpendCeiling === true;
         const ceiling = reservation?.ceiling;
         const appliedCeiling = enforcesCeiling && ceiling !== undefined ? ceiling : undefined;
-        if (reservation !== undefined && spendController !== undefined) {
+        if (reservation !== undefined) {
           reservation = await spendController.prepareDispatch(reservation, {
             workerId: worker.id,
             workerVersion: worker.version,
@@ -766,7 +773,7 @@ export class StageRunner {
           // After `prepareDispatch` a failure is not proof of no charge (ADR-0044). The
           // reservation stays committed and the effect becomes non-retryable, because assuming a
           // failed request cost nothing is how a budget is quietly exceeded (§19.3).
-          if (reservation !== undefined && spendController !== undefined) {
+          if (reservation !== undefined) {
             await spendController.markUnknown(
               reservation,
               `Worker "${worker.id}@${worker.version}" threw after dispatch, so whether it was ` +
@@ -780,15 +787,57 @@ export class StageRunner {
         // straight back and read by nothing — a Worker that knew what it spent had its answer
         // discarded one line after the call (#107).
         const observations = result.costs ?? [];
-        if (reservation !== undefined && spendController !== undefined) {
+        // Billing semantics, not array length. `free` and `voided` are a provider stating that
+        // nothing is owed, which is evidence of no spend rather than a charge to account for — so
+        // a Worker that truthfully reports `billingStatus: "free"` is not diverging from a free
+        // declaration, and a paid one reporting only those has not gone silent about billing.
+        const charges = observations.filter((observation) =>
+          isChargeBearing(observation.billingStatus),
+        );
+        if (reservation !== undefined) {
+          // One `billingEffectKey` names one independently billed effect and commits one
+          // reservation for it. A result carrying several independent charges is a cardinality the
+          // declaration cannot describe, and settling them together would let one authorization
+          // cover N — exactly what per-charge identity exists to prevent (ADR-0043, ADR-0046).
+          //
+          // The money is already spent, so the facts are persisted and attributed and the
+          // reservation is retained unresolved. What is withheld is the claim that it covered them.
+          if (charges.length > 1) {
+            await spendController.markUnknown(
+              reservation,
+              `Worker "${worker.id}@${worker.version}" reported ${charges.length} independently ` +
+                "billed charges against one declared billing effect. One reservation authorizes " +
+                "one charge; declare one invocation per billed effect.",
+              observations,
+            );
+            throw stageRunnerError(
+              StageRunnerErrorCodes.WORKER_SPEND_CARDINALITY,
+              `Stage "${definition.id}" declared one billing effect for Worker "${worker.id}" ` +
+                `and it reported ${charges.length} independent charges. They are recorded and the ` +
+                "reservation is left unresolved: settling them against one authorization would " +
+                "let a single approval cover several charges (§13.2, §19.3).",
+              {
+                category: "conflict",
+                retryable: false,
+                details: { stageId: definition.id, workerId: worker.id },
+              },
+            );
+          }
+          // Silence, not "no charges". A result carrying only `free`/`voided` observations is a
+          // provider stating nothing is owed, and settlement releases on it; a result carrying
+          // nothing at all is a Worker that said nothing about billing, which is the unknown case.
           if (observations.length === 0) {
             // Dispatched under a reservation and came back saying nothing about billing. The
             // charge may have landed and nobody can measure it, so the reservation is retained
             // and the effect becomes non-retryable rather than being released as free (§19.3).
+            //
+            // A result carrying only `free`/`voided` observations does **not** reach here: that is
+            // a provider stating nothing is owed, which `settle` releases on.
             await spendController.markUnknown(
               reservation,
               `Worker "${worker.id}@${worker.version}" was dispatched under a paid expectation ` +
                 "and returned no billing facts, so whether it was charged is unknown.",
+              observations,
             );
             throw stageRunnerError(
               StageRunnerErrorCodes.WORKER_BILLING_UNKNOWN,
@@ -805,11 +854,11 @@ export class StageRunner {
           // Records are durable before authorization is released. The reverse would free the
           // budget while the charge is absent from the record (ADR-0044).
           await spendController.settle(reservation, observations);
-        } else if (observations.length > 0) {
+        } else if (charges.length > 0) {
           // Declared free and charged anyway. Recorded so §20 can answer what the Run cost, and
           // deliberately not attached to a grant: laundering it through one nobody consulted
           // would invent an approval.
-          await spendController?.recordUnauthorized(
+          await spendController.recordUnauthorized(
             {
               runId,
               stageId: definition.id,
@@ -817,7 +866,7 @@ export class StageRunner {
               workerId: worker.id,
               workerVersion: worker.version,
             },
-            observations,
+            charges,
           );
           throw stageRunnerError(
             StageRunnerErrorCodes.WORKER_SPEND_UNAUTHORIZED,

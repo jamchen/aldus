@@ -211,12 +211,11 @@ describe("a Worker invocation that expects to cost money (#107)", () => {
 
   it("refuses when the composition wired no spend controller, without dispatching", async () => {
     // The fail-closed half. A spend check skipped because its enforcer is absent is a check whose
-    // presence depends on the configuration it exists to enforce — and `makeTempRun` wires no
-    // controller, which is the composition an adopter has before they supply grants.
+    // presence depends on the configuration it exists to enforce.
     const worker = recordingWorker();
     const workers = new WorkerRegistry();
     workers.register(worker);
-    const temp = await makeTempRun({ workers });
+    const temp = await makeTempRun({ workers, workerSpend: false });
     temp.registry.register(paidStage());
 
     const result = await temp.runner.run(temp.manifest.runId, "stage-a", {});
@@ -250,6 +249,49 @@ describe("a Worker invocation that expects to cost money (#107)", () => {
 
     expect(result.status).toBe("failed");
     expect(result.error?.code).toBe(StageRunnerErrorCodes.WORKER_SPEND_UNDECLARED);
+    expect(worker.seen).toHaveLength(0);
+  });
+
+  it("refuses a *free* invocation with no cost sink, so the divergence message cannot lie", async () => {
+    // The narrower defect: a free declaration dispatched without a controller, and if the Worker
+    // charged, `recordUnauthorized` was an optional call that did nothing while the error told the
+    // operator "the charge is recorded". Refusing beforehand is the only way that sentence is true.
+    const worker = recordingWorker({
+      execute: () =>
+        Promise.resolve({
+          output: { ok: true },
+          costs: [
+            {
+              provider: "provider-a",
+              operation: "render",
+              billingStatus: "charged" as const,
+              actual: { amount: "1.0000", currency: "USD" },
+            },
+          ],
+        }),
+    });
+    const workers = new WorkerRegistry();
+    workers.register(worker);
+    const temp = await makeTempRun({ workers, workerSpend: false });
+    temp.registry.register(
+      aStage({
+        execute: async (context) => {
+          await context.runWorker({
+            workerId: "checksum",
+            workerVersion: "1",
+            input: {},
+            effect: { kind: "none" },
+            spend: { expectation: { kind: "free" } },
+          } as never);
+          return { kind: "completed", output: undefined };
+        },
+      }),
+    );
+
+    const result = await temp.runner.run(temp.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe(StageRunnerErrorCodes.WORKER_SPEND_UNAVAILABLE);
     expect(worker.seen).toHaveLength(0);
   });
 });

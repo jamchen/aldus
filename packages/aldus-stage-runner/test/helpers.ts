@@ -17,6 +17,7 @@ import { builders, createTestContext, type TestContext } from "@aldus-runtime/te
 import { z } from "zod";
 
 import type { AgentBackend, AgentCapabilities } from "../src/backend.js";
+import { recordingSpendController } from "../src/doubles.js";
 import type {
   ArtifactRecorder,
   StageDefinition,
@@ -73,6 +74,8 @@ export interface TempRunOptions {
   manifest?: { runId?: string; episodeId?: string };
   /** Workers a stage may invoke (ADR-0035). Omitted so the unwired refusal stays testable. */
   workers?: WorkerRegistry;
+  /** Pass `false` to omit the spend controller, exercising the unwired refusal. */
+  workerSpend?: false;
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -103,6 +106,12 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
     ...(options.backend !== undefined ? { backend: options.backend } : {}),
     ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
     ...(options.workers !== undefined ? { workers: options.workers } : {}),
+    // A Worker dispatch requires a cost sink, so a Worker that unexpectedly charges has somewhere
+    // durable to go (#107). Supplied by default because these tests are about other things; the
+    // refusal when one is absent has its own test.
+    ...(options.workers !== undefined && options.workerSpend !== false
+      ? { workerSpend: recordingSpendController() }
+      : {}),
     now: () => {
       clock += 1000;
       return new Date(clock);

@@ -133,6 +133,14 @@ export const StageRunnerErrorCodes = {
    * that nobody can measure, and re-running would spend again on the assumption it did not.
    */
   WORKER_BILLING_UNKNOWN: "ALDUS_WORKER_BILLING_UNKNOWN",
+  /**
+   * A Worker reported more independent charges than its declaration identified (§19.3, ADR-0043).
+   *
+   * One `billingEffectKey` names one billed effect and commits one reservation. Settling several
+   * independent charges against it would let one approval cover N. The charges are recorded and
+   * the reservation is left unresolved, because the money is already spent.
+   */
+  WORKER_SPEND_CARDINALITY: "ALDUS_WORKER_SPEND_CARDINALITY",
   /** The stage's retry budget was exhausted without a success (contract §19.1). */
   STAGE_RETRIES_EXHAUSTED: "ALDUS_STAGE_RETRIES_EXHAUSTED",
   /** Execution was cancelled by an operator or a supervising runtime (contract §19.1). */

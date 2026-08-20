@@ -91,6 +91,25 @@ always the Runtime's**, from what the grant authorized for this request. A capab
 enforce a ceiling" must never be read as "and here is the ceiling": a spender does not choose its
 own limit.
 
+### One invocation, one billed effect
+
+`billingEffectKey` names **one** independently billed charge and commits one reservation for it. A
+result carrying several independent charges is a cardinality the declaration cannot describe, and
+settling them together would let one authorization cover N — the thing per-charge identity exists
+to prevent.
+
+So it is validated rather than assumed. A plural result is refused: the charges are persisted and
+attributed, because the money is already spent and §20 must be able to answer what it was, and the
+reservation is retained unresolved. What is withheld is the claim that one reservation covered
+them. A Worker performing N billed effects declares N invocations.
+
+**Free and voided observations are not charges.** `free` is a provider stating that nothing is
+owed, and `voided` that it was reversed; both are evidence of no spend. Counting them meant a
+Worker truthfully reporting `billingStatus: "free"` against a free declaration was recorded as an
+unauthorized charge, and a paid one reporting only free lines looked like it had gone silent.
+`isChargeBearing` is the single predicate, so the settlement lifecycle and the divergence check
+cannot disagree.
+
 ### Outcomes
 
 - Billing facts returned → `CostRecord`s written **before** settlement, with Runtime attribution.
@@ -103,6 +122,16 @@ own limit.
 
 ## Consequences
 
+- **A cost sink is required for every Worker dispatch, not only a paid one.** A free declaration is
+  a belief about a provider, and the case that matters is when the belief is wrong. Without a sink
+  the unexpected charge has nowhere durable to go, and the refusal told the operator _"the charge
+  is recorded"_ while an optional `recordUnauthorized` call had silently done nothing. Refusing
+  before dispatch is the only way that sentence can be true. `recordingSpendController` ships from
+  `stage-runner` so a composition running only free Workers is not forced to write one.
+- **A second pre-existing defect, in the shared lifecycle.** `SpendService.settle` recognised
+  all-`voided` as released and not all-`free`, so an execution that cost nothing reached
+  `reservation.settled` — saying money was spent and accounted for when none was. Fixed in the
+  shared implementation, so it applies to the agent, synthesis and Worker paths at once.
 - **A pre-existing defect surfaced and is fixed here.** `SpendService.reserve` — ADR-0044's
   "single authoritative pre-dispatch decision" — never checked `grant.maxPerRequest`. Scope and
   remaining total were carried over from `checkSpend` and the per-request limit was left behind, so

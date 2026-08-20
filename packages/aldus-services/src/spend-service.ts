@@ -12,6 +12,7 @@ import {
   reduceReservations,
   newSpendReservationId,
   SCHEMA_VERSION,
+  type BillingStatus,
   type CostExpectation,
   type CostObservation,
   type CostRecord,
@@ -50,6 +51,24 @@ import { ServiceErrorCodes, serviceError } from "./errors.js";
  * layer (#107). Nothing that imported it from here has to change.
  */
 export type { CostExpectation };
+
+/**
+ * Whether a billing status is evidence that **no** charge occurred (§19.3).
+ *
+ * `free` and `voided` are the two, and they are evidence rather than an absence of it: a provider
+ * saying "this was free" and one saying "this was reversed" both establish that nothing is owed.
+ * Everything else — `charged`, `estimated`, `unknown` — leaves money either spent or unaccounted
+ * for.
+ *
+ * Shared so the settlement lifecycle and the unauthorized-divergence check answer the question the
+ * same way. They disagreed: settlement released only on `voided`, so an all-`free` execution
+ * settled — saying money was spent and accounted for when none was — and the free-declaration
+ * check treated any non-empty observation array as a violation, so a Worker declared free that
+ * truthfully reported `billingStatus: "free"` was recorded as an unauthorized charge.
+ */
+export function isUncharged(status: BillingStatus): boolean {
+  return status === "free" || status === "voided";
+}
 
 /** What the caller states before a paid effect. */
 export interface ReserveInput {
@@ -294,10 +313,13 @@ export class SpendService {
       written.push(record);
     }
 
+    // `released` means no charge occurred, and `free` is evidence of exactly that — the same
+    // evidence `voided` is. Recognising only `voided` settled an all-free execution, which says
+    // money was spent and accounted for when none was (ADR-0044).
     const unknown = written.some((record) => record.billingStatus === "unknown");
     const kind: SpendTransitionKind = unknown
       ? "reservation.billing_unknown"
-      : written.length === 0 || written.every((record) => record.billingStatus === "voided")
+      : written.length === 0 || written.every((record) => isUncharged(record.billingStatus))
         ? "reservation.released"
         : "reservation.settled";
 

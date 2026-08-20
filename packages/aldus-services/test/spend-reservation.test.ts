@@ -458,3 +458,101 @@ describe("9/10. ordering", () => {
     expect(costs.records).toHaveLength(1);
   });
 });
+
+describe("an execution that cost nothing releases rather than settling", () => {
+  /**
+   * `free` and `voided` are both a provider stating that nothing is owed.
+   *
+   * `settle` recognised only `voided`, so an all-`free` execution reached `reservation.settled` —
+   * which says money was spent and accounted for when none was. The lifecycle only ever had one
+   * meaning for `released`, and this is it (ADR-0044).
+   *
+   * The fix lives in `SpendService`, so it applies to every paid path at once. These cover the
+   * shared implementation; `packages/aldus-e2e/test/worker-spend.test.ts` covers the Worker path
+   * through the composed stack, and `synthesis.test.ts` the synthesis one.
+   */
+  async function settleWith(billingStatus: "free" | "voided", effectKey: string) {
+    const { spend, costs } = services();
+    const outcome = await spend.reserve({
+      ...reserveInput,
+      effectKey,
+      grant: grant(),
+      expectation: { kind: "estimated", amount: { amount: "1.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+    const settled = await spend.settle(
+      prepared,
+      [
+        {
+          provider: "provider-a",
+          operation: "completion",
+          billingStatus,
+          // Stated, not omitted: §19.3 forbids an amount-less charge, and here zero is a real
+          // assertion rather than a stand-in for an unknown amount.
+          actual: { amount: "0.0000", currency: "USD" },
+        },
+      ],
+      {},
+    );
+    return { settled, costs };
+  }
+
+  it("releases when every observation is free", async () => {
+    const { settled } = await settleWith("free", "effect-all-free");
+    expect(settled.reservation.status).toBe("released");
+  });
+
+  it("releases when every observation is voided", async () => {
+    const { settled } = await settleWith("voided", "effect-all-voided");
+    expect(settled.reservation.status).toBe("released");
+  });
+
+  it("still records the observation, so §20 can answer what happened", async () => {
+    // Released is not "nothing happened". The provider was called and said it cost nothing, and
+    // that is a fact the trace has to carry.
+    const { settled } = await settleWith("free", "effect-free-recorded");
+    expect(settled.costs).toHaveLength(1);
+    expect(settled.costs[0]?.billingStatus).toBe("free");
+  });
+
+  it("settles when one observation is free and another is charged", async () => {
+    const { spend } = services();
+    const outcome = await spend.reserve({
+      ...reserveInput,
+      effectKey: "effect-mixed-free",
+      grant: grant(),
+      expectation: { kind: "estimated", amount: { amount: "1.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+    const settled = await spend.settle(
+      prepared,
+      [
+        {
+          provider: "provider-a",
+          operation: "warmup",
+          billingStatus: "free",
+          actual: { amount: "0.0000", currency: "USD" },
+        },
+        {
+          provider: "provider-a",
+          operation: "completion",
+          billingStatus: "charged",
+          actual: { amount: "0.5000", currency: "USD" },
+        },
+      ],
+      {},
+    );
+
+    expect(settled.reservation.status).toBe("settled");
+  });
+});

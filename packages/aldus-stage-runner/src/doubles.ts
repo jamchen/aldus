@@ -15,6 +15,10 @@
  * is attributable.
  */
 
+import { SCHEMA_VERSION, type CostObservation, type CostRecord } from "@aldus-runtime/core";
+
+import type { WorkerSpendController, WorkerSpendReserveInput } from "./worker-spend.js";
+
 import type { Worker, WorkerCapabilities, WorkerRequest, WorkerResult } from "./worker.js";
 
 /** A Worker that records every invocation, for asserting what the runtime supplied. */
@@ -113,5 +117,73 @@ export function cancellableWorker(options: { id?: string; version?: string } = {
           { once: true },
         );
       }),
+  };
+}
+
+/** A spend controller that records rather than reserves, for tests and for free-only wirings. */
+export interface RecordingSpendController extends WorkerSpendController {
+  /** Every cost record it was asked to persist, in order. */
+  readonly written: CostRecord[];
+  /** Reservations it committed. */
+  readonly reserved: WorkerSpendReserveInput[];
+  /** Reasons it was asked to mark a reservation unresolved. */
+  readonly unknown: string[];
+}
+
+/**
+ * An in-memory {@link WorkerSpendController} that authorizes everything and records what happens.
+ *
+ * Exists because a Worker dispatch now requires a cost sink — a free declaration is a belief about
+ * a provider, and without somewhere durable to put an unexpected charge the runtime cannot
+ * truthfully say it recorded one. A composition running only free Workers still needs a sink, and
+ * writing one per test would make each test carry the wiring rather than the case under test.
+ *
+ * **Not a budget.** It reserves whatever it is asked for, so it proves nothing about
+ * authorization; the composed tests do that against the real `SpendService`.
+ */
+export function recordingSpendController(): RecordingSpendController {
+  const written: CostRecord[] = [];
+  const reserved: WorkerSpendReserveInput[] = [];
+  const unknown: string[] = [];
+  let next = 0;
+
+  const write = (
+    reservationId: string | undefined,
+    observations: readonly CostObservation[],
+  ): readonly CostRecord[] => {
+    const records = observations.map((observation) => {
+      next += 1;
+      return {
+        ...observation,
+        schemaVersion: SCHEMA_VERSION,
+        costId: `cost_${String(next).padStart(4, "0")}`,
+        runId: "run",
+        stageId: "stage",
+        attemptId: "attempt",
+        ...(reservationId === undefined ? {} : { reservationId }),
+        recordedAt: "2026-01-01T00:00:00.000Z",
+      } as CostRecord;
+    });
+    written.push(...records);
+    return records;
+  };
+
+  return {
+    written,
+    reserved,
+    unknown,
+    reserve: (input) => {
+      reserved.push(input);
+      return Promise.resolve({ reservationId: `res_${String(reserved.length)}` });
+    },
+    prepareDispatch: (reservation) => Promise.resolve(reservation),
+    settle: (reservation, observations) =>
+      Promise.resolve(write(reservation.reservationId, observations)),
+    markUnknown: (reservation, reason, observations = []) => {
+      unknown.push(reason);
+      return Promise.resolve(write(reservation.reservationId, observations));
+    },
+    releaseBeforeDispatch: () => Promise.resolve(),
+    recordUnauthorized: (_input, observations) => Promise.resolve(write(undefined, observations)),
   };
 }

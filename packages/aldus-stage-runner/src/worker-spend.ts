@@ -20,7 +20,7 @@
  * refuse a paid invocation without depending upward (§4.3).
  */
 
-import type { CostObservation, CostRecord, Money } from "@aldus-runtime/core";
+import type { BillingStatus, CostObservation, CostRecord, Money } from "@aldus-runtime/core";
 
 /** A committed reservation, as the runner holds it. Opaque beyond what dispatch needs. */
 export interface WorkerSpendReservation {
@@ -101,7 +101,19 @@ export interface WorkerSpendController {
    * reports. Both mean a charge may have landed that nobody can measure, and re-running would
    * spend again on the assumption it did not.
    */
-  markUnknown(reservation: WorkerSpendReservation, reason: string): Promise<void>;
+  markUnknown(
+    reservation: WorkerSpendReservation,
+    reason: string,
+    /**
+     * Billing facts to persist before the reservation is marked unresolved.
+     *
+     * For the case where charges are known to have happened and the reservation cannot settle
+     * them — a result carrying several independent charges against one reserved effect. The money
+     * is real and §20 must be able to answer what it was, so the records are written and
+     * attributed; what is withheld is the claim that one reservation covered them.
+     */
+    observations?: readonly CostObservation[],
+  ): Promise<readonly CostRecord[]>;
 
   /**
    * Release a reservation whose effect provably did not begin.
@@ -127,4 +139,18 @@ export interface WorkerSpendController {
     },
     observations: readonly CostObservation[],
   ): Promise<readonly CostRecord[]>;
+}
+
+/**
+ * Whether a billing status is evidence that **no** charge occurred (§19.3).
+ *
+ * `free` and `voided` are the two, and they are evidence rather than an absence of it. Everything
+ * else — `charged`, `estimated`, `unknown` — leaves money either spent or unaccounted for.
+ *
+ * The runner needs this to tell a Worker that truthfully reported "this was free" from one that
+ * charged against a free declaration. Branching on `costs.length > 0` conflated them, so a Worker
+ * doing exactly what it was asked was recorded as an unauthorized charge.
+ */
+export function isChargeBearing(status: BillingStatus): boolean {
+  return status !== "free" && status !== "voided";
 }
