@@ -392,6 +392,18 @@ export const takeRecordSchema = z
      * number to keep reconciled with the one budgets are actually computed from.
      */
     costRecordId: z.string().min(1).max(200).optional(),
+    /**
+     * Every cost record attributed to this take (§19.3; #160).
+     *
+     * One synthesis may report more than one billing observation — a provider that charges for
+     * characters and for a model separately reports two — so the canonical link cannot be
+     * singular. {@link costRecordId} stays readable for records written before this, and is not
+     * the writer contract for new ones.
+     *
+     * Runtime-supplied, with `CostRecord.takeId` as the other direction: reconciliation starts
+     * from whichever record survived.
+     */
+    costIds: z.array(z.string().min(1).max(200)).max(256).optional(),
     /** How the spend was authorized (contract §13.2). Absent for an unpaid or local take. */
     authorization: takeAuthorizationSchema.optional(),
     /**

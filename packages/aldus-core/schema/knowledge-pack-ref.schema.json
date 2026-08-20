@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.9:KnowledgePackRef",
+  "$id": "urn:aldus:schema:1.10:KnowledgePackRef",
   "type": "object",
   "properties": {
     "packId": {

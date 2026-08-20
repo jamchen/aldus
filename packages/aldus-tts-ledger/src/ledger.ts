@@ -259,7 +259,10 @@ export class TtsLedger {
    * Returns a refusal rather than throwing: a caller needs to *display* why synthesis is blocked,
    * and an operator staring at a halted production wants the explanation, not a stack trace.
    */
-  async permitSynthesis(plan: TtsRequestPlan): Promise<SynthesisPermission> {
+  async permitSynthesis(
+    plan: TtsRequestPlan,
+    options: { excludeCostIds?: readonly string[] } = {},
+  ): Promise<SynthesisPermission> {
     if (this.#authorizer === undefined) {
       return {
         permitted: false,
@@ -276,6 +279,9 @@ export class TtsLedger {
       planScopeSha256: planScopeDigest(plan),
       subjectDigests: planSubjectDigests(plan),
       ...(plan.estimatedTotal === undefined ? {} : { estimatedCost: plan.estimatedTotal }),
+      ...(options.excludeCostIds === undefined || options.excludeCostIds.length === 0
+        ? {}
+        : { excludeCostIds: options.excludeCostIds }),
     });
 
     if (!outcome.authorized) return { permitted: false, explanation: outcome.explanation };
@@ -553,7 +559,19 @@ export class TtsLedger {
       );
     }
 
-    const permission = await this.permitSynthesis(plan);
+    // Re-checked here, but **not** against this take's own charge.
+    //
+    // A charge of unknown size makes a grant indeterminate (§19.3, #150), and the charge being
+    // attributed to this take is written before the take is recorded (#160). Checking the grant as
+    // it stands *including* that charge means every unknown-money charge blocks the recording of
+    // its own take: the guard refuses the fact that triggered it, and the charge is left durable
+    // with nothing attributing it.
+    //
+    // What this check is for is preventing *new* spend against an indeterminate grant. A take is a
+    // record of spend that already happened, so it is not the thing being prevented.
+    const permission = await this.permitSynthesis(plan, {
+      excludeCostIds: take.costIds ?? [],
+    });
     if (!permission.permitted) {
       throw ttsLedgerError(
         TtsLedgerErrorCodes.UNAUTHORIZED_CHARGE,
