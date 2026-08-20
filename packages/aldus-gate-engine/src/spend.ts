@@ -11,7 +11,7 @@
  * `GateDecision` stores only digests. Carrying the limit in a record beside the decision would
  * let someone raise the ceiling without touching the approval.
  *
- * So a grant does both: it holds the values, and {@link grantLimitsDigest} is included among the
+ * So a grant does both: it holds the values, and {@link grantTermsDigest} is included among the
  * gate's bound subjects. Raising a limit changes that digest, which drifts from `subjectHashes`,
  * which voids the authorization exactly as §13.2 requires. The ceiling cannot move without an
  * operator re-approving it.
@@ -59,6 +59,20 @@ export interface SpendGrant {
    * back to the approval that permitted it (§19.3 "explicit spend authorization").
    */
   decisionId: string;
+  /**
+   * What this grant authorizes spending **on** (§13.2, §4.2).
+   *
+   * Operation names are adopter-defined open strings — `"agent.execute"`, `"tts.synthesize"`.
+   * Core names none.
+   *
+   * Present so that handing the wrong grant to an execution gateway cannot authorize an unrelated
+   * operation. Without it, "a grant" is a pool of money with no statement about what it is for,
+   * and the only thing keeping agent spend out of a synthesis ledger is which `decisionId` each
+   * happened to carry.
+   */
+  scope: {
+    operations: readonly string[];
+  };
   /** Maximum total spend authorized across the Run (§13.2 "maximum authorized cost"). */
   maxTotal: Money;
   /** Maximum spend authorized for any single request (§19.3 "per-request ... limits"). */
@@ -66,13 +80,20 @@ export interface SpendGrant {
 }
 
 /**
- * The digest a gate must bind for the grant's limits to be tamper-evident.
+ * The digest a gate must bind for the grant's **terms** to be tamper-evident (§13.2).
  *
- * Only the limits are digested, not the grant's identity: re-issuing an identical ceiling under a
- * new `grantId` should not read as the operator having approved something different.
+ * Was `grantTermsDigest`, covering the ceilings alone. Scope is now a term too: changing a grant
+ * from agent-only to TTS-capable widens what an approval permits exactly as raising its ceiling
+ * does, and an approval that survives that change did not bind what it appeared to bind.
+ *
+ * Only the terms are digested, not the grant's identity: re-issuing an identical grant under a new
+ * `grantId` should not read as the operator having approved something different.
  */
-export function grantLimitsDigest(grant: SpendGrant): string {
+export function grantTermsDigest(grant: SpendGrant): string {
   return digestSubjectValue({
+    // Sorted, because the *set* of authorized operations is the term, not the order an adopter
+    // listed them in — the same reason ADR-0033 sorts release input hashes.
+    scope: { operations: [...grant.scope.operations].sort() },
     maxTotal: grant.maxTotal,
     maxPerRequest: grant.maxPerRequest ?? null,
   });
@@ -253,9 +274,10 @@ export function availableAuthorization(
   const currency = grant.maxTotal.currency;
   const ledger = computeLedger(grant, costs);
 
-  const mine = reservations.filter(
-    (reservation) => reservation.authorizationId === grant.decisionId,
-  );
+  // Per grant, never per decision. The grant is the budget pool; the decision is who authorized
+  // its terms. One decision may establish several grants — an episode-level ceiling above an agent
+  // grant and a TTS grant — and deriving availability per decision would silently aggregate them.
+  const mine = reservations.filter((reservation) => reservation.grantId === grant.grantId);
   const active = mine.filter(reservationIsActive);
 
   // Settled reservations are already represented by the cost records that settled them. Counting
@@ -289,6 +311,9 @@ export function availableAuthorization(
       .filter((reservation) => reservationExposureIsBounded(reservation))
       .map((reservation) => reservation.reservationId),
   );
+  // `computeLedger` filters cost records by `authorizationId`, which is the legacy link and stays
+  // correct: a record written before reservations existed has no `reservationId` to reach a grant
+  // through, and its decision is the only thing tying it to an authorization (#155).
   const unreservedUnknownCharges = ledger.counted.filter(
     (record) =>
       isUnresolvedUnknownCharge(record) &&
@@ -308,6 +333,36 @@ export function availableAuthorization(
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([code, money]) => [code, money.amount]),
     ),
+  };
+}
+
+/** Why a grant does not authorize an operation. */
+export interface SpendScopeRefusal {
+  operation: string;
+  authorized: readonly string[];
+  explanation: string;
+}
+
+/**
+ * Whether a grant authorizes an operation (§13.2, §4.2; #155).
+ *
+ * Checked before reserving, so handing the wrong grant to an execution gateway cannot authorize
+ * unrelated work. Without it a grant is a pool of money with no statement about what it is for,
+ * and the only thing separating agent spend from a synthesis ledger is which decision each
+ * happened to name.
+ */
+export function checkSpendScope(
+  grant: SpendGrant,
+  operation: string,
+): SpendScopeRefusal | undefined {
+  if (grant.scope.operations.includes(operation)) return undefined;
+  return {
+    operation,
+    authorized: [...grant.scope.operations],
+    explanation:
+      `Grant "${grant.grantId}" authorizes ${grant.scope.operations.map((entry) => `"${entry}"`).join(", ") || "nothing"} ` +
+      `and this operation is "${operation}". A grant states what it may be spent on as well as ` +
+      "how much, so passing the wrong one to a gateway cannot authorize unrelated work (§13.2).",
   };
 }
 

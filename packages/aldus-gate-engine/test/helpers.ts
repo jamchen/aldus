@@ -12,7 +12,7 @@ import { SCHEMA_VERSION } from "@aldus-runtime/core";
 
 import { digestBytes, type GateSubject } from "../src/binding.js";
 import type { GateDefinition } from "../src/definition.js";
-import { SPEND_LIMIT_SUBJECT_KEY, grantLimitsDigest, type SpendGrant } from "../src/spend.js";
+import { SPEND_LIMIT_SUBJECT_KEY, grantTermsDigest, type SpendGrant } from "../src/spend.js";
 
 export const RUN_ID = "run-a";
 export const EPISODE_ID = "show:example-show:episode:episode-a";
@@ -111,7 +111,7 @@ export function standardSubjects(
   const spendSubject: GateSubject =
     grant === undefined
       ? subject(SPEND_LIMIT_SUBJECT_KEY, value(SPEND_LIMIT_SUBJECT_KEY))
-      : { key: SPEND_LIMIT_SUBJECT_KEY, sha256: grantLimitsDigest(grant) };
+      : { key: SPEND_LIMIT_SUBJECT_KEY, sha256: grantTermsDigest(grant) };
 
   return {
     [CONTENT_FREEZE]: [
@@ -152,6 +152,7 @@ export function grantFor(decisionId: string, maxTotal: string, maxPerRequest?: s
     runId: RUN_ID,
     gateId: PERFORMANCE_FREEZE,
     decisionId,
+    scope: { operations: ["tts.synthesize"] },
     maxTotal: money(maxTotal),
     ...(maxPerRequest !== undefined ? { maxPerRequest: money(maxPerRequest) } : {}),
   };

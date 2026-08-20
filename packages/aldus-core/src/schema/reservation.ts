@@ -90,12 +90,33 @@ export const spendReservationSchema = z
     /** Identity of this reservation. */
     reservationId: nonEmptyString,
     /**
-     * The `GateDecision` whose grant this draws on (contract §13.2).
+     * The budget pool whose headroom this consumes (contract §19.3).
      *
-     * The contended resource, and therefore the lease scope: two Runs against one authorization
-     * compete for the same headroom, two Runs against different authorizations do not.
+     * **The contended resource, and therefore the lease and partition key.** Two reservations
+     * against one grant compete for the same headroom; two against different grants do not, even
+     * when one human decision authorized both.
+     *
+     * Distinct from {@link authorizationId} on purpose. Treating the decision as the ledger
+     * partition would make one `GateDecision` mean one budget pool — an implementation shortcut
+     * hardened into a workflow restriction, and the mechanism by which an unresolved agent charge
+     * would quietly reduce what synthesis may spend.
+     */
+    grantId: nonEmptyString,
+    /**
+     * The `GateDecision` that authorized the terms (contract §13.2).
+     *
+     * Provenance, not partition: it answers *who permitted this*, and `CostRecord.authorizationId`
+     * carries the same value. It is deliberately **not** what availability is derived per.
      */
     authorizationId: nonEmptyString,
+    /**
+     * What this reservation is for, e.g. `"agent.execute"` (§4.2).
+     *
+     * Checked against the grant's declared scope before reserving, so passing the wrong grant to
+     * an execution gateway cannot authorize an unrelated operation. An open string — Core names no
+     * operations.
+     */
+    operation: nonEmptyString,
     /** Run this reservation belongs to (contract §6.2). */
     runId: nonEmptyString,
     /** Stage that will incur the cost. */

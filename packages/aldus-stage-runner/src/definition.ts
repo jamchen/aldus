@@ -393,6 +393,24 @@ export interface EffectKeyContext {
  * reproducible rather than because re-running has an external effect — §15.1's retry refusal is
  * right for the second and merely conservative for the first.
  */
+/**
+ * **Retry safety and retry policy are different questions.** Answer both.
+ *
+ * 1. Is re-execution safe with respect to external effects? — {@link StageRetrySafety}
+ * 2. Should Aldus automatically retry this operation? — {@link StageDefinition.retryPolicy}
+ *
+ * A twenty-minute renderer may truthfully declare `no_external_effects` and keep
+ * `maxAttempts: 1`. That states the semantics accurately while preserving production behaviour:
+ * manual re-running stays possible, and automatic re-rendering does not begin merely because a
+ * declaration became more precise.
+ *
+ * This matters because the arms below describe a class of stage that declares `not_idempotent` for
+ * the wrong reason — an adopter reported nine of thirteen, several because the stage's *output* is
+ * not reproducible rather than because re-running touches anything outside the workspace.
+ * Describing that class is not a recommendation to reclassify it. **A declaration migration must
+ * not silently change production retry behaviour**, and reclassifying without pinning
+ * `maxAttempts` does exactly that.
+ */
 export type StageRetrySafety =
   | {
       /**

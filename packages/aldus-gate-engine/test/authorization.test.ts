@@ -16,7 +16,7 @@ import { GateEngine } from "../src/engine.js";
 import { GateRegistry } from "../src/definition.js";
 import { GateEngineErrorCodes } from "../src/errors.js";
 import { MemoryGateDecisionStore, MemoryGateEventSink } from "../src/ports.js";
-import { SPEND_LIMIT_SUBJECT_KEY, grantLimitsDigest } from "../src/spend.js";
+import { SPEND_LIMIT_SUBJECT_KEY, grantTermsDigest } from "../src/spend.js";
 import {
   AGENT,
   AT,
@@ -405,17 +405,17 @@ describe("the spend limit subject key", () => {
     const a = grantFor("dec-1", "10.00");
     const b = { ...a, grantId: "grant-b" };
     // Re-issuing the same ceiling must not read as the operator approving something different.
-    expect(grantLimitsDigest(a)).toBe(grantLimitsDigest(b));
+    expect(grantTermsDigest(a)).toBe(grantTermsDigest(b));
     expect(SPEND_LIMIT_SUBJECT_KEY).toBe("spendLimit");
   });
 
   it("changes when either limit changes", () => {
     const base = grantFor("dec-1", "10.00");
-    expect(grantLimitsDigest({ ...base, maxTotal: money("10.01") })).not.toBe(
-      grantLimitsDigest(base),
+    expect(grantTermsDigest({ ...base, maxTotal: money("10.01") })).not.toBe(
+      grantTermsDigest(base),
     );
-    expect(grantLimitsDigest({ ...base, maxPerRequest: money("1.00") })).not.toBe(
-      grantLimitsDigest(base),
+    expect(grantTermsDigest({ ...base, maxPerRequest: money("1.00") })).not.toBe(
+      grantTermsDigest(base),
     );
   });
 });

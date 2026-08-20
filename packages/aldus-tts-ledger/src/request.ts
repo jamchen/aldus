@@ -298,7 +298,7 @@ export function planSpokenTextDigest(plan: TtsRequestPlan): string {
  * Digest of the plan itself: parameters and segment scope (contract §13.2).
  *
  * Deliberately excludes `planId` and `createdAt`. Rebuilding an identical plan should not read as
- * the operator having approved something different — the same reasoning `grantLimitsDigest`
+ * the operator having approved something different — the same reasoning `grantTermsDigest`
  * follows in the gate engine — and a timestamp that voided an approval would make re-planning
  * after a restart require re-approval for no reason.
  *

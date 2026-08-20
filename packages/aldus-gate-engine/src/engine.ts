@@ -35,7 +35,7 @@ import { GateEngineErrorCodes, gateEngineError } from "./errors.js";
 import type { CostReader, GateDecisionStore, GateEventSink } from "./ports.js";
 import {
   checkSpend,
-  grantLimitsDigest,
+  grantTermsDigest,
   type SpendCheck,
   type SpendGrant,
   type SpendRequest,
@@ -551,7 +551,7 @@ export class GateEngine {
       };
     }
 
-    if (!decision.subjectHashes.includes(grantLimitsDigest(grant))) {
+    if (!decision.subjectHashes.includes(grantTermsDigest(grant))) {
       return {
         authorized: false,
         statuses: [status],
