@@ -34,7 +34,7 @@ import {
   type SynthesisAdapter,
   type WorkflowGraph,
 } from "@aldus-runtime/services";
-import { StageRegistry } from "@aldus-runtime/stage-runner";
+import { StageRegistry, type AgentBackend, type WorkerRegistry } from "@aldus-runtime/stage-runner";
 import type {
   PerformanceScript,
   RecordTakeInput,
@@ -114,6 +114,10 @@ export interface CliEnvironment {
    * a stage's own `requiredGates` still applies and behaviour is unchanged.
    */
   workflow?: WorkflowGraph;
+  /** Workers a stage may invoke, from the config or injected by a test (§4.1, ADR-0035). */
+  workers?: WorkerRegistry;
+  /** The agent backend stage executions run through (§10). */
+  agentBackend?: AgentBackend;
   /** Clock, injectable for deterministic tests. */
   now?: () => Date;
 }
@@ -307,6 +311,12 @@ async function withConfig(
     ...(environment.workflow === undefined && config.workflow !== undefined
       ? { workflow: config.workflow }
       : {}),
+    ...(environment.workers === undefined && config.workers !== undefined
+      ? { workers: config.workers }
+      : {}),
+    ...(environment.agentBackend === undefined && config.agentBackend !== undefined
+      ? { agentBackend: config.agentBackend }
+      : {}),
   };
 }
 
@@ -401,6 +411,8 @@ function servicesFor(options: CommonOptions, environment: CliEnvironment): Aldus
     ...(environment.spendGrants !== undefined ? { spendGrants: environment.spendGrants } : {}),
     ...(environment.archive !== undefined ? { archive: environment.archive } : {}),
     ...(environment.workflow !== undefined ? { workflow: environment.workflow } : {}),
+    ...(environment.workers !== undefined ? { workers: environment.workers } : {}),
+    ...(environment.agentBackend !== undefined ? { backend: environment.agentBackend } : {}),
     ...(environment.now !== undefined ? { now: environment.now } : {}),
   });
   return new AldusServices(context);

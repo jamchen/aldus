@@ -34,6 +34,7 @@ import {
   StageRunner,
   createStageRunner,
   type AgentBackend,
+  type WorkerRegistry,
 } from "@aldus-runtime/stage-runner";
 import { TtsLedger, type SpendAuthorizer, type TtsRequestPlan } from "@aldus-runtime/tts-ledger";
 
@@ -92,6 +93,14 @@ export interface AldusContextOptions {
   actor?: ActorRef;
   /** Backend whose capabilities gate stage execution (contract §10). */
   backend?: AgentBackend;
+  /**
+   * Workers a stage may invoke through `StageContext.runWorker` (§4.1, ADR-0035).
+   *
+   * Held here rather than only on the runner because this is the composition root: an option a
+   * runner accepts but a composition cannot supply is a capability no adopter can reach, which is
+   * #67 and the reason this field exists at all.
+   */
+  workers?: WorkerRegistry;
   /** Current digests of what gates bind. Defaults to supplying none. */
   subjects?: SubjectsProvider;
   /** Clock, injectable so tests produce reproducible timestamps. */
@@ -126,6 +135,7 @@ export class AldusContext {
   readonly gates: GateEngine;
   readonly actor: ActorRef | undefined;
   readonly backend: AgentBackend | undefined;
+  readonly workers: WorkerRegistry | undefined;
   readonly subjectsFor: SubjectsProvider;
   readonly now: () => Date;
 
@@ -172,6 +182,7 @@ export class AldusContext {
     this.workflow = options.workflow;
     this.actor = options.actor;
     this.backend = options.backend;
+    this.workers = options.workers;
     this.subjectsFor = options.subjects ?? (() => Promise.resolve({}));
     this.now = options.now ?? (() => new Date());
     this.#synthesisAdapter = options.synthesisAdapter;
@@ -249,6 +260,7 @@ export class AldusContext {
       // the refusal softened.
       artifacts: stageArtifactRecorder(this.artifacts),
       ...(this.backend !== undefined ? { backend: this.backend } : {}),
+      ...(this.workers !== undefined ? { workers: this.workers } : {}),
       now: this.now,
     });
   }

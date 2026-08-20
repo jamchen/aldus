@@ -31,6 +31,11 @@ export {
   type StageRunResult,
   type StageSchema,
   type StageSchemaResult,
+  deriveInvocationKey,
+  type EffectKeyContext,
+  type StageEvaluationChannel,
+  type StageEvaluationDeclaration,
+  type StageWorkerRequest,
 } from "./definition.js";
 
 export {
@@ -71,3 +76,13 @@ export {
 } from "./state.js";
 
 export { STAGE_STATE_FILE, stageStatePathFor, createStageRunner } from "./workspace.js";
+
+export {
+  WorkerRegistry,
+  assertWorkerCapabilities,
+  type Worker,
+  type WorkerCapabilities,
+  type WorkerRef,
+  type WorkerRequest,
+  type WorkerResult,
+} from "./worker.js";

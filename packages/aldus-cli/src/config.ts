@@ -31,7 +31,12 @@ import type {
   WorkflowGraph,
   WorkflowStageNode,
 } from "@aldus-runtime/services";
-import { StageRegistry, type StageDefinition } from "@aldus-runtime/stage-runner";
+import {
+  StageRegistry,
+  type AgentBackend,
+  type StageDefinition,
+  type WorkerRegistry,
+} from "@aldus-runtime/stage-runner";
 
 /**
  * What the CLI knows about this invocation when it loads a config module.
@@ -121,6 +126,22 @@ export interface AldusConfig {
    * cannot select by `workflowId` on its behalf.
    */
   workflow?: WorkflowGraph;
+  /**
+   * Workers a stage may invoke (§3.2, §4.1; ADR-0035).
+   *
+   * Present because a seam a composition cannot reach is not a seam. The Worker contract, its
+   * registry and the `StageContext.runWorker` path all shipped before this field existed, and an
+   * adopter could write a Worker that nothing in their pipeline could invoke — every path to a
+   * Stage runs through this file (#121).
+   */
+  workers?: WorkerRegistry;
+  /**
+   * The agent backend a stage's executions run through (§10, §4.1).
+   *
+   * `AldusContext` has accepted a backend since it was written; nothing could supply one from a
+   * config, so the option existed and no adopter could use it. Same gap as `workers`, older.
+   */
+  agentBackend?: AgentBackend;
 }
 
 /**
