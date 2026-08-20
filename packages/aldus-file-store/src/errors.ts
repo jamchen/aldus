@@ -39,6 +39,12 @@ export const FileStoreErrorCodes = {
   LOCK_TIMEOUT: "ALDUS_LOCK_TIMEOUT",
   /** A lock was released or renewed by something that no longer holds it. */
   LOCK_LOST: "ALDUS_LOCK_LOST",
+  /** A reservation transition does not satisfy its schema (ADR-0044). */
+  RESERVATION_TRANSITION_INVALID: "ALDUS_RESERVATION_TRANSITION_INVALID",
+  /** One transition id was reused for a different fact (ADR-0044). */
+  RESERVATION_TRANSITION_CONFLICT: "ALDUS_RESERVATION_TRANSITION_CONFLICT",
+  /** A reservation stream has a gap, which no correct writer can produce (ADR-0044). */
+  RESERVATION_STREAM_CORRUPT: "ALDUS_RESERVATION_STREAM_CORRUPT",
   /**
    * A lock was re-acquired inside a scope that already holds it.
    *
