@@ -144,6 +144,26 @@ export const takeDecisionSchema = z
      * the orientation that gets the code changed.
      */
     decidedBy: nonEmptyString,
+    /**
+     * The acting identity, with its kind (contract §19.2; #64).
+     *
+     * `decidedBy` names a human by construction — `decideTake` refuses an actor kind the ledger
+     * does not permit — but it is a bare string, so the record restates an identity the event log
+     * already holds *typed*. `GateDecision.decidedBy` is an `ActorRef`; a take decision beside it
+     * in the same workspace was not, and that asymmetry was the whole of #64.
+     *
+     * Optional rather than a replacement, which is what keeps this a MINOR change: making
+     * `decidedBy` an `ActorRef` would be MAJOR under ADR-0003, and `SCHEMA_VERSION` is
+     * package-wide, so it would make **every** stored record of every type unreadable — including
+     * append-only event logs, whose rewriting is the operation the version policy exists to make
+     * visible.
+     *
+     * Absence is meaningful and cannot be forged: `decideTake` populates both fields
+     * unconditionally, so a record carrying only the string is, by construction, one written
+     * before this field existed. The era marker is a property of the write path rather than a
+     * convention — there is exactly one write path, asserted below.
+     */
+    decidedByActor: actorRefSchema.optional(),
     /** ISO-8601 with offset. */
     decidedAt: iso8601,
     /** Why. Required for a rejection; see the type note above. */
