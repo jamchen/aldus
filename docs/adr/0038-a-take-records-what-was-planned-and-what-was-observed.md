@@ -1,4 +1,4 @@
-# ADR-0038: A take records what was planned and what was observed, side by side
+# ADR-0038: A take records what was requested and what produced the bytes, side by side
 
 - Status: Accepted
 - Date: 2026-08-20
@@ -57,16 +57,16 @@ wearing its clothes."
 
 ## Decision
 
-**A take stores planned and observed values side by side. Observed values never overwrite planned
-ones.**
+**A take stores requested facts and produced facts side by side. Produced facts never overwrite
+requested ones, and their absence is never decoded as agreement.**
 
-`SynthesisOutcome` gains `observedParameters`, `observedFinalProviderText` and
-`observationReason`. The gateway writes them to `TakeRecord.observed`, leaving `text` and
-`parameters` exactly as before.
+`SynthesisOutcome` gains `producedParameters`, `producedFinalProviderText` and `productionReason`.
+The gateway writes them to `TakeRecord.produced`, leaving `text` and `parameters` exactly as
+before.
 
 ### Beside, not preferred
 
-The alternative — the gateway preferring an observed value into `parameters` — was the initial
+The alternative — the gateway preferring a produced value into `parameters` — was the initial
 recommendation and was withdrawn once the second instance appeared. With one field and rare
 divergence it is defensible. With two fields diverging routinely for an entire class of adapter,
 the warranty becomes: _"`parameters` means used, unless the adapter did not say, in which case
@@ -76,23 +76,30 @@ renegotiates the meaning of every record already written.
 Side by side, each field means one thing, always. No field's meaning depends on whether another
 field is present.
 
-### The precedence rule exists, and lives in one named place
+### Unknown is a value, and is never decoded as agreement
 
-Readers still need the effective answer, and pushing the fallback into every call site would be
-worse than a renegotiated warranty — it would be an unwritten one. So `effectiveParameters`,
-`effectiveFinalProviderText` and `takeDivergences` are exported functions: documented, tested, and
-the obvious thing to reach for. **`effectiveParameters` is the function that answers "which takes
-were paid for."** Reading `take.parameters` answers "which takes were _planned_ to be paid for",
-and the two differ exactly where the question matters.
+`producedParameters` and `producedFinalProviderText` return `undefined` when nothing recorded what
+made the bytes. **`undefined` means unknown, never "the same as requested."**
 
-`takeDivergences` is derived on read and never stored. A stored divergence flag would be a third
-value to keep consistent with the two it summarises, which is a defect class this repository has
-now hit four times.
+The first draft of this ADR had them fall back to the requested value, under the name
+`effectiveParameters`. It read well and it was wrong, for the reason the ruling states directly:
+_never infer that observed equals requested_. An adapter that never learned to report is
+indistinguishable from one that produced exactly what was planned, and a fallback states the second
+while establishing only the first. That is the same defect as the field it was introduced to fix,
+one layer up — worth recording, because it survived being written by someone who had just finished
+describing the defect.
 
-### Observations are whole values
+`compareProducedToRequested` is three-valued for the same reason: `unknown`, `matches`, `diverged`.
+A boolean, or a list whose emptiness means agreement, folds unknown into matches.
 
-`observed.parameters` is a complete `SynthesisParameters` or absent — never partial. A partial
-observation would mean "provider is what I say, voice is whatever was planned", reintroducing one
+It is derived on read and never stored. A stored comparison would be a third value to keep
+consistent with the two it summarises, which is a defect class this repository has now hit four
+times.
+
+### Produced facts are whole values
+
+`produced.parameters` is a complete `SynthesisParameters` or absent — never partial. A partial
+report would mean "provider is what I say, voice is whatever was planned", reintroducing one
 key at a time the exact ambiguity the record exists to remove.
 
 Only `finalProviderText` is observable among the text stages. Normalisation, substitution and
@@ -101,7 +108,7 @@ What an adapter knows, and nothing else does, is the bytes it sent.
 
 ### Absence means nobody said
 
-`observed` is omitted entirely when the adapter reported nothing, rather than written as an empty
+`produced` is omitted entirely when the adapter reported nothing, rather than written as an empty
 object — "did not report" is a silence, "reported that it matched" is a claim, and only the second
 is evidence. Neither means the plan was followed. An adapter that never learned to report is
 indistinguishable from one with nothing to report, and no function over this record can tell them
@@ -120,11 +127,36 @@ invisible from the value.
   claiming to protect it.
 - The adopter's sidecar file can be deleted rather than migrated. Nothing depended on it.
 
+## Scope, and what this ADR does not settle
+
+The ruling on #133 models **three** facts, and this ADR implements the first two:
+
+1. **Requested / approved** — the plan's text and parameters, unchanged in place and now documented
+   strictly as requested facts.
+2. **Produced with** — the exact text and parameters that made the bytes.
+3. **Delivered through** — the adapter and mechanism by which bytes entered the Run.
+
+The third is deliberately not here, and neither are four consequences of it: the gateway recording
+`adapterId` itself rather than trusting an adapter to self-identify; provenance linkage for replay
+and import; refusing a **paid** execution whose produced facts differ from the authorized ones; and
+the paidness correction below. They are one coherent piece of work and are tracked as such rather
+than half-built here.
+
+`isPaid` currently reads:
+
+```ts
+return take.authorization !== undefined || take.costRecordId !== undefined;
+```
+
+An authorization means spending was _permitted_, not that it _occurred_. The adopter's seven local
+takes are authorized and free, and `isPaid` calls all seven paid — the same defect as
+`parameters.provider`, in the same records, for the third time.
+
 ## Alternatives considered
 
-- **Prefer observed into `parameters`.** Rejected above; it was my own first recommendation and
+- **Prefer produced values into `parameters`.** Rejected above; it was my own first recommendation and
   the second instance is what changed it.
-- **A single `observed: true/false` flag.** Rejected: it records that something differed without
+- **A single `diverged: true/false` flag.** Rejected: it records that something differed without
   recording what, which leaves the original question — which provider made this audio — exactly as
   unanswerable as before.
 - **Refuse a take whose observed text differs from the approved text.** Rejected: the divergence

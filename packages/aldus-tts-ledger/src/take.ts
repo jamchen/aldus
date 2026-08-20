@@ -246,7 +246,7 @@ export type TakeAuthorization = z.infer<typeof takeAuthorizationSchema>;
  * this record cannot tell you which. That limit is the price of the field being optional, and it
  * is stated here rather than discovered.
  */
-export const takeObservationSchema = z
+export const producedFactsSchema = z
   .object({
     /**
      * The parameters actually used, **complete** where present.
@@ -273,8 +273,8 @@ export const takeObservationSchema = z
     reason: z.string().min(1).max(2000).optional(),
   })
   .meta({
-    id: "TakeObservation",
-    title: "TakeObservation",
+    id: "ProducedFacts",
+    title: "ProducedFacts",
     description:
       "What a synthesis adapter reports it actually did, where that differs from the plan " +
       "(architecture contract §15). Stored beside the planned values, never overwriting them. " +
@@ -282,8 +282,8 @@ export const takeObservationSchema = z
       "followed.",
   });
 
-/** @see takeObservationSchema */
-export type TakeObservation = z.infer<typeof takeObservationSchema>;
+/** @see producedFactsSchema */
+export type ProducedFacts = z.infer<typeof producedFactsSchema>;
 
 /**
  * One synthesis attempt at one segment (contract §15).
@@ -321,8 +321,8 @@ export const takeRecordSchema = z
      * {@link effectiveParameters} for what actually produced the audio.
      */
     parameters: synthesisParametersSchema,
-    /** What the adapter reported it actually did, where it differed (§15; ADR-0038). */
-    observed: takeObservationSchema.optional(),
+    /** The facts that produced the bytes, as reported by the adapter (§15; ADR-0038). */
+    produced: producedFactsSchema.optional(),
     /** The provider's own request identifier, for reconciliation (contract §15). */
     providerRequestId: z.string().min(1).max(400).optional(),
     /**
@@ -406,63 +406,76 @@ export const takeRecordSchema = z
 export type TakeRecord = z.infer<typeof takeRecordSchema>;
 
 /**
- * The parameters that actually produced this take's audio (contract §15; ADR-0038).
+ * The parameters that produced this take's audio, or `undefined` when nothing recorded them.
  *
- * The precedence rule, in one place. A take stores planned and observed parameters side by side so
- * neither field's meaning depends on the other; reading them together is a separate act, and this
- * is where it happens — named, documented and tested, rather than reimplemented by each caller who
- * remembers that the distinction exists.
+ * **`undefined` means unknown, never "the same as requested."** That distinction is the whole
+ * decision: an adapter that never learned to report produced facts is indistinguishable from one
+ * that produced exactly what was planned, and a function returning the requested parameters here
+ * would state the second while establishing only the first.
  *
- * **This is the function that answers "which takes were paid for."** Reading `take.parameters`
- * directly answers "which takes were *planned* to be paid for", and the two differ for exactly the
- * adapters where the question matters.
+ * The earlier draft of this function did exactly that, falling back to `take.parameters`. It made
+ * the common case read nicely and it is the reason the owner's ruling says, in as many words,
+ * *never infer that observed equals requested*.
  *
- * Where no observation was reported, the plan is returned. That is a fallback, not a finding: it
- * means nobody said otherwise, which is the best available answer and not a guarantee.
+ * **This is the function that answers "what made these bytes."** `take.parameters` answers "what
+ * was planned", and for the adapters where the question matters the two differ — an adopter
+ * synthesising locally recorded seven takes naming a hosted provider that never ran.
  */
-export function effectiveParameters(take: TakeRecord): SynthesisParameters {
-  return take.observed?.parameters ?? take.parameters;
+export function producedParameters(take: TakeRecord): SynthesisParameters | undefined {
+  return take.produced?.parameters;
 }
 
 /**
- * The string actually sent to the provider, where anything knows it (contract §15; ADR-0038).
+ * The string actually sent to the provider, or `undefined` when nothing recorded it.
  *
- * Returns `undefined` when neither the adapter reported one nor the plan recorded one — §15 makes
- * final provider text conditional ("where applicable"), so its absence is a legitimate state and
- * not an error to paper over with the raw text.
+ * Same rule as {@link producedParameters}: absent is unknown. Note that `take.text` may carry a
+ * `finalProviderText` and this still return `undefined` — the plan's intended string is not
+ * evidence about what the adapter sent, which is precisely how a §13.2 comparison came to have
+ * the same expression on both sides.
  */
-export function effectiveFinalProviderText(take: TakeRecord): string | undefined {
-  return take.observed?.finalProviderText ?? take.text.finalProviderText;
+export function producedFinalProviderText(take: TakeRecord): string | undefined {
+  return take.produced?.finalProviderText;
 }
 
+/** How a take's produced facts stand against the requested ones (§15; ADR-0038). */
+export type ProducedFactComparison =
+  /** Nothing reported what produced the bytes. Not a match, and not a divergence. */
+  | { status: "unknown" }
+  /** The adapter reported, and what it reported is what was requested. */
+  | { status: "matches" }
+  /** The adapter reported something other than what was requested. */
+  | { status: "diverged"; fields: readonly ("parameters" | "text")[] };
+
 /**
- * Which of a take's planned values the adapter reported doing something else with (§15; ADR-0038).
+ * Compare what produced the bytes against what was requested (§15, §13.2; ADR-0038).
  *
- * Derived on read, never stored. A stored divergence flag would be a third value to keep
- * consistent with the two it summarises, and the recurring defect in this repository is a recorded
- * fact that nothing recomputes.
+ * Three-valued on purpose. A boolean, or a list whose emptiness means agreement, would fold
+ * *unknown* into *matches* — the single inference the ruling on #133 forbids, and the one that
+ * makes a record of an unreporting adapter look like evidence of compliance.
  *
- * An empty array means **no divergence was reported**. It does not mean the plan was followed —
- * an adapter that never learned to report is indistinguishable from one with nothing to report,
- * and no function over this record can tell them apart.
+ * Derived on read, never stored. A stored comparison would be a third value to keep consistent
+ * with the two it summarises, which is a defect class this repository has now hit four times.
  */
-export function takeDivergences(take: TakeRecord): readonly ("parameters" | "text")[] {
-  const diverged: ("parameters" | "text")[] = [];
-  const observed = take.observed;
-  if (observed === undefined) return diverged;
+export function compareProducedToRequested(take: TakeRecord): ProducedFactComparison {
+  const produced = take.produced;
+  if (produced === undefined) return { status: "unknown" };
+  if (produced.parameters === undefined && produced.finalProviderText === undefined) {
+    return { status: "unknown" };
+  }
+  const fields: ("parameters" | "text")[] = [];
   if (
-    observed.parameters !== undefined &&
-    JSON.stringify(observed.parameters) !== JSON.stringify(take.parameters)
+    produced.parameters !== undefined &&
+    JSON.stringify(produced.parameters) !== JSON.stringify(take.parameters)
   ) {
-    diverged.push("parameters");
+    fields.push("parameters");
   }
   if (
-    observed.finalProviderText !== undefined &&
-    observed.finalProviderText !== take.text.finalProviderText
+    produced.finalProviderText !== undefined &&
+    produced.finalProviderText !== take.text.finalProviderText
   ) {
-    diverged.push("text");
+    fields.push("text");
   }
-  return diverged;
+  return fields.length === 0 ? { status: "matches" } : { status: "diverged", fields };
 }
 
 /** Whether a take was accepted by a human (contract §13.3). */

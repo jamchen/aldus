@@ -139,7 +139,7 @@ export interface SynthesisOutcome {
    * **Complete where present, never partial.** Reporting only the provider would mean "voice is
    * whatever was planned", which is the ambiguity this field exists to remove, one key at a time.
    */
-  observedParameters?: SynthesisParameters;
+  producedParameters?: SynthesisParameters;
   /**
    * The string actually sent to the provider, where it differs from the plan's (§15; ADR-0038).
    *
@@ -147,9 +147,9 @@ export interface SynthesisOutcome {
    * tags a hosted model consumes and speaks them aloud instead, so their adapter strips them. The
    * take previously recorded text carrying 36 tags the engine never received.
    */
-  observedFinalProviderText?: string;
+  producedFinalProviderText?: string;
   /** Why the adapter diverged, in its own words. Recorded verbatim, never parsed. */
-  observationReason?: string;
+  productionReason?: string;
 }
 
 /**
@@ -303,20 +303,20 @@ export class SynthesisGateway {
         // Stored beside the plan's values, never over them (ADR-0038). The whole object is omitted
         // when the adapter reported nothing, so "did not report" stays distinguishable from
         // "reported that it matched" — the second is a claim, the first is a silence.
-        ...(outcome.observedParameters === undefined &&
-        outcome.observedFinalProviderText === undefined
+        ...(outcome.producedParameters === undefined &&
+        outcome.producedFinalProviderText === undefined
           ? {}
           : {
-              observed: {
-                ...(outcome.observedParameters === undefined
+              produced: {
+                ...(outcome.producedParameters === undefined
                   ? {}
-                  : { parameters: outcome.observedParameters }),
-                ...(outcome.observedFinalProviderText === undefined
+                  : { parameters: outcome.producedParameters }),
+                ...(outcome.producedFinalProviderText === undefined
                   ? {}
-                  : { finalProviderText: outcome.observedFinalProviderText }),
-                ...(outcome.observationReason === undefined
+                  : { finalProviderText: outcome.producedFinalProviderText }),
+                ...(outcome.productionReason === undefined
                   ? {}
-                  : { reason: outcome.observationReason }),
+                  : { reason: outcome.productionReason }),
               },
             }),
       },

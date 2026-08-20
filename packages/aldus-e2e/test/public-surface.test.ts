@@ -73,10 +73,10 @@ const PUBLIC_SURFACE: Record<string, { module: object; names: readonly string[] 
       // The precedence rule between a take's planned and observed values lives in these, and
       // nowhere else (ADR-0038). Unreachable, an adopter reimplements it — which is worse than the
       // renegotiated warranty that storing "beside" was chosen to avoid.
-      "effectiveParameters",
-      "effectiveFinalProviderText",
-      "takeDivergences",
-      "takeObservationSchema",
+      "producedParameters",
+      "producedFinalProviderText",
+      "compareProducedToRequested",
+      "producedFactsSchema",
     ],
   },
   "@aldus-runtime/artifact-registry": {

@@ -14,9 +14,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SubjectsByGate } from "@aldus-runtime/gate-engine";
 import type { TtsRequestPlan } from "@aldus-runtime/tts-ledger";
 import {
-  effectiveFinalProviderText,
-  effectiveParameters,
-  takeDivergences,
+  compareProducedToRequested,
+  producedFinalProviderText,
+  producedParameters,
 } from "@aldus-runtime/tts-ledger";
 
 import { ServiceErrorCodes } from "../src/errors.js";
@@ -366,8 +366,8 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
     const harness = await armed();
     await approveSynthesis(harness);
     harness.synthesis.observation = {
-      observedParameters: { provider: "provider-b", voice: "voice-b", model: "model-b" },
-      observationReason: "synthesised locally; the planned provider was not called",
+      producedParameters: { provider: "provider-b", voice: "voice-b", model: "model-b" },
+      productionReason: "synthesised locally; the planned provider was not called",
     };
 
     const result = await harness.services.synthesiseSegment({
@@ -381,10 +381,13 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
 
     // Beside, not over. The plan's value is still there and still says what was planned.
     expect(take.parameters.provider).toBe("provider-a");
-    expect(take.observed?.parameters?.provider).toBe("provider-b");
+    expect(take.produced?.parameters?.provider).toBe("provider-b");
     // And the question the adopter was actually asking has a right answer.
-    expect(effectiveParameters(take).provider).toBe("provider-b");
-    expect(takeDivergences(take)).toEqual(["parameters"]);
+    expect(producedParameters(take)?.provider).toBe("provider-b");
+    expect(compareProducedToRequested(take)).toEqual({
+      status: "diverged",
+      fields: ["parameters"],
+    });
   });
 
   it("records the string the adapter says it sent, beside the planned one", async () => {
@@ -400,7 +403,7 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
     } as never);
     const harness = await armed({ plan: tagged });
     await approveSynthesis(harness);
-    harness.synthesis.observation = { observedFinalProviderText: "The first line." };
+    harness.synthesis.observation = { producedFinalProviderText: "The first line." };
 
     const result = await harness.services.synthesiseSegment({
       plan: tagged,
@@ -412,8 +415,8 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
     const take = result.data.take;
 
     expect(take.text.finalProviderText).toBe("[tag] The first line.");
-    expect(effectiveFinalProviderText(take)).toBe("The first line.");
-    expect(takeDivergences(take)).toEqual(["text"]);
+    expect(producedFinalProviderText(take)).toBe("The first line.");
+    expect(compareProducedToRequested(take)).toEqual({ status: "diverged", fields: ["text"] });
   });
 
   it("leaves the take unchanged when the adapter reports nothing", async () => {
@@ -432,9 +435,12 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
     if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
     const take = result.data.take;
 
-    expect(take.observed).toBeUndefined();
-    expect(effectiveParameters(take)).toEqual(take.parameters);
-    expect(takeDivergences(take)).toEqual([]);
+    expect(take.produced).toBeUndefined();
+    // Unknown, not "matches". An adapter that never learned to report is indistinguishable from
+    // one that produced exactly what was planned, and the earlier draft of this returned the
+    // plan's parameters here — stating the second while establishing only the first.
+    expect(producedParameters(take)).toBeUndefined();
+    expect(compareProducedToRequested(take)).toEqual({ status: "unknown" });
   });
 
   it("reports no divergence when the adapter reports the same values it was given", async () => {
@@ -444,7 +450,7 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
     const harness = await armed();
     await approveSynthesis(harness);
     harness.synthesis.observation = {
-      observedParameters: { provider: "provider-a", voice: "voice-a", model: "model-a" },
+      producedParameters: { provider: "provider-a", voice: "voice-a", model: "model-a" },
     };
 
     const result = await harness.services.synthesiseSegment({
@@ -454,7 +460,7 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
     });
 
     if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
-    expect(result.data.take.observed?.parameters).toBeDefined();
-    expect(takeDivergences(result.data.take)).toEqual([]);
+    expect(result.data.take.produced?.parameters).toBeDefined();
+    expect(compareProducedToRequested(result.data.take)).toEqual({ status: "matches" });
   });
 });
