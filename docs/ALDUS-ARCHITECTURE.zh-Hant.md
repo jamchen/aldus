@@ -438,6 +438,10 @@ interface StageDefinition<I, O> {
 
 Machine pass 不能被描述成 semantic correctness。
 
+Evaluator 無法執行、無法解析輸入、或無法產出有效報告時，必須造成 operational failure。Evaluator 成功執行並發現內容問題時，必須產出 **evaluation result**，不得把該 finding 編碼成無法區分的 internal error。Production trace 必須能分辨「evaluator 壞了」與「evaluator 找到缺陷」。
+
+Evaluation result 是否阻擋工作，由該 finding class 的宣告 enforcement 與 §12.1 決定，永遠不由 evaluator 自己決定。Finding class 若沒有對應的宣告 enforcement，必須被拒絕，而不是套用預設值。
+
 Evaluator 只有在與 human-labeled corpus 校準後才能升級成 blocking gate，且必須考慮 recall、false positive、嚴重度加權 false negative、不必要修正的傷害、scope 與已知盲點。
 
 Listening 評估應從聽眾體驗出發，涵蓋無視覺脈絡時的清晰度、資訊密度、節奏、轉場、人設、發音、情緒與修辭意圖。
