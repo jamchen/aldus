@@ -137,5 +137,14 @@ export {
   type AgentExecutionInput,
   type AgentExecutionOptions,
   type AgentExecutionResult,
-  type CostRecordStore,
 } from "./agent-execution.js";
+
+export type { CostRecordStore } from "./cost-store.js";
+export {
+  SpendService,
+  type CostExpectation,
+  type DispatchEvidence,
+  type ReserveInput,
+  type ReserveOutcome,
+  type SpendServiceOptions,
+} from "./spend-service.js";

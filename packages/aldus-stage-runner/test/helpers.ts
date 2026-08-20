@@ -162,6 +162,7 @@ export function aBackend(offers: string[] = [], id = "backend-a"): AgentBackend 
   const capabilities: AgentCapabilities = { offers, interactive: true, resumable: false };
   return {
     id,
+    version: "1.0.0",
     capabilities: async () => capabilities,
     execute: async () => ({ ok: true }),
   };

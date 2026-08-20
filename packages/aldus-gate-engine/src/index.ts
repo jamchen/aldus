@@ -68,6 +68,7 @@ export {
   SPEND_LIMIT_SUBJECT_KEY,
   availableAuthorization,
   checkSpendScope,
+  unestimatedPolicyIsSatisfiable,
   checkSpend,
   computeLedger,
   consumesBudget,

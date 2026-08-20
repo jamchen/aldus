@@ -148,6 +148,7 @@ describe("entity ids", () => {
       cost: factory.newCostId(),
       rel: factory.newReleaseId(),
       evt: factory.newEventId(),
+      res: factory.newSpendReservationId(),
     };
     for (const [prefix, id] of Object.entries(minted)) {
       expect(id.startsWith(`${prefix}_`)).toBe(true);

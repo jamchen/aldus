@@ -77,6 +77,8 @@ export const ID_PREFIXES = {
   release: "rel",
   /** `AldusEvent.eventId` (§6.4). */
   event: "evt",
+  /** `SpendReservation.reservationId` (§19.3; ADR-0044). */
+  spendReservation: "res",
 } as const;
 
 /** @see ID_PREFIXES */
@@ -133,6 +135,8 @@ export interface IdFactory {
   newReleaseId(): string;
   /** Mint an `AldusEvent.eventId` (§6.4). */
   newEventId(): string;
+  /** Mint a `SpendReservation.reservationId` (§19.3; ADR-0044). */
+  newSpendReservationId(): string;
   /** Mint a bare ULID with no prefix. Exposed for callers that need the raw time-ordered token. */
   newUlid(): string;
 }
@@ -241,6 +245,7 @@ export function createIdFactory(options: IdFactoryOptions = {}): IdFactory {
     newCostId: () => newId(ID_PREFIXES.cost),
     newReleaseId: () => newId(ID_PREFIXES.release),
     newEventId: () => newId(ID_PREFIXES.event),
+    newSpendReservationId: () => newId(ID_PREFIXES.spendReservation),
   };
 }
 
@@ -274,6 +279,9 @@ export const newCostId = (): string => defaultIdFactory.newCostId();
 export const newReleaseId = (): string => defaultIdFactory.newReleaseId();
 /** Mint an `AldusEvent.eventId` (§6.4). */
 export const newEventId = (): string => defaultIdFactory.newEventId();
+
+/** @see IdFactory.newSpendReservationId */
+export const newSpendReservationId = (): string => defaultIdFactory.newSpendReservationId();
 
 /** True if `value` is a strictly well-formed 26-character ULID. */
 export function isUlid(value: string): boolean {
