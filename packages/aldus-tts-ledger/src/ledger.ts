@@ -450,7 +450,14 @@ export class TtsLedger {
       );
     }
 
-    const decided: TakeRecord = { ...take, decision };
+    // Both fields, unconditionally. That is what makes "only the string" impossible for anything
+    // this runtime writes, so a legacy record is distinguishable by construction rather than by a
+    // convention someone has to keep (#64). There is exactly one write path, which is what makes
+    // this cheap — asserted in the tests so a second one cannot appear quietly.
+    const decided: TakeRecord = {
+      ...take,
+      decision: { ...decision, decidedByActor: decidedBy },
+    };
     await this.#takes.replace(runId, decided);
     await this.#emit(
       runId,

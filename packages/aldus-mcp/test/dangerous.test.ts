@@ -306,14 +306,17 @@ describe("the recorded actor stays the agent (§10.1, ADR-0014 §4)", () => {
   // `.omit()` on a schema carrying refinements. Restating means the two can drift, so this is
   // the test that stops it: a field added to the ledger's decision and forgotten here would
   // silently stop being accepted over MCP.
-  it("accepts exactly the ledger's decision fields, less decidedBy", () => {
+  it("accepts exactly the ledger's decision fields, less the ones filled from the session", () => {
+    // `decidedBy` and `decidedByActor` are both excluded, and for the same reason: an agent that
+    // could supply either could name an actor that is not the one acting. §10.1 and ADR-0014 make
+    // the session the source of the identity, so a tool argument for it is a way to lie.
     const ledgerFields = Object.keys(
       (
         z.toJSONSchema(takeDecisionSchema, { target: "draft-2020-12" }) as {
           properties?: Record<string, unknown>;
         }
       ).properties ?? {},
-    ).filter((field) => field !== "decidedBy");
+    ).filter((field) => field !== "decidedBy" && field !== "decidedByActor");
 
     const tool = MUTATION_TOOLS.find((entry) => entry.name === "aldus_decide_take");
     const decision = (

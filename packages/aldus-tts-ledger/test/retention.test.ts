@@ -11,6 +11,8 @@
  * would throw away the reason the working one was reachable.
  */
 
+import { readFile } from "node:fs/promises";
+
 import { AldusError, type ActorRef } from "@aldus-runtime/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -489,5 +491,57 @@ describe("who may decide a take, and what the trace records (§13.3, #64)", () =
     expect(accepted).toHaveLength(1);
     // The identity that acted, carried through rather than reconstructed from a bare string.
     expect(accepted[0]?.actor).toEqual(decider);
+  });
+});
+
+describe("the acting identity is recorded with its kind (#64)", () => {
+  it("records both fields, so a string-only record cannot come from this runtime", async () => {
+    // The property that makes absence an unforgeable era marker. `decideTake` populates both
+    // unconditionally, so any record carrying only `decidedBy` was written before the field
+    // existed — no convention to keep, and nothing for a second write path to forget.
+    const takes = new MemoryTakeStore();
+    const ledger = new TtsLedger({
+      takes,
+      plans: new MemoryPlanStore(),
+      scripts: new MemoryScriptStore(),
+      events: new MemoryLedgerEventSink(),
+      authorizer: new ApprovingAuthorizer(),
+      now: () => new Date(AT),
+    });
+    await ledger.recordPlan(plan(), EPISODE_ID, OPERATOR);
+    const take = await ledger.recordTake({
+      runId: RUN_ID,
+      planId: PLAN_ID,
+      segmentId: "seg-1",
+      take: paidTake(plan(), { takeId: "take-typed" }),
+      episodeId: EPISODE_ID,
+      actor: WORKER,
+    });
+
+    const decider: ActorRef = { kind: "human", id: "user-42", displayName: "Producer B" };
+    const decided = await ledger.decideTake(
+      RUN_ID,
+      take.takeId,
+      { decision: "accepted", decidedBy: "producer-b", decidedAt: AT },
+      EPISODE_ID,
+      decider,
+    );
+
+    // The string stays what the caller wrote; the typed identity is what actually acted.
+    expect(decided.decision?.decidedBy).toBe("producer-b");
+    expect(decided.decision?.decidedByActor).toEqual(decider);
+  });
+
+  it("is the only place a decided take record is constructed", async () => {
+    // The invariant the era marker rests on. A second write path could populate one field and not
+    // the other, and then absence would stop meaning "predates the field". Asserted here so the
+    // second path cannot appear quietly — this is a fact about the source, not about a run.
+    const source = await readFile(new URL("../src/ledger.ts", import.meta.url), "utf8");
+    const constructions = source.match(/const decided: TakeRecord =/g) ?? [];
+    expect(
+      constructions,
+      "a second construction site would have to populate both fields too, or absence stops " +
+        "meaning what #64 relies on it meaning",
+    ).toHaveLength(1);
   });
 });
