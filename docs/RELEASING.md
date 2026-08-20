@@ -110,6 +110,11 @@ If `npm run verify` fails that way, it is this and not your change:
 rm -rf packages/*/node_modules packages/*/dist packages/*/*.tsbuildinfo
 ```
 
+**Run that after the pin update and after `npm install`, not before.** Cleaning first does not
+help: the lockfile `npm version` regenerated still records the stale resolutions, so the next
+install puts them straight back. Cleaning last removes the directories once nothing will
+re-create them.
+
 CI is unaffected — it runs `npm ci` from a clean checkout, where the window never exists.
 
 Then update every internal dependency to the exact version. Verify:
