@@ -27,7 +27,7 @@ import {
   compareMoney,
   type SpendGrant,
 } from "@aldus-runtime/gate-engine";
-import type { SpendReservationStore } from "@aldus-runtime/file-store";
+import type { GrantReservationStream, SpendReservationStore } from "@aldus-runtime/file-store";
 
 import type { CostRecordStore } from "./cost-store.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
@@ -97,6 +97,17 @@ export type ReconciliationResolution =
        * the mismatch is reported; converting implicitly would invent a rate nobody approved.
        */
       amount: Money;
+      /**
+       * Who charged, and for what — required unless a linked unknown observation already says.
+       *
+       * The first implementation wrote `provider: "reconciled"`, which describes **how Aldus
+       * learned a fact** rather than who charged for what: a fabricated provider that also
+       * silently removed the charge from per-provider reporting. Where an unresolved observation
+       * survives, these come from it; where nothing was ever written, the evidence has to supply
+       * them or the reconciliation is refused.
+       */
+      provider?: string;
+      billedOperation?: string;
     }
   | {
       /** Positive evidence that nothing was charged. */
@@ -139,16 +150,76 @@ export interface ReservationStatus {
   execution?: SpendReservation["execution"];
   /** Whether a human decision is what this reservation is waiting on. */
   requiresReconciliation: boolean;
+  /** Charges linked to this reservation whose money amount nobody established (#150). */
+  unquantifiedUnknownBillingCount: number;
+  /** Every human finding so far, terminal or audit-only, in order. */
+  reconciliationHistory: readonly {
+    decisionId: string;
+    resolution: string;
+    evidenceRef: string;
+    decidedBy: ActorRef | undefined;
+    at: string;
+    outcome: "terminal" | "audit_only";
+  }[];
+  /** Why this reservation is unresolved and non-retryable, in the operator's terms. */
+  unresolvedReason?: string;
 }
 
-/** One human reconciliation decision. */
+/**
+ * Proof that a reconciliation was initiated by a trusted operator invocation (#155 step 5).
+ *
+ * A caller-supplied `ActorRef` proves nothing: any caller can write `{ kind: "human" }`, so a check
+ * on that field tests whether a caller is *honest about being an agent*, not whether a human
+ * decided. The brand is a phantom — declared as a type, absent at runtime — and the runtime proof
+ * is membership of a set only {@link OperatorSpendConsole} can add to, following the same pattern
+ * `SynthesisPermit` uses for the same reason.
+ */
+export type OperatorAuthority = { readonly actor: ActorRef } & {
+  readonly __operatorAuthority: unique symbol;
+};
+
+/** Authorities this process minted. A cast cannot manufacture membership. */
+const ISSUED_AUTHORITIES = new WeakSet<object>();
+
+/** Whether an authority was minted here rather than assembled by a caller. */
+export function isIssuedOperatorAuthority(authority: OperatorAuthority): boolean {
+  return ISSUED_AUTHORITIES.has(authority);
+}
+
+/**
+ * The only path to a reconciliation (#155 step 5).
+ *
+ * Constructed by the composition root with the actor it already trusts, so the decision's identity
+ * comes from the invocation rather than from an argument. `reconcile` takes no actor: there is
+ * nothing for a caller to claim.
+ */
+export class OperatorSpendConsole {
+  readonly #spend: SpendService;
+  readonly #actor: ActorRef;
+
+  constructor(options: { spend: SpendService; actor: ActorRef }) {
+    this.#spend = options.spend;
+    this.#actor = options.actor;
+  }
+
+  /** @see SpendService.reconcile */
+  reconcile(
+    reservation: SpendReservation,
+    input: ReconcileInput,
+  ): Promise<{ reservation: SpendReservation; costs: readonly CostRecord[] }> {
+    const authority = { actor: this.#actor } as OperatorAuthority;
+    ISSUED_AUTHORITIES.add(authority);
+    return this.#spend.reconcile(reservation, input, authority);
+  }
+
+  /** @see SpendService.status */
+  status(runId: string): Promise<readonly ReservationStatus[]> {
+    return this.#spend.status(runId);
+  }
+}
+
+/** One human reconciliation decision. Carries no actor: see {@link OperatorSpendConsole}. */
 export interface ReconcileInput {
-  /**
-   * Who decided. **Human only**, and supplied by the Runtime rather than as a caller string.
-   *
-   * An agent that could reconcile could release authorization it had itself consumed.
-   */
-  actor: ActorRef;
   /**
    * What the decision rests on — a provider statement, a support reference, an invoice line.
    *
@@ -341,24 +412,37 @@ export class SpendService {
   ): Promise<{ reservation: SpendReservation; costs: readonly CostRecord[] }> {
     const recordedAt = this.#now().toISOString();
     const written: CostRecord[] = [];
-    for (const [index, observation] of observations.entries()) {
-      const costId = `${reservation.reservationId}:cost:${index}`;
-      const record: CostRecord = {
-        ...observation,
-        schemaVersion: SCHEMA_VERSION,
-        costId,
-        runId: reservation.runId,
-        stageId: reservation.stageId,
-        attemptId: reservation.attemptId,
-        reservationId: reservation.reservationId,
-        ...(attribution.authorizationId === undefined
-          ? {}
-          : { authorizationId: attribution.authorizationId }),
-        ...(attribution.takeId === undefined ? {} : { takeId: attribution.takeId }),
-        recordedAt,
-      };
-      await this.#costs.append(reservation.runId, record);
-      written.push(record);
+    try {
+      for (const [index, observation] of observations.entries()) {
+        const costId = `${reservation.reservationId}:cost:${index}`;
+        const record: CostRecord = {
+          ...observation,
+          schemaVersion: SCHEMA_VERSION,
+          costId,
+          runId: reservation.runId,
+          stageId: reservation.stageId,
+          attemptId: reservation.attemptId,
+          reservationId: reservation.reservationId,
+          ...(attribution.authorizationId === undefined
+            ? {}
+            : { authorizationId: attribution.authorizationId }),
+          ...(attribution.takeId === undefined ? {} : { takeId: attribution.takeId }),
+          recordedAt,
+        };
+        await this.#costs.append(reservation.runId, record);
+        written.push(record);
+      }
+    } catch (thrown) {
+      // The provider was called and the charge could not be recorded (#152). The reservation moves
+      // to `billing_unknown` **before** the error propagates, so the state a human must act on
+      // exists without anyone performing a repair step first. Left `reserved`, it reads as
+      // "dispatch not begun", which is exactly the wrong thing to tell an operator here.
+      await this.markUnknown(reservation, [], {
+        reason:
+          "settlement persistence failed after dispatch: the provider may have charged and the " +
+          "cost record could not be written, so this is non-retryable until reconciled (#152)",
+      });
+      throw thrown;
     }
 
     const unknown = written.some((record) => record.billingStatus === "unknown");
@@ -404,8 +488,14 @@ export class SpendService {
   async markUnknown(
     reservation: SpendReservation,
     costIds: readonly string[] = [],
+    options: { reason?: string } = {},
   ): Promise<SpendReservation> {
-    return this.#appendOne(reservation, "reservation.billing_unknown", { costIds: [...costIds] });
+    return this.#appendOne(reservation, "reservation.billing_unknown", {
+      costIds: [...costIds],
+      // Why it is unresolved, in the operator's terms. `budget status` surfaces this, because
+      // "non-retryable" with no reason gives a human nothing to act on.
+      ...(options.reason === undefined ? {} : { reason: options.reason }),
+    });
   }
 
   /**
@@ -420,26 +510,76 @@ export class SpendService {
    */
   async status(runId: string): Promise<readonly ReservationStatus[]> {
     const reservations = await this.#store.listByRun(runId);
-    return reservations.map((reservation) => ({
-      reservationId: reservation.reservationId,
-      grantId: reservation.grantId,
-      authorizationId: reservation.authorizationId,
-      runId: reservation.runId,
-      stageId: reservation.stageId,
-      attemptId: reservation.attemptId,
-      effectKey: reservation.effectKey,
-      operation: reservation.operation,
-      status: reservation.status,
-      // Labelled, not merely typed. A reader who takes this for the provider's charge has made
-      // exactly the substitution the rejected third resolution would have institutionalised.
-      reservedAuthorizationAmount: reservation.reserved,
-      costIds: [...reservation.costIds],
-      ...(reservation.providerRequestId === undefined
-        ? {}
-        : { providerRequestId: reservation.providerRequestId }),
-      ...(reservation.execution === undefined ? {} : { execution: reservation.execution }),
-      requiresReconciliation: reservation.status === "billing_unknown",
-    }));
+    const costs = await this.#costs.list(runId);
+    const byGrant = new Map<string, GrantReservationStream>();
+    for (const reservation of reservations) {
+      if (!byGrant.has(reservation.grantId)) {
+        byGrant.set(reservation.grantId, await this.#store.readGrant(reservation.grantId));
+      }
+    }
+
+    return reservations.map((reservation) => {
+      const transitions = (byGrant.get(reservation.grantId)?.transitions ?? []).filter(
+        (transition) => transition.reservationId === reservation.reservationId,
+      );
+      // Every human finding so far, in order. A reconciliation decided without seeing what a
+      // previous investigator already established is the second person repeating the first's work
+      // — or contradicting it without knowing.
+      const history = transitions
+        .filter(
+          (transition) =>
+            transition.kind === "reservation.reconciled" ||
+            transition.kind === "reservation.investigation_recorded",
+        )
+        .map((transition) => ({
+          decisionId: String(transition.detail["decisionId"] ?? ""),
+          resolution: String(transition.detail["resolution"] ?? ""),
+          evidenceRef: String(transition.detail["evidenceRef"] ?? ""),
+          decidedBy: transition.detail["decidedBy"] as ActorRef | undefined,
+          at: transition.at,
+          outcome:
+            transition.kind === "reservation.reconciled"
+              ? ("terminal" as const)
+              : ("audit_only" as const),
+        }));
+      const unresolvedReason = transitions
+        .filter((transition) => transition.kind === "reservation.billing_unknown")
+        .map((transition) => transition.detail["reason"])
+        .filter((reason): reason is string => typeof reason === "string")
+        .at(-1);
+
+      return {
+        reservationId: reservation.reservationId,
+        grantId: reservation.grantId,
+        authorizationId: reservation.authorizationId,
+        runId: reservation.runId,
+        stageId: reservation.stageId,
+        attemptId: reservation.attemptId,
+        effectKey: reservation.effectKey,
+        operation: reservation.operation,
+        status: reservation.status,
+        // Labelled, not merely typed. A reader who takes this for the provider's charge has made
+        // exactly the substitution the rejected third resolution would have institutionalised.
+        reservedAuthorizationAmount: reservation.reserved,
+        costIds: [...reservation.costIds],
+        ...(reservation.providerRequestId === undefined
+          ? {}
+          : { providerRequestId: reservation.providerRequestId }),
+        ...(reservation.execution === undefined ? {} : { execution: reservation.execution }),
+        requiresReconciliation: reservation.status === "billing_unknown",
+        // From the cost records, not from the reservation: an unresolved charge is a billing fact
+        // and the reservation is an authorization one.
+        unquantifiedUnknownBillingCount: costs.filter(
+          (record) =>
+            record.reservationId === reservation.reservationId &&
+            record.billingStatus === "unknown" &&
+            record.actual === undefined &&
+            record.estimated === undefined,
+        ).length,
+        reconciliationHistory: history,
+        ...(unresolvedReason === undefined ? {} : { unresolvedReason }),
+      };
+    });
   }
 
   /**
@@ -457,11 +597,27 @@ export class SpendService {
   async reconcile(
     reservation: SpendReservation,
     input: ReconcileInput,
+    authority: OperatorAuthority,
   ): Promise<{ reservation: SpendReservation; costs: readonly CostRecord[] }> {
-    if (input.actor.kind !== "human") {
+    // Membership, not shape. A caller that assembled an object with the right fields has proved it
+    // can write an object literal.
+    if (!isIssuedOperatorAuthority(authority)) {
       throw serviceError(
         ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
-        `Reconciliation is a human decision and this actor is a "${input.actor.kind}". An agent ` +
+        "This reconciliation did not come through an operator console, so nothing establishes " +
+          "that a human decided it. A caller-supplied actor is a claim about itself (§19.2).",
+        {
+          category: "policy",
+          retryable: false,
+          details: { reservationId: reservation.reservationId },
+        },
+      );
+    }
+    if (authority.actor.kind !== "human") {
+      throw serviceError(
+        ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+        `Reconciliation is a human decision and this actor is a "${authority.actor.kind}". An ` +
+          "agent " +
           "that could reconcile could release authorization it had itself consumed (§13.3, §19.3).",
         {
           category: "policy",
@@ -500,23 +656,62 @@ export class SpendService {
       );
     }
 
-    // Appended before anything changes, so the decision survives even if the effect below fails.
-    const audited = await this.#appendOne(current, "reservation.reconciled", {
+    // Resumable by design (#155 step 5). The decision transition is identified by the decision,
+    // not by its kind, so retrying the same decision after a failed cost write re-appends nothing
+    // and continues from where it stopped. A *different* decision, or the same id carrying
+    // different contents, conflicts rather than overwriting.
+    const stream = await this.#store.readGrant(current.grantId);
+    const priorDecision = stream.transitions.find(
+      (transition) =>
+        transition.reservationId === current.reservationId &&
+        transition.kind === "reservation.reconciled",
+    );
+    if (priorDecision !== undefined && priorDecision.detail["decisionId"] !== input.decisionId) {
+      throw serviceError(
+        ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+        `Reservation "${current.reservationId}" already carries reconciliation decision ` +
+          `"${String(priorDecision.detail["decisionId"])}". A second, different decision would ` +
+          "overwrite a human's recorded finding rather than adding to it (ADR-0044).",
+        {
+          category: "conflict",
+          retryable: false,
+          details: { reservationId: current.reservationId },
+        },
+      );
+    }
+
+    const decisionDetail: Record<string, unknown> = {
       decisionId: input.decisionId,
       resolution: input.resolution.kind,
       evidenceRef: input.evidenceRef,
-      decidedBy: { kind: input.actor.kind, id: input.actor.id },
+      decidedBy: { kind: authority.actor.kind, id: authority.actor.id },
       ...(input.resolution.kind === "settled_with_amount"
         ? { amount: input.resolution.amount }
         : {}),
-    });
+    };
 
     if (input.resolution.kind === "investigation_ended") {
-      // Resolves nothing on purpose. The reservation stays active, keeps consuming its reserved
-      // amount, and reports stay indeterminate — further spend needs a new authorization rather
-      // than headroom this decision manufactured.
-      return { reservation: audited, costs: [] };
+      // Its own non-terminal transition, and repeatable: recording an abandoned investigation on
+      // the terminal seam made the first one a dead end for every later decision.
+      const recorded = await this.#appendOne(
+        current,
+        "reservation.investigation_recorded",
+        decisionDetail,
+        `${current.reservationId}:investigation:${input.decisionId}`,
+      );
+      return { reservation: recorded, costs: [] };
     }
+
+    // Appended before anything changes, so the decision survives even if the effect below fails.
+    const audited =
+      priorDecision !== undefined
+        ? current
+        : await this.#appendOne(
+            current,
+            "reservation.reconciled",
+            decisionDetail,
+            `${current.reservationId}:reconciled:${input.decisionId}`,
+          );
 
     if (input.resolution.kind === "released_as_uncharged") {
       return {
@@ -528,6 +723,31 @@ export class SpendService {
     }
 
     // `settled_with_amount`: the record is durable before authorization is released.
+    //
+    // Provider and operation are preserved from a surviving unresolved observation where one
+    // exists, because that is who actually charged. Where nothing was written, the evidence must
+    // supply them — Aldus does not invent a provider to fill a required field.
+    const linked = (await this.#costs.list(current.runId)).find(
+      (record) =>
+        record.reservationId === current.reservationId && record.billingStatus === "unknown",
+    );
+    const provider = linked?.provider ?? input.resolution.provider;
+    const operation = linked?.operation ?? input.resolution.billedOperation;
+    if (provider === undefined || operation === undefined) {
+      throw serviceError(
+        ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+        `Reconciling reservation "${current.reservationId}" with an amount requires who was ` +
+          "charged and for what. No unresolved observation survives to take them from, so the " +
+          "evidence must state them: a record naming Aldus as the provider would describe how " +
+          "the fact was learned rather than who billed (§19.3).",
+        {
+          category: "validation",
+          retryable: false,
+          details: { reservationId: current.reservationId },
+        },
+      );
+    }
+
     const costId = `${current.reservationId}:reconciled`;
     const record: CostRecord = {
       schemaVersion: SCHEMA_VERSION,
@@ -536,8 +756,10 @@ export class SpendService {
       stageId: current.stageId,
       attemptId: current.attemptId,
       reservationId: current.reservationId,
-      provider: "reconciled",
-      operation: "reconciliation",
+      // Runtime-owned, from the reservation. Never taken from the reconciliation input.
+      authorizationId: current.authorizationId,
+      provider,
+      operation,
       billingStatus: "charged",
       actual: input.resolution.amount,
       recordedAt: this.#now().toISOString(),
@@ -572,6 +794,7 @@ export class SpendService {
     reservation: SpendReservation,
     kind: SpendTransitionKind,
     detail: Record<string, unknown>,
+    transitionId?: string,
   ): Promise<SpendReservation> {
     for (let attempt = 0; attempt < this.#maxAttempts; attempt += 1) {
       const stream = await this.#store.readGrant(reservation.grantId);
@@ -601,7 +824,14 @@ export class SpendService {
       const result = await this.#store.compareAndAppend({
         grantId: reservation.grantId,
         expectedRevision: stream.revision,
-        transitions: [this.#transition(current.reservationId, current.grantId, kind, detail)],
+        transitions: [
+          {
+            ...this.#transition(current.reservationId, current.grantId, kind, detail),
+            // Per decision rather than per kind where one is supplied: a reconciliation must be
+            // resumable by the same decision and repeatable across different ones.
+            ...(transitionId === undefined ? {} : { transitionId }),
+          },
+        ],
       });
       // A conflict here is usually an unrelated reservation on a shared grant. Retrying is right;
       // sending an operator to reconciliation for it would make every busy grant look broken.

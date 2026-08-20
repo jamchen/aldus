@@ -12,12 +12,12 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ActorRef, CostRecord } from "@aldus-runtime/core";
+import { SCHEMA_VERSION, type ActorRef, type CostRecord } from "@aldus-runtime/core";
 import { FileSpendReservationStore } from "@aldus-runtime/file-store";
 import { availableAuthorization, type SpendGrant } from "@aldus-runtime/gate-engine";
 
 import type { CostRecordStore } from "../src/cost-store.js";
-import { SpendService } from "../src/spend-service.js";
+import { OperatorSpendConsole, SpendService } from "../src/spend-service.js";
 
 const HUMAN: ActorRef = { kind: "human", id: "operator-a" };
 const AGENT: ActorRef = { kind: "agent", id: "claude" };
@@ -47,6 +47,7 @@ function costStore(): CostRecordStore & { records: CostRecord[] } {
 
 let root: string;
 let spend: SpendService;
+let console_: OperatorSpendConsole;
 let costs: ReturnType<typeof costStore>;
 let store: FileSpendReservationStore;
 
@@ -55,6 +56,7 @@ beforeEach(async () => {
   store = new FileSpendReservationStore({ root });
   costs = costStore();
   spend = new SpendService({ store, costs, now: () => new Date("2026-01-01T00:00:00.000Z") });
+  console_ = new OperatorSpendConsole({ spend, actor: HUMAN });
 });
 
 afterEach(async () => {
@@ -84,13 +86,13 @@ async function unresolved(effectKey = "effect-a") {
 const evidence = "provider statement 2026-08, line 42";
 
 describe("who may reconcile", () => {
-  it("refuses an agent, whatever it claims about itself", async () => {
+  it("refuses an agent behind the console", async () => {
     // An agent that could reconcile could release authorization it had itself consumed.
     const reservation = await unresolved();
+    const agentConsole = new OperatorSpendConsole({ spend, actor: AGENT });
 
     await expect(
-      spend.reconcile(reservation, {
-        actor: AGENT,
+      agentConsole.reconcile(reservation, {
         evidenceRef: evidence,
         decisionId: "dec-1",
         resolution: { kind: "released_as_uncharged" },
@@ -98,12 +100,31 @@ describe("who may reconcile", () => {
     ).rejects.toThrow(/human decision/);
   });
 
+  it("refuses a caller that fabricates a human authority", async () => {
+    // The defect the console exists to close: a caller-supplied `ActorRef` proves nothing, because
+    // any caller can write `{ kind: "human" }`. The earlier test only proved that a caller honest
+    // about being an agent was refused — which is a different and much weaker claim.
+    const reservation = await unresolved();
+    const forged = { actor: HUMAN } as unknown as Parameters<typeof spend.reconcile>[2];
+
+    await expect(
+      spend.reconcile(
+        reservation,
+        {
+          evidenceRef: evidence,
+          decisionId: "dec-1",
+          resolution: { kind: "released_as_uncharged" },
+        },
+        forged,
+      ),
+    ).rejects.toThrow(/did not come through an operator console/);
+  });
+
   it("refuses a decision that cites nothing", async () => {
     const reservation = await unresolved();
 
     await expect(
-      spend.reconcile(reservation, {
-        actor: HUMAN,
+      console_.reconcile(reservation, {
         evidenceRef: "   ",
         decisionId: "dec-1",
         resolution: { kind: "released_as_uncharged" },
@@ -116,11 +137,16 @@ describe("the two terminal resolutions", () => {
   it("settled_with_amount writes the cost record before releasing authorization", async () => {
     const reservation = await unresolved();
 
-    const result = await spend.reconcile(reservation, {
-      actor: HUMAN,
+    const result = await console_.reconcile(reservation, {
       evidenceRef: evidence,
       decisionId: "dec-1",
-      resolution: { kind: "settled_with_amount", amount: { amount: "0.7500", currency: "USD" } },
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.7500", currency: "USD" },
+        // Who charged, and for what. Aldus does not invent a provider to fill a required field.
+        provider: "provider-a",
+        billedOperation: "completion",
+      },
     });
 
     expect(result.reservation.status).toBe("settled");
@@ -134,8 +160,7 @@ describe("the two terminal resolutions", () => {
   it("released_as_uncharged releases, and the evidence is on the record", async () => {
     const reservation = await unresolved();
 
-    const result = await spend.reconcile(reservation, {
-      actor: HUMAN,
+    const result = await console_.reconcile(reservation, {
       evidenceRef: evidence,
       decisionId: "dec-1",
       resolution: { kind: "released_as_uncharged" },
@@ -157,21 +182,29 @@ it("does not settle when the cost record cannot be written", async () => {
   // every other test here — the requirement was in the ruling and in the code, and asserted by
   // nobody.
   const reservation = await unresolved("effect-write-fails");
-  const failing = new SpendService({
-    store,
-    costs: {
-      list: () => Promise.resolve([]),
-      append: () => Promise.reject(new Error("cost store unavailable")),
-    },
-    now: () => new Date("2026-01-01T00:00:00.000Z"),
+  const failing = new OperatorSpendConsole({
+    spend: new SpendService({
+      store,
+      costs: {
+        list: () => Promise.resolve([]),
+        append: () => Promise.reject(new Error("cost store unavailable")),
+      },
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    }),
+    actor: HUMAN,
   });
 
   await expect(
     failing.reconcile(reservation, {
-      actor: HUMAN,
       evidenceRef: evidence,
       decisionId: "dec-1",
-      resolution: { kind: "settled_with_amount", amount: { amount: "0.7500", currency: "USD" } },
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.7500", currency: "USD" },
+        // Who charged, and for what. Aldus does not invent a provider to fill a required field.
+        provider: "provider-a",
+        billedOperation: "completion",
+      },
     }),
   ).rejects.toThrow(/cost store unavailable/);
 
@@ -184,14 +217,89 @@ it("does not settle when the cost record cannot be written", async () => {
   expect(stream.transitions.some((t) => t.kind === "reservation.settled")).toBe(false);
 });
 
+describe("billing attribution stays truthful", () => {
+  it("refuses to settle an amount without saying who charged", async () => {
+    // The first implementation wrote `provider: "reconciled"` — how Aldus learned a fact, not who
+    // billed. That fabricates a provider and silently removes the charge from per-provider
+    // reporting. Written because a mutation dropping this refusal passed everything.
+    const reservation = await unresolved("effect-no-provider");
+
+    await expect(
+      console_.reconcile(reservation, {
+        evidenceRef: evidence,
+        decisionId: "dec-1",
+        resolution: { kind: "settled_with_amount", amount: { amount: "0.5000", currency: "USD" } },
+      }),
+    ).rejects.toThrow(/requires who was charged and for what/);
+  });
+
+  it("takes provider and operation from a surviving unresolved observation", async () => {
+    // Where the charge was recorded but its amount was not, the provider is already known and the
+    // human should not have to restate it — nor be able to restate it differently.
+    const reservation = await unresolved("effect-linked");
+    await costs.append(RUN, {
+      schemaVersion: SCHEMA_VERSION,
+      costId: `${reservation.reservationId}:cost:0`,
+      runId: RUN,
+      reservationId: reservation.reservationId,
+      provider: "provider-b",
+      operation: "synthesis",
+      billingStatus: "unknown",
+      recordedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const resolved = await console_.reconcile(reservation, {
+      evidenceRef: evidence,
+      decisionId: "dec-1",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.5000", currency: "USD" },
+        // Deliberately different: the surviving observation is the authority on who charged.
+        provider: "provider-a",
+        billedOperation: "completion",
+      },
+    });
+
+    expect(resolved.costs[0]?.provider).toBe("provider-b");
+    expect(resolved.costs[0]?.operation).toBe("synthesis");
+  });
+
+  it("never writes Aldus itself as the provider", async () => {
+    // The specific literal the first implementation used. Asserted directly because a refusal that
+    // happens to fire on the *operation* being absent does not prove the provider is never
+    // synthesized — a mutation defaulting only the provider passed the test above.
+    const reservation = await unresolved("effect-provider-literal");
+    await costs.append(RUN, {
+      schemaVersion: SCHEMA_VERSION,
+      costId: `${reservation.reservationId}:cost:0`,
+      runId: RUN,
+      reservationId: reservation.reservationId,
+      provider: "provider-b",
+      operation: "synthesis",
+      billingStatus: "unknown",
+      recordedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const resolved = await console_.reconcile(reservation, {
+      evidenceRef: evidence,
+      decisionId: "dec-1",
+      resolution: { kind: "settled_with_amount", amount: { amount: "0.5000", currency: "USD" } },
+    });
+
+    for (const record of resolved.costs) {
+      expect(record.provider).not.toBe("reconciled");
+      expect(record.operation).not.toBe("reconciliation");
+    }
+  });
+});
+
 describe("investigation that ends without an answer", () => {
   it("records the decision and resolves nothing", async () => {
     // The rejected third resolution, in the shape it is permitted to take. "I could not find a
     // charge" is a human decision worth recording and is not evidence that no charge occurred.
     const reservation = await unresolved();
 
-    const result = await spend.reconcile(reservation, {
-      actor: HUMAN,
+    const result = await console_.reconcile(reservation, {
       evidenceRef: "searched the console and the invoice; found nothing",
       decisionId: "dec-1",
       resolution: { kind: "investigation_ended" },
@@ -209,8 +317,7 @@ describe("investigation that ends without an answer", () => {
   it("cannot be used to create a numeric cost", async () => {
     const reservation = await unresolved();
 
-    await spend.reconcile(reservation, {
-      actor: HUMAN,
+    await console_.reconcile(reservation, {
       evidenceRef: "abandoned",
       decisionId: "dec-1",
       resolution: { kind: "investigation_ended" },
@@ -236,18 +343,21 @@ describe("idempotency and staleness", () => {
   it("reconciling twice with the same decision does not settle twice", async () => {
     const reservation = await unresolved();
     const input = {
-      actor: HUMAN,
       evidenceRef: evidence,
       decisionId: "dec-1",
       resolution: {
         kind: "settled_with_amount" as const,
         amount: { amount: "0.7500", currency: "USD" },
+        provider: "provider-a",
+        billedOperation: "completion",
       },
     };
 
-    await spend.reconcile(reservation, input);
+    await console_.reconcile(reservation, input);
     // The second call sees a terminal reservation and refuses rather than writing again.
-    await expect(spend.reconcile(reservation, input)).rejects.toThrow(/only an unresolved charge/);
+    await expect(console_.reconcile(reservation, input)).rejects.toThrow(
+      /only an unresolved charge/,
+    );
 
     expect(costs.records).toHaveLength(1);
   });
@@ -265,8 +375,7 @@ describe("idempotency and staleness", () => {
     if (!outcome.reserved) throw new Error("expected a reservation");
 
     await expect(
-      spend.reconcile(outcome.reservation, {
-        actor: HUMAN,
+      console_.reconcile(outcome.reservation, {
         evidenceRef: evidence,
         decisionId: "dec-1",
         resolution: { kind: "released_as_uncharged" },
@@ -305,25 +414,75 @@ describe("budget status", () => {
   });
 });
 
+describe("an abandoned investigation is not a dead end", () => {
+  it("investigation_ended then a later settled_with_amount both succeed", async () => {
+    // The defect the ruling found: recording an abandoned investigation on the terminal
+    // `reservation.reconciled` seam left the projection `billing_unknown`, so a later decision
+    // looked legal and was then refused because the last transition was already `reconciled`.
+    // Ending one investigation permanently prevented later evidence from resolving the charge.
+    const reservation = await unresolved("effect-dead-end");
+
+    await console_.reconcile(reservation, {
+      evidenceRef: "searched the console; found nothing",
+      decisionId: "dec-1",
+      resolution: { kind: "investigation_ended" },
+    });
+    const afterFirst = await store.get(reservation.reservationId);
+    expect(afterFirst?.status).toBe("billing_unknown");
+
+    // A second abandoned investigation is also permitted — evidence may arrive on the third try.
+    await console_.reconcile(afterFirst as NonNullable<typeof afterFirst>, {
+      evidenceRef: "asked support; no answer yet",
+      decisionId: "dec-2",
+      resolution: { kind: "investigation_ended" },
+    });
+
+    const afterSecond = await store.get(reservation.reservationId);
+    const resolved = await console_.reconcile(afterSecond as NonNullable<typeof afterSecond>, {
+      evidenceRef: "invoice line 88 shows 0.9000 USD",
+      decisionId: "dec-3",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.9000", currency: "USD" },
+        provider: "provider-a",
+        billedOperation: "completion",
+      },
+    });
+
+    expect(resolved.reservation.status).toBe("settled");
+    // Every finding is on the record, in order, including the two that resolved nothing.
+    const [entry] = (await spend.status(RUN)).filter(
+      (item) => item.reservationId === reservation.reservationId,
+    );
+    expect(entry?.reconciliationHistory.map((h) => h.outcome)).toEqual([
+      "audit_only",
+      "audit_only",
+      "terminal",
+    ]);
+    expect(entry?.reconciliationHistory[0]?.evidenceRef).toContain("found nothing");
+  });
+});
+
 describe("#152 — the provider may have executed and the cost write failed", () => {
-  it("leaves the reservation active, exposes the handle, and reconciles to a correct terminal state", async () => {
+  it("becomes reconcilable without any preparatory repair step", async () => {
     // The contract test the ruling names, end to end:
     //
     //   provider may have executed
     //     → CostRecord append fails
     //       → reservation remains active and non-retryable
-    //         → budget status exposes the reconciliation handle
+    //         → budget status exposes the reconciliation handle and the reason
     //           → human reconciliation reaches the correct audited terminal state
     //
-    // No paid provider is involved: the failure is injected at the store, which is where a real
-    // one would surface.
-    const failing: CostRecordStore = {
+    // The earlier version called `markUnknown` by hand between the failure and the reconciliation,
+    // which proved the *pieces* worked and not the path: an operator has no such call, and a state
+    // that needs an out-of-band repair before it can be acted on is not a recovery.
+    const failingCosts: CostRecordStore = {
       list: () => Promise.resolve([]),
       append: () => Promise.reject(new Error("cost store unavailable")),
     };
     const service = new SpendService({
       store,
-      costs: failing,
+      costs: failingCosts,
       now: () => new Date("2026-01-01T00:00:00.000Z"),
     });
 
@@ -360,34 +519,121 @@ describe("#152 — the provider may have executed and the cost write failed", ()
       ),
     ).rejects.toThrow(/cost store unavailable/);
 
-    // Still active: the money may be gone and nothing recorded it, so releasing would restore
-    // authorization for a charge that may have happened.
-    const stillActive = await store.get(identified.reservationId);
-    expect(stillActive?.status).toBe("reserved");
-
-    // The handle an operator needs to investigate, without any credential.
+    // The state an operator has to act on exists already — nobody had to put it there.
     const [entry] = (await service.status(RUN)).filter(
       (item) => item.reservationId === identified.reservationId,
     );
+    expect(entry?.requiresReconciliation).toBe(true);
+    expect(entry?.unresolvedReason).toContain("settlement persistence failed");
     expect(entry?.providerRequestId).toBe("provider-request-9");
     expect(entry?.execution?.backendVersion).toBe("1.0.0");
 
-    // A human establishes what happened. `markUnknown` first, because reconciliation resolves an
-    // unresolved charge and this one is merely unrecorded — the operator states which it is.
-    const unknownNow = await service.markUnknown(stillActive as NonNullable<typeof stillActive>);
-    const working = new SpendService({
-      store,
-      costs,
-      now: () => new Date("2026-01-01T00:00:00.000Z"),
-    });
-    const resolved = await working.reconcile(unknownNow, {
+    // A human resolves it from that surfaced state, through the operator console.
+    const operator = new OperatorSpendConsole({
+      spend: new SpendService({ store, costs, now: () => new Date("2026-01-01T00:00:00.000Z") }),
       actor: HUMAN,
+    });
+    const stuck = await store.get(identified.reservationId);
+    const resolved = await operator.reconcile(stuck as NonNullable<typeof stuck>, {
       evidenceRef: "provider console shows request provider-request-9 charged 1.0000 USD",
       decisionId: "dec-152",
-      resolution: { kind: "settled_with_amount", amount: { amount: "1.0000", currency: "USD" } },
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "1.0000", currency: "USD" },
+        provider: "provider-a",
+        billedOperation: "completion",
+      },
     });
 
     expect(resolved.reservation.status).toBe("settled");
-    expect(resolved.costs[0]?.actual).toEqual({ amount: "1.0000", currency: "USD" });
+    // Truthful attribution: the provider that charged, and the authorization it drew on.
+    expect(resolved.costs[0]?.provider).toBe("provider-a");
+    expect(resolved.costs[0]?.operation).toBe("completion");
+    expect(resolved.costs[0]?.authorizationId).toBe(grant.decisionId);
+  });
+
+  it("resumes the same decision after a transient cost-store failure", async () => {
+    // The decision is durable before the cost write, so retrying it must continue rather than
+    // restart — and must not be blocked by the decision transition it already appended.
+    const reservation = await unresolved("effect-resume");
+    let failNext = true;
+    const flaky: CostRecordStore = {
+      list: () => costs.list(RUN),
+      append: (runId, record) => {
+        if (failNext) {
+          failNext = false;
+          return Promise.reject(new Error("transient store failure"));
+        }
+        return costs.append(runId, record);
+      },
+    };
+    const operator = new OperatorSpendConsole({
+      spend: new SpendService({
+        store,
+        costs: flaky,
+        now: () => new Date("2026-01-01T00:00:00.000Z"),
+      }),
+      actor: HUMAN,
+    });
+    const decision = {
+      evidenceRef: evidence,
+      decisionId: "dec-resume",
+      resolution: {
+        kind: "settled_with_amount" as const,
+        amount: { amount: "0.5000", currency: "USD" },
+        provider: "provider-a",
+        billedOperation: "completion",
+      },
+    };
+
+    await expect(operator.reconcile(reservation, decision)).rejects.toThrow(/transient/);
+
+    const midway = await store.get(reservation.reservationId);
+    const resumed = await operator.reconcile(midway as NonNullable<typeof midway>, decision);
+
+    expect(resumed.reservation.status).toBe("settled");
+    expect(costs.records.filter((r) => r.reservationId === reservation.reservationId)).toHaveLength(
+      1,
+    );
+  });
+
+  it("refuses a different decision once one is recorded", async () => {
+    const reservation = await unresolved("effect-conflict");
+    await console_.reconcile(reservation, {
+      evidenceRef: evidence,
+      decisionId: "dec-first",
+      resolution: { kind: "investigation_ended" },
+    });
+    const afterAudit = await store.get(reservation.reservationId);
+    await console_.reconcile(afterAudit as NonNullable<typeof afterAudit>, {
+      evidenceRef: evidence,
+      decisionId: "dec-second",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.5000", currency: "USD" },
+        provider: "provider-a",
+        billedOperation: "completion",
+      },
+    });
+
+    // An abandoned investigation does not block a later finding — the dead end the ruling named.
+    const settled = await store.get(reservation.reservationId);
+    expect(settled?.status).toBe("settled");
+
+    // But a second, different *terminal* decision would overwrite a human's recorded finding.
+    const another = await unresolved("effect-two-decisions");
+    await console_.reconcile(another, {
+      evidenceRef: evidence,
+      decisionId: "dec-a",
+      resolution: { kind: "released_as_uncharged" },
+    });
+    const done = await store.get(another.reservationId);
+    await expect(
+      console_.reconcile(done as NonNullable<typeof done>, {
+        evidenceRef: evidence,
+        decisionId: "dec-b",
+        resolution: { kind: "released_as_uncharged" },
+      }),
+    ).rejects.toThrow(/only an unresolved charge/);
   });
 });
