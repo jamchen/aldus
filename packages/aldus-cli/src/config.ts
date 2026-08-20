@@ -152,6 +152,7 @@ export interface AldusConfig {
  * is the intended direction: the list cannot silently fall behind the interface.
  */
 const KNOWN_CONFIG_KEYS = [
+  "agentBackend",
   "archive",
   "gates",
   "releaseAdapters",
@@ -159,8 +160,25 @@ const KNOWN_CONFIG_KEYS = [
   "stages",
   "subjects",
   "synthesisAdapter",
+  "workers",
   "workflow",
 ] as const satisfies readonly (keyof AldusConfig)[];
+
+/**
+ * Every key of {@link AldusConfig} must appear in the list above, or this does not compile.
+ *
+ * `satisfies` above catches a listed key that is **not** on the interface. It does not catch the
+ * opposite, and the opposite is the direction that bites: a field is declared on the interface,
+ * the CLI reads it and passes it to the composition, and `loadConfig` refuses the key before that
+ * code can run. An adopter then writes a field they can see in the type, typechecks clean, and is
+ * told at runtime that it does not exist (#123).
+ *
+ * A test would catch this too, and a compile error catches it earlier and cannot be skipped. The
+ * failure names the missing key, because `MissingConfigKey` resolves to it.
+ */
+type MissingConfigKey = Exclude<keyof AldusConfig, (typeof KNOWN_CONFIG_KEYS)[number]>;
+const _everyConfigKeyIsRecognised: MissingConfigKey extends never ? true : MissingConfigKey = true;
+void _everyConfigKeyIsRecognised;
 
 /** A config module may export its config as `default` or as `config`, as an object or a factory. */
 interface ConfigModule {
