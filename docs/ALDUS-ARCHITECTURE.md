@@ -654,6 +654,18 @@ Whether an evaluation result stops work is governed by the declared enforcement 
 class and by §12.1, never by the evaluator itself. A finding whose class has no declared
 enforcement MUST be refused rather than assigned a default.
 
+An evaluation observation MUST state whether it **enumerates one identified defect occurrence** or
+**reports that an evaluator triggered without enumerating its contents**. The channel MUST declare
+which form it emits, and an observation whose form disagrees with its channel MUST be refused.
+
+One enumerated finding counts as one finding. One report counts as one evaluator report and MUST
+NOT contribute to a defect count. The absence of enumerated findings inside a report MUST NOT be
+read as zero defects: where only reports are present, a defect count is **unmeasurable**, which is
+neither zero nor the number of reports. Where a report cannot be mapped to a subject scope,
+site-level metrics are unmeasurable rather than zero. Both forms trigger the channel's declared
+enforcement — whether an observation can be counted and whether it stops work are separate
+questions.
+
 ### 12.1 Evaluator promotion policy
 
 An evaluator MAY become blocking only after it is calibrated against human-labeled examples. Promotion SHOULD consider:

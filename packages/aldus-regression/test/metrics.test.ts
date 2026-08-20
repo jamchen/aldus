@@ -184,3 +184,58 @@ describe("naming (contract §12)", () => {
     expect(keys.join(" ").toLowerCase()).not.toMatch(/accuracy|correctness/);
   });
 });
+
+describe("an evaluator that flagged without enumerating (#140)", () => {
+  // The sixth acceptance case of the #140 ruling. A wrapped legacy evaluator reports that it had
+  // something to say and not how much — so a case-level flag is sound and everything per site is
+  // unmeasurable.
+
+  const scope = { show: "example-show" };
+
+  it("keeps the case-level verdict, because a flag is a flag", () => {
+    const corpus = aCorpus([aCase({ id: "case-1", scope, defective: true, severity: "major" })]);
+    const report = compareRun(
+      corpus,
+      aRun([{ caseId: "case-1", flagged: true, findings: [] }]),
+      policy(),
+    );
+
+    expect(report.comparisons[0]?.verdict).toBe("truePositive");
+  });
+
+  it("marks site-level metrics unmeasurable rather than answering them", () => {
+    // The defect this closes: with no evaluator categories to compare, `categoryMismatch` came out
+    // `false`, which reads as *the categories agreed*. An evaluator nobody measured scored a clean
+    // sheet, and the number was reported next to ones that mean something.
+    const corpus = aCorpus([aCase({ id: "case-1", scope, defective: true, severity: "major" })]);
+    const report = compareRun(
+      corpus,
+      aRun([{ caseId: "case-1", flagged: true, findings: [] }]),
+      policy(),
+    );
+
+    expect(report.comparisons[0]?.siteMetricsMeasurable).toBe(false);
+    expect(report.wholeCorpus.unmeasurableSiteMetrics).toBe(1);
+  });
+
+  it("does not fabricate a finding to make the record look complete", () => {
+    // `flagged: true` with an empty findings list is not a contradiction to be repaired. Inventing
+    // one entry would make one report count as one defect, which is the statistic this exists to
+    // protect.
+    const corpus = aCorpus([aCase({ id: "case-1", scope, defective: true, severity: "major" })]);
+    const run = aRun([{ caseId: "case-1", flagged: true, findings: [] }]);
+
+    compareRun(corpus, run, policy());
+
+    expect(run.outcomes[0]?.findings).toEqual([]);
+  });
+
+  it("still measures a case the evaluator did enumerate", () => {
+    // The other side of the condition, so the flag is not simply always false.
+    const corpus = aCorpus([aCase({ id: "case-1", scope, defective: true, severity: "major" })]);
+    const report = compareRun(corpus, aRun([anOutcome("case-1", true)]), policy());
+
+    expect(report.comparisons[0]?.siteMetricsMeasurable).toBe(true);
+    expect(report.wholeCorpus.unmeasurableSiteMetrics).toBe(0);
+  });
+});

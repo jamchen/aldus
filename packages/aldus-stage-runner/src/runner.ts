@@ -50,7 +50,8 @@ import {
   checkArtifactContract,
   type ArtifactObligation,
   type StageWorkerRequest,
-  type EvaluationFinding,
+  type EvaluationObservation,
+  countEvaluationEvidence,
 } from "./definition.js";
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
 import { assertWorkerCapabilities, type WorkerRegistry, type WorkerResult } from "./worker.js";
@@ -687,8 +688,8 @@ export class StageRunner {
     // anything (§12.1, ADR pending on #115).
     if (outcome.kind === "evaluated") {
       const channels = definition.evaluation?.channels ?? [];
-      const blocking: EvaluationFinding[] = [];
-      for (const finding of outcome.findings) {
+      const blocking: EvaluationObservation[] = [];
+      for (const finding of outcome.observations) {
         const channel = channels.find((entry) => entry.findingClass === finding.findingClass);
         if (channel === undefined) {
           // Refused rather than defaulted. A finding whose class the stage never declared would
@@ -714,13 +715,58 @@ export class StageRunner {
             ),
           });
         }
+        // The evidence form is declared, not chosen per result (#140). A stage that could decide
+        // per observation whether its output is countable could make a defect rate mean whatever
+        // this run needed it to mean — the same reason enforcement is declared rather than set on
+        // the way past.
+        const expectedKind = channel.evidenceKind === "aggregate_reports" ? "report" : "finding";
+        if (finding.kind !== expectedKind) {
+          return this.#terminal(manifest, definition, settled, withNotes(), {
+            status: "failed",
+            invocationKey,
+            error: redactError(
+              toStructuredError(
+                stageRunnerError(
+                  StageRunnerErrorCodes.STAGE_EVALUATION_INVALID,
+                  `Stage "${definition.id}" emitted a "${finding.kind}" on channel ` +
+                    `"${finding.findingClass}", which declares "${channel.evidenceKind}". An ` +
+                    "enumerated finding counts as one defect and a report counts as none, so " +
+                    "emitting the other form would make a defect count mean something the " +
+                    "declaration did not say (contract §12).",
+                  {
+                    category: "validation",
+                    retryable: false,
+                    details: {
+                      stageId: definition.id,
+                      findingClass: finding.findingClass,
+                      declared: channel.evidenceKind,
+                      emitted: finding.kind,
+                    },
+                  },
+                ),
+              ),
+            ),
+          });
+        }
+        // Both forms trigger the channel's declared enforcement. Countability and blocking are
+        // separate questions: a report that cannot be counted can still stop work.
         if (channel.enforcement === "blocking") blocking.push(finding);
       }
 
       // Recorded either way — an advisory finding that vanished would make a green result look
       // like semantic correctness, which §12 forbids.
-      for (const finding of outcome.findings) {
-        notes.push(`${finding.findingClass}: ${finding.message}`);
+      for (const observation of outcome.observations) {
+        // The kind is written into the note, because a note reading only "warning: …" is exactly
+        // the record that gets counted as one defect later (#140).
+        notes.push(`${observation.kind}/${observation.findingClass}: ${observation.message}`);
+      }
+      const evidence = countEvaluationEvidence(outcome.observations);
+      if (!evidence.defectCountMeasurable) {
+        notes.push(
+          `evaluation evidence: ${evidence.enumeratedFindings} enumerated finding(s) and ` +
+            `${evidence.reports} report(s); a defect count over this evidence is not measurable, ` +
+            "because a report states that an evaluator had something to say and not how much.",
+        );
       }
 
       if (blocking.length > 0) {
@@ -731,7 +777,7 @@ export class StageRunner {
             toStructuredError(
               stageRunnerError(
                 StageRunnerErrorCodes.STAGE_EVALUATION_BLOCKED,
-                `Stage "${definition.id}" found ${blocking.length} blocking finding(s). This is ` +
+                `Stage "${definition.id}" has ${blocking.length} blocking observation(s). This is ` +
                   "the evaluator working, not the evaluator failing — the findings are recorded " +
                   "and the stage stopped because their class is declared blocking (§12).",
                 {

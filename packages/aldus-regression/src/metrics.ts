@@ -54,6 +54,19 @@ export interface CaseComparison {
    * negative — it did catch the case — but a promotion reader should see it.
    */
   categoryMismatch: boolean;
+  /**
+   * Whether site-level comparison means anything for this case (#140).
+   *
+   * `false` when the evaluator flagged without enumerating what it found — a wrapped legacy
+   * evaluator reporting that it had something to say, and nothing about how much or where.
+   *
+   * The case-level verdict is still sound: a flag is a flag, and §12's precision and recall over
+   * *cases* are computable. What is not computable is anything per site, and the previous code
+   * quietly answered it anyway — with no evaluator categories to compare, `categoryMismatch` came
+   * out `false`, which reads as *the categories agreed*. An evaluator nobody measured would have
+   * scored a clean sheet.
+   */
+  siteMetricsMeasurable: boolean;
   /** Harm a spurious flag would cause here; zero unless this is a false positive. */
   unnecessaryCorrectionHarm: number;
 }
@@ -79,6 +92,14 @@ export interface SliceMetrics {
   trueNegatives: number;
   /** True positives found under the wrong category (contract §12.3). */
   categoryMismatches: number;
+  /**
+   * Cases whose site-level metrics are unmeasurable (#140).
+   *
+   * Reported rather than folded in, because a slice where this is large is a slice whose
+   * category agreement means much less than the other numbers suggest. Zero is the honest value
+   * only when it is true.
+   */
+  unmeasurableSiteMetrics: number;
   /** `truePositives / defectiveCases`; `undefined` when there are no defective cases. */
   recall: number | undefined;
   /** `falsePositives / cleanCases`; `undefined` when there are no clean cases. */
@@ -159,6 +180,11 @@ function compareCase(
     severity: entry.severity,
     severityWeight: weight,
     categoryMismatch,
+    // A flag with nothing enumerated. Not a contradiction to be repaired by inventing a finding —
+    // that would make one report count as one defect, which is exactly the statistic #140 exists
+    // to protect.
+    siteMetricsMeasurable:
+      outcome?.siteMetricsMeasurable ?? !(flagged && (outcome?.findings ?? []).length === 0),
     unnecessaryCorrectionHarm: harm,
   };
 }
@@ -206,6 +232,8 @@ function summarise(
     falsePositives,
     trueNegatives,
     categoryMismatches: comparisons.filter((comparison) => comparison.categoryMismatch).length,
+    unmeasurableSiteMetrics: comparisons.filter((comparison) => !comparison.siteMetricsMeasurable)
+      .length,
     recall: defectiveCases === 0 ? undefined : truePositives / defectiveCases,
     falsePositiveRate: cleanCases === 0 ? undefined : falsePositives / cleanCases,
     severityWeightedRecall: defectiveWeight === 0 ? undefined : caughtWeight / defectiveWeight,

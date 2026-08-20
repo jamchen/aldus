@@ -45,6 +45,8 @@ const PUBLIC_SURFACE: Record<string, { module: object; names: readonly string[] 
       "deriveInvocationKey",
       "resolveArtifactContract",
       "checkArtifactContract",
+      "countEvaluationEvidence",
+      "asEnumeratedFinding",
       // Adopter-facing doubles. Listed because a new export is exactly what gets forgotten — the
       // Worker module itself was implemented, tested and unexported for a full release (#121).
       "recordingWorker",
@@ -132,14 +134,15 @@ describe("the published surface is what an adopter can reach (#121)", () => {
     // Same failure mode, one release later. An adopter told to report findings rather than throw
     // has to name the shape to build it, and `EvaluationFinding` is type-only — invisible to the
     // value check above, and reachable or not only at compile time.
-    const finding: stageRunner.EvaluationFinding = {
+    const finding: stageRunner.EvaluationObservation = {
+      kind: "finding",
       findingClass: "warning",
       message: "example finding",
     };
     const outcome: stageRunner.StageOutcome<{ checked: number }> = {
       kind: "evaluated",
       output: { checked: 1 },
-      findings: [finding],
+      observations: [finding],
     };
     expect(outcome.kind).toBe("evaluated");
   });

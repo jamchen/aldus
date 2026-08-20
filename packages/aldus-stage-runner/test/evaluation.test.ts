@@ -13,6 +13,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { asEnumeratedFinding, countEvaluationEvidence } from "../src/definition.js";
+
 import { aStage, makeTempRun, type TempRun } from "./helpers.js";
 
 let harness: TempRun;
@@ -39,8 +41,18 @@ describe("a Stage declaring quality claims", () => {
           id: "script.lint",
           evaluation: {
             channels: [
-              { findingClass: "error", level: "hard_gate", enforcement: "blocking" },
-              { findingClass: "warning", level: "advisory_signal", enforcement: "advisory" },
+              {
+                findingClass: "error",
+                level: "hard_gate",
+                enforcement: "blocking",
+                evidenceKind: "enumerated_findings",
+              },
+              {
+                findingClass: "warning",
+                level: "advisory_signal",
+                enforcement: "advisory",
+                evidenceKind: "enumerated_findings",
+              },
             ],
             scopeLimitations: ["appendix sections are cut before checking"],
           },
@@ -55,7 +67,14 @@ describe("a Stage declaring quality claims", () => {
         aStage({
           id: "semantic.review",
           evaluation: {
-            channels: [{ findingClass: "error", level: "model_assisted", enforcement: "blocking" }],
+            channels: [
+              {
+                findingClass: "error",
+                level: "model_assisted",
+                enforcement: "blocking",
+                evidenceKind: "enumerated_findings",
+              },
+            ],
           },
         }),
       ),
@@ -73,6 +92,7 @@ describe("a Stage declaring quality claims", () => {
                 findingClass: "error",
                 level: "model_assisted",
                 enforcement: "blocking",
+                evidenceKind: "enumerated_findings",
                 promotionEvidence: evidence,
               },
             ],
@@ -90,7 +110,12 @@ describe("a Stage declaring quality claims", () => {
           id: "rhythm.check",
           evaluation: {
             channels: [
-              { findingClass: "error", level: "advisory_signal", enforcement: "blocking" },
+              {
+                findingClass: "error",
+                level: "advisory_signal",
+                enforcement: "blocking",
+                evidenceKind: "enumerated_findings",
+              },
             ],
           },
         }),
@@ -111,6 +136,7 @@ describe("a Stage declaring quality claims", () => {
                 findingClass: "error",
                 level: "model_assisted",
                 enforcement: "blocking",
+                evidenceKind: "enumerated_findings",
                 promotionEvidence: { reportRef: "r", scope: {} },
               },
             ],
@@ -127,8 +153,18 @@ describe("a Stage declaring quality claims", () => {
           id: "script.lint",
           evaluation: {
             channels: [
-              { findingClass: "error", level: "hard_gate", enforcement: "blocking" },
-              { findingClass: "error", level: "advisory_signal", enforcement: "advisory" },
+              {
+                findingClass: "error",
+                level: "hard_gate",
+                enforcement: "blocking",
+                evidenceKind: "enumerated_findings",
+              },
+              {
+                findingClass: "error",
+                level: "advisory_signal",
+                enforcement: "advisory",
+                evidenceKind: "enumerated_findings",
+              },
             ],
           },
         }),
@@ -160,11 +196,25 @@ describe("an evaluator that ran and found something (#115)", () => {
       id: "stage-a",
       evaluation: {
         channels: [
-          { findingClass: "error", level: "hard_gate", enforcement: "blocking" },
-          { findingClass: "warning", level: "advisory_signal", enforcement: "advisory" },
+          {
+            findingClass: "error",
+            level: "hard_gate",
+            enforcement: "blocking",
+            evidenceKind: "enumerated_findings",
+          },
+          {
+            findingClass: "warning",
+            level: "advisory_signal",
+            enforcement: "advisory",
+            evidenceKind: "enumerated_findings",
+          },
         ],
       },
-      execute: async () => ({ kind: "evaluated", output: { checked: 12 }, findings }),
+      execute: async () => ({
+        kind: "evaluated",
+        output: { checked: 12 },
+        observations: findings.map((finding) => ({ ...finding, kind: "finding" as const })),
+      }),
     });
 
   it("blocks on a finding whose class is declared blocking, and says it was a finding", async () => {
@@ -216,7 +266,14 @@ describe("an evaluator that ran and found something (#115)", () => {
       aStage({
         id: "stage-b",
         evaluation: {
-          channels: [{ findingClass: "error", level: "hard_gate", enforcement: "blocking" }],
+          channels: [
+            {
+              findingClass: "error",
+              level: "hard_gate",
+              enforcement: "blocking",
+              evidenceKind: "enumerated_findings",
+            },
+          ],
         },
         execute: async () => {
           throw new Error("the evaluator's own parser threw");
@@ -242,12 +299,21 @@ describe("an evaluator that ran and found something (#115)", () => {
       aStage({
         id: "stage-a",
         evaluation: {
-          channels: [{ findingClass: "error", level: "hard_gate", enforcement: "advisory" }],
+          channels: [
+            {
+              findingClass: "error",
+              level: "hard_gate",
+              enforcement: "advisory",
+              evidenceKind: "enumerated_findings",
+            },
+          ],
         },
         execute: async () => ({
           kind: "evaluated",
           output: {},
-          findings: [{ findingClass: "error", message: "unsupported claim" }],
+          observations: [
+            { kind: "finding" as const, findingClass: "error", message: "unsupported claim" },
+          ],
         }),
       }),
     );
@@ -255,5 +321,175 @@ describe("an evaluator that ran and found something (#115)", () => {
     const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
 
     expect(result.status).toBe("succeeded");
+  });
+});
+
+describe("the seven acceptance cases of the #140 ruling", () => {
+  // The distinction is countability, not scope. A document-wide omission may be one enumerated
+  // defect; a report about one file may contain forty. Subject scope and statistical cardinality
+  // are orthogonal, which is why `granularity: "site" | "run"` was rejected.
+
+  const enumerating = {
+    findingClass: "error",
+    level: "hard_gate",
+    enforcement: "blocking",
+    evidenceKind: "enumerated_findings",
+  } as const;
+  const reporting = {
+    findingClass: "vendored",
+    level: "advisory_signal",
+    enforcement: "advisory",
+    evidenceKind: "aggregate_reports",
+  } as const;
+
+  it("1. a structured linter produces multiple enumerated findings", async () => {
+    harness.registry.register(
+      aStage({
+        id: "stage-a",
+        evaluation: { channels: [enumerating] },
+        execute: async () => ({
+          kind: "evaluated",
+          output: {},
+          observations: [
+            { kind: "finding", findingClass: "error", message: "one" },
+            { kind: "finding", findingClass: "error", message: "two" },
+          ],
+        }),
+      }),
+    );
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    expect(result.status).toBe("failed");
+    expect(
+      countEvaluationEvidence([
+        { kind: "finding", findingClass: "error", message: "one" },
+        { kind: "finding", findingClass: "error", message: "two" },
+      ]),
+    ).toEqual({ enumeratedFindings: 2, reports: 0, defectCountMeasurable: true });
+  });
+
+  it("2. a vendored linter produces one aggregate report", async () => {
+    harness.registry.register(
+      aStage({
+        id: "stage-a",
+        evaluation: { channels: [reporting] },
+        execute: async () => ({
+          kind: "evaluated",
+          output: {},
+          observations: [
+            { kind: "report", findingClass: "vendored", message: "lint-sources exited 1" },
+          ],
+        }),
+      }),
+    );
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    expect(result.status).toBe("succeeded");
+
+    const stored = await harness.runner.stageExecution(harness.manifest.runId, "stage-a");
+    const attemptId = stored?.execution.attempts.at(-1)?.attemptId ?? "";
+    const notes = (stored?.metadata[attemptId]?.notes ?? []).join(" ");
+    // The kind is in the note. A note reading only "vendored: …" is the record that gets counted
+    // as one defect later.
+    expect(notes).toContain("report/vendored");
+    expect(notes).toContain("not measurable");
+  });
+
+  it("3. both forms trigger the channel's declared enforcement", async () => {
+    // Countability and blocking are separate questions. A report that cannot be counted can still
+    // stop work — and an enumerated finding on an advisory channel still cannot.
+    harness.registry.register(
+      aStage({
+        id: "stage-a",
+        // `hard_gate`, not `advisory_signal` — the first draft of this test spread `blocking` onto
+        // an advisory signal and was correctly refused as a §12 contradiction. A vendored linter's
+        // exit code is objectively testable, so level 1 is the honest classification, and this is
+        // the pairing §12's table permits: level and enforcement are chosen separately.
+        evaluation: {
+          channels: [
+            {
+              ...reporting,
+              level: "hard_gate",
+              enforcement: "blocking",
+              evidenceKind: "enumerated_findings",
+            },
+          ],
+        },
+        execute: async () => ({
+          kind: "evaluated",
+          output: {},
+          observations: [{ kind: "report", findingClass: "vendored", message: "exited 1" }],
+        }),
+      }),
+    );
+    harness.registry.register(
+      aStage({
+        id: "stage-b",
+        evaluation: { channels: [{ ...enumerating, enforcement: "advisory" }] },
+        execute: async () => ({
+          kind: "evaluated",
+          output: {},
+          observations: [{ kind: "finding", findingClass: "error", message: "one" }],
+        }),
+      }),
+    );
+
+    const blockingReport = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    const advisoryFinding = await harness.runner.run(harness.manifest.runId, "stage-b", {});
+
+    expect(blockingReport.status).toBe("failed");
+    expect(advisoryFinding.status).toBe("succeeded");
+  });
+
+  it("4. emitted evidence disagreeing with the channel declaration is refused", async () => {
+    harness.registry.register(
+      aStage({
+        id: "stage-a",
+        evaluation: { channels: [enumerating] },
+        execute: async () => ({
+          kind: "evaluated",
+          output: {},
+          // Declared enumerated, emitted a report.
+          observations: [{ kind: "report", findingClass: "error", message: "something happened" }],
+        }),
+      }),
+    );
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("ALDUS_STAGE_EVALUATION_INVALID");
+    expect(result.error?.message).toContain("enumerated_findings");
+  });
+
+  it("5. reports are excluded from defect-count aggregation", async () => {
+    // The rule the whole model exists for. Three reports are not three defects, and they are not
+    // zero either — the count is unmeasurable, and saying so is the only honest answer.
+    const evidence = countEvaluationEvidence([
+      { kind: "finding", findingClass: "error", message: "one real defect" },
+      { kind: "report", findingClass: "vendored", message: "linter a exited 1" },
+      { kind: "report", findingClass: "vendored", message: "linter b exited 1" },
+    ]);
+
+    expect(evidence.enumeratedFindings).toBe(1);
+    expect(evidence.reports).toBe(2);
+    expect(evidence.defectCountMeasurable).toBe(false);
+  });
+
+  // Case 6 — a report flagging a case without fabricating a defect — lives in
+  // `packages/aldus-regression/test/metrics.test.ts`, because that is where the case-level
+  // comparison it is about actually runs. Named here so the ruling's list stays followable.
+
+  it("7. a record predating the discriminant decodes as an enumerated finding", () => {
+    // One direction only. Nothing infers a report from an undiscriminated record: a record written
+    // under the old meaning was never claiming to be one.
+    const legacy = { findingClass: "error", message: "unsupported claim", locator: "line 42" };
+
+    expect(asEnumeratedFinding(legacy)).toEqual({ ...legacy, kind: "finding" });
+    expect(countEvaluationEvidence([asEnumeratedFinding(legacy)])).toEqual({
+      enumeratedFindings: 1,
+      reports: 0,
+      defectCountMeasurable: true,
+    });
   });
 });

@@ -69,6 +69,16 @@ export interface StageEvaluationChannel {
   level: Exclude<QualityLevel, "human_oracle">;
   /** Whether findings of this class stop work or merely report (§12). */
   enforcement: QualityEnforcement;
+  /**
+   * Which form of evidence this channel emits (§12; #140).
+   *
+   * Declared rather than chosen per result, so it is reviewable before execution — the same
+   * principle as {@link enforcement}. A stage that could decide per observation whether its output
+   * is countable could make a defect rate mean whatever this run needed it to mean.
+   *
+   * The runner refuses an observation whose kind disagrees with this.
+   */
+  evidenceKind: "enumerated_findings" | "aggregate_reports";
   /** Calibration evidence, required when a model-assisted channel blocks (§12.1). */
   promotionEvidence?: PromotionEvidence;
 }
@@ -428,10 +438,9 @@ export interface CostPolicy {
 /**
  * One thing an evaluator found (contract §12, §12.3; #115).
  *
- * Structured so the production trace can tell **"the evaluator found a defect"** from **"the
- * evaluator failed"**. Those are different events with different responses, and an adopter whose
- * linter crashed on every run had the crash counted as a soft finding for the length of a
- * migration because nothing distinguished them.
+ * **An enumerated defect occurrence**, and countable as exactly one. That is what this type has
+ * always meant, which is why a record carrying it decodes as {@link EnumeratedFinding} without
+ * needing a discriminant (#140).
  */
 export interface EvaluationFinding {
   /**
@@ -448,6 +457,90 @@ export interface EvaluationFinding {
   category?: string;
   /** Where, in whatever terms the adopter's subject has. */
   locator?: string;
+}
+
+/** One identified defect occurrence. Counts as one finding (§12; #140). */
+export interface EnumeratedFinding extends EvaluationFinding {
+  kind: "finding";
+}
+
+/**
+ * An evaluator reported something without enumerating what (§12; #140).
+ *
+ * Deliberately carries no `locator` and no `category`. It is not a defect that happens to lack
+ * detail — it is the statement *"this evaluator had something to say"*, and giving it the fields
+ * of a finding would invite it to be counted as one.
+ *
+ * The case is a wrapped legacy evaluator. An adopter's three vendored linters return a process
+ * result — exit code, stdout, stderr — and no findings, so the finest true thing their stage can
+ * say is that a linter reported. Parsing that output into per-finding shape was considered and
+ * rejected by them: §3.7 says wrap before rewriting, and a parser over another program's
+ * human-facing output is a second implementation of its semantics, with nothing keeping the two in
+ * step and a silent failure mode the day a message changes.
+ */
+export interface AggregateReport {
+  kind: "report";
+  /** Which declared channel this report belongs to. */
+  findingClass: string;
+  /** What the evaluator said. Operator-facing, redacted before it reaches a record (§19.2). */
+  message: string;
+}
+
+/**
+ * What an evaluator emitted about one subject (contract §12; #140).
+ *
+ * Two closed semantics, discriminated, because the difference is **countability** rather than
+ * scope. A document-wide omission may still be one enumerated defect, and a report about one file
+ * may contain an unknown number of them: subject scope and statistical cardinality are orthogonal,
+ * and modelling the first would leave the second unmeasurable while looking solved.
+ *
+ * The rule that follows and matters most: **a report must never silently contribute 1 to a defect
+ * count**, and the absence of parsed findings inside a report is not zero defects. See
+ * {@link countEvaluationEvidence}.
+ */
+export type EvaluationObservation = EnumeratedFinding | AggregateReport;
+
+/**
+ * Read a record that predates the discriminant (#140).
+ *
+ * `EvaluationFinding` documented itself as one identified defect, so that is what it decodes to.
+ * The compatibility runs one way only: nothing infers a report from an undiscriminated record,
+ * because a record written under the old meaning was never claiming to be one.
+ */
+export function asEnumeratedFinding(finding: EvaluationFinding): EnumeratedFinding {
+  return { ...finding, kind: "finding" };
+}
+
+/** How much an evaluator's evidence establishes (contract §12; #140). */
+export interface EvaluationEvidenceCount {
+  /** Defect occurrences actually enumerated. Safe to use as a defect count. */
+  enumeratedFindings: number;
+  /** Evaluator reports. **Not** defects, and never summed into a defect count. */
+  reports: number;
+  /**
+   * Whether a defect count over this evidence is measurable at all.
+   *
+   * `false` when any report is present. A report establishes that an evaluator had something to
+   * say and nothing about how much — so the honest defect count is *unknown*, which is neither
+   * zero nor the number of reports. A consumer computing a defect rate must treat this as
+   * unmeasurable rather than substituting either.
+   */
+  defectCountMeasurable: boolean;
+}
+
+/**
+ * Separate what was counted from what was merely reported (contract §12; #140).
+ *
+ * The whole reason the discriminant exists. Summing observations would count one vendored linter's
+ * report as one defect when it might stand for forty, and a defect rate computed that way is wrong
+ * in a direction nobody checks — it looks plausible.
+ */
+export function countEvaluationEvidence(
+  observations: readonly EvaluationObservation[],
+): EvaluationEvidenceCount {
+  const enumeratedFindings = observations.filter((entry) => entry.kind === "finding").length;
+  const reports = observations.length - enumeratedFindings;
+  return { enumeratedFindings, reports, defectCountMeasurable: reports === 0 };
 }
 
 export type StageOutcome<O> =
@@ -467,7 +560,14 @@ export type StageOutcome<O> =
        */
       kind: "evaluated";
       output: O;
-      findings: readonly EvaluationFinding[];
+      /**
+       * What the evaluator emitted, each discriminated as an enumerated finding or a report.
+       *
+       * Replaces the previous `findings` list. Stored records written under the old shape decode
+       * as enumerated findings via {@link asEnumeratedFinding}; a live outcome states which it is,
+       * because a value being constructed right now has no excuse not to.
+       */
+      observations: readonly EvaluationObservation[];
     }
   | {
       kind: "gate_required";

@@ -190,8 +190,27 @@ export const evaluatorOutcomeSchema = z
     caseId: identifier,
     /** Whether the evaluator flagged the subject. */
     flagged: z.boolean(),
-    /** What it reported. Empty when not flagged. */
+    /**
+     * The defect occurrences it enumerated. Empty when not flagged, **and also empty when the
+     * evaluator flagged without enumerating** (#140).
+     *
+     * An empty list under `flagged: true` is therefore not a contradiction and must not be
+     * repaired by inventing an entry. A wrapped legacy evaluator reports that it had something to
+     * say and not how much; fabricating one finding would make its report count as one defect,
+     * which is the statistic this distinction exists to protect.
+     */
     findings: z.array(evaluatorFindingSchema).max(256),
+    /**
+     * Whether site-level metrics are computable for this case (#140).
+     *
+     * `false` when the evaluator flagged without enumerating, or when a report could not be mapped
+     * to this case's subject scope at all. Site-level precision and recall are then **unmeasurable
+     * rather than zero**, and a metric that silently treated an unenumerated flag as zero findings
+     * would report perfect precision for an evaluator nobody measured.
+     *
+     * Absent means measurable, which is what every record written before this field meant.
+     */
+    siteMetricsMeasurable: z.boolean().optional(),
   })
   .meta({ id: "EvaluatorOutcome", title: "EvaluatorOutcome" });
 
