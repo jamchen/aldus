@@ -94,3 +94,11 @@ export {
   openWorkspace,
   type OpenWorkspaceOptions,
 } from "./workspace.js";
+
+export {
+  FileSpendReservationStore,
+  type CompareAndAppendResult,
+  type FileSpendReservationStoreOptions,
+  type GrantReservationStream,
+  type SpendReservationStore,
+} from "./reservation-store.js";

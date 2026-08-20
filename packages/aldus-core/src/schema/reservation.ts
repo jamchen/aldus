@@ -209,3 +209,186 @@ export function reservationExposureIsBounded(reservation: SpendReservation): boo
   if (execution.appliedCeiling === undefined) return false;
   return reservationIsActive(reservation);
 }
+
+/* -------------------------------------------------------------------------------------------
+ * Transitions — the authoritative form (ADR-0044, #155 step 2)
+ * ---------------------------------------------------------------------------------------- */
+
+/** What kinds of fact a reservation stream carries. */
+export const SPEND_TRANSITION_KINDS = [
+  /** Authorization committed to an effect, before dispatch. */
+  "reservation.reserved",
+  /** The runtime is about to call a provider. Appended **before** the call. */
+  "reservation.dispatch_prepared",
+  /** The provider request identity became known. */
+  "reservation.dispatch_identified",
+  /** A charge is known and its cost records are durable. */
+  "reservation.settled",
+  /** No charge occurred. */
+  "reservation.released",
+  /** The provider charged and did not say how much. */
+  "reservation.billing_unknown",
+  /** A human or a provider lookup resolved an unknown charge. */
+  "reservation.reconciled",
+] as const;
+
+/** @see SPEND_TRANSITION_KINDS */
+export type SpendTransitionKind = (typeof SPEND_TRANSITION_KINDS)[number];
+
+/**
+ * One appended fact about a reservation. Never edited (ADR-0044).
+ *
+ * `transitionId` is the identity a retry resolves against: the same id with byte-identical contents
+ * is the same fact and appending it again is a no-op; the same id with different contents is two
+ * different facts wearing one name, and is refused.
+ */
+export const spendReservationTransitionSchema = z
+  .object({
+    schemaVersion: schemaVersionString,
+    /** Stable across retries of the operation that produced it. */
+    transitionId: nonEmptyString,
+    reservationId: nonEmptyString,
+    /** The budget pool this belongs to — the stream's partition key. */
+    grantId: nonEmptyString,
+    kind: z.enum(SPEND_TRANSITION_KINDS),
+    at: iso8601,
+    /** Kind-specific payload, already redacted (§19.2). */
+    detail: z.record(z.string(), z.unknown()),
+  })
+  .meta({
+    id: "SpendReservationTransition",
+    title: "SpendReservationTransition",
+    description:
+      "One appended, immutable fact about a spend reservation (architecture contract §19.3). " +
+      "The transition stream is authoritative; SpendReservation is a projection of it.",
+  });
+
+/** @see spendReservationTransitionSchema */
+export type SpendReservationTransition = z.infer<typeof spendReservationTransitionSchema>;
+
+/** Which kinds may follow which. Terminal states have no successors (ADR-0044). */
+const ALLOWED_AFTER: Record<string, readonly SpendTransitionKind[]> = {
+  // Before anything exists, only a reservation may be created.
+  "": ["reservation.reserved"],
+  "reservation.reserved": [
+    "reservation.dispatch_prepared",
+    "reservation.dispatch_identified",
+    "reservation.settled",
+    "reservation.released",
+    "reservation.billing_unknown",
+  ],
+  // Annotations, not state changes: the reservation stays `reserved`.
+  "reservation.dispatch_prepared": [
+    "reservation.dispatch_identified",
+    "reservation.settled",
+    "reservation.released",
+    "reservation.billing_unknown",
+  ],
+  "reservation.dispatch_identified": [
+    "reservation.settled",
+    "reservation.released",
+    "reservation.billing_unknown",
+  ],
+  "reservation.billing_unknown": [
+    "reservation.reconciled",
+    "reservation.settled",
+    "reservation.released",
+  ],
+  // Terminal. A reservation that stopped consuming authorization never resumes.
+  "reservation.settled": [],
+  "reservation.released": [],
+  "reservation.reconciled": ["reservation.settled", "reservation.released"],
+};
+
+/** Why a proposed transition is not legal for the current stream. */
+export interface TransitionRejection {
+  transitionId: string;
+  reason: "illegal-successor" | "unknown-reservation";
+  explanation: string;
+}
+
+/**
+ * Whether a proposed transition may follow what the stream already holds (ADR-0044).
+ *
+ * **Lifecycle policy, evaluated by `SpendService` against a projection it reduced** — not by the
+ * storage adapter. A store that knew the state machine would be a store making policy, and the
+ * expected revision is what keeps a decision taken a moment ago safe to apply.
+ */
+export function isLegalSuccessor(
+  previous: SpendTransitionKind | undefined,
+  next: SpendTransitionKind,
+): boolean {
+  return (ALLOWED_AFTER[previous ?? ""] ?? []).includes(next);
+}
+
+/**
+ * Reduce a grant's transitions into the reservations they describe (ADR-0044).
+ *
+ * The projection. Never stored as the answer to anything — `availableAuthorization` runs over the
+ * result of this, so a cached figure can never become a second authoritative balance.
+ */
+export function reduceReservations(
+  transitions: readonly SpendReservationTransition[],
+): readonly SpendReservation[] {
+  const byId = new Map<string, SpendReservation>();
+  for (const transition of transitions) {
+    // The detail is `Record<string, unknown>` by schema. Reading it here is the one place a
+    // transition's payload becomes typed, and the projection is validated by the caller that
+    // parses the stream — a malformed detail surfaces as a refused stream, not a silently
+    // half-built reservation.
+    const detail = transition.detail as Record<string, never>;
+    const existing = byId.get(transition.reservationId);
+
+    if (transition.kind === "reservation.reserved") {
+      byId.set(transition.reservationId, {
+        schemaVersion: transition.schemaVersion,
+        reservationId: transition.reservationId,
+        grantId: transition.grantId,
+        authorizationId: detail["authorizationId"],
+        operation: detail["operation"],
+        runId: detail["runId"],
+        stageId: detail["stageId"],
+        attemptId: detail["attemptId"],
+        effectKey: detail["effectKey"],
+        reserved: detail["reserved"],
+        status: "reserved",
+        costIds: [],
+        createdAt: transition.at,
+      } as unknown as SpendReservation);
+      continue;
+    }
+
+    if (existing === undefined) continue;
+
+    switch (transition.kind) {
+      case "reservation.dispatch_prepared":
+        byId.set(transition.reservationId, { ...existing, execution: detail["execution"] });
+        break;
+      case "reservation.dispatch_identified":
+        byId.set(transition.reservationId, {
+          ...existing,
+          providerRequestId: detail["providerRequestId"],
+        });
+        break;
+      case "reservation.settled":
+      case "reservation.released":
+      case "reservation.billing_unknown":
+        byId.set(transition.reservationId, {
+          ...existing,
+          status: (transition.kind.split(".")[1] ?? "reserved") as SpendReservation["status"],
+          costIds: (detail["costIds"] as string[] | undefined) ?? existing.costIds,
+          ...(transition.kind === "reservation.billing_unknown"
+            ? {}
+            : { settledAt: transition.at }),
+        });
+        break;
+      case "reservation.reconciled":
+        byId.set(transition.reservationId, {
+          ...existing,
+          costIds: (detail["costIds"] as string[] | undefined) ?? existing.costIds,
+        });
+        break;
+    }
+  }
+  return [...byId.values()];
+}
