@@ -28,7 +28,11 @@ import {
   isIssuedSynthesisPermit,
   type WorkflowGraph,
 } from "@aldus-runtime/services";
-import { StageRegistry, type StageDefinition } from "@aldus-runtime/stage-runner";
+import {
+  StageRegistry,
+  type StageDefinition,
+  type WorkerRegistry,
+} from "@aldus-runtime/stage-runner";
 
 import { FakeSynthesisAdapter } from "./adapters.js";
 import { DESTINATION_A } from "./fixtures.js";
@@ -90,6 +94,13 @@ export interface StackOptions {
    * which is what an adopter who has not yet declared a graph gets.
    */
   workflow?: WorkflowGraph;
+  /**
+   * Workers a stage may invoke through the composed stack (§4.1, ADR-0035).
+   *
+   * Omitted by default so the unwired refusal stays exercisable — a composition that supplied a
+   * registry unconditionally could not test what happens when an adopter has not.
+   */
+  workers?: WorkerRegistry;
   /** Pass `null` for a context with no default actor, to exercise §19.2's refusal. */
   actor?: ActorRef | null;
   /** Omit the synthesis adapter entirely, modelling an adopter that wired none. */
@@ -167,6 +178,7 @@ export async function makeStack(options: StackOptions = {}): Promise<Stack> {
       ...(options.withSynthesisAdapter === false ? {} : { synthesisAdapter: synthesis }),
       ...(options.withReleaseAdapter === false ? {} : { releaseAdapters: [release] }),
       ...(options.withGrants === false ? {} : { spendGrants: () => state.grant }),
+      ...(options.workers === undefined ? {} : { workers: options.workers }),
     });
 
     // Registered *after* the context exists, so the stages can be handed the registry the context
