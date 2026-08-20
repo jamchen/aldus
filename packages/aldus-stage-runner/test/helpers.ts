@@ -25,6 +25,7 @@ import type {
 } from "../src/definition.js";
 import { StageRegistry } from "../src/registry.js";
 import { StageRunner } from "../src/runner.js";
+import type { WorkerRegistry } from "../src/worker.js";
 import { stageStatePathFor } from "../src/workspace.js";
 
 /** A temp workspace root, its stores, and its cleanup. */
@@ -70,6 +71,8 @@ export interface TempRunOptions {
    * value with itself and passes for the wrong reason.
    */
   manifest?: { runId?: string; episodeId?: string };
+  /** Workers a stage may invoke (ADR-0035). Omitted so the unwired refusal stays testable. */
+  workers?: WorkerRegistry;
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -99,6 +102,7 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
     actor: TEST_ACTOR,
     ...(options.backend !== undefined ? { backend: options.backend } : {}),
     ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
+    ...(options.workers !== undefined ? { workers: options.workers } : {}),
     now: () => {
       clock += 1000;
       return new Date(clock);

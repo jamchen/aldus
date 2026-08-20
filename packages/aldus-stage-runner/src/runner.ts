@@ -46,8 +46,10 @@ import {
   type StageOutputRegistration,
   type StageRunResult,
   deriveInvocationKey,
+  type StageWorkerRequest,
 } from "./definition.js";
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
+import { assertWorkerCapabilities, type WorkerRegistry, type WorkerResult } from "./worker.js";
 import type { StageRegistry } from "./registry.js";
 import {
   STAGE_EVENT_ACTIONS,
@@ -105,6 +107,14 @@ export interface StageRunnerOptions {
    * `registerOutput` without one is refused rather than silently ignored.
    */
   artifacts?: ArtifactRecorder;
+  /**
+   * Workers a stage may invoke through {@link StageContext.runWorker} (§4.1, ADR-0035).
+   *
+   * Optional because most compositions have none. A stage that invokes a Worker without one is
+   * refused rather than silently doing nothing — the same reason `registerOutput` refuses without
+   * a recorder, and the same defect (#67) if it did not.
+   */
+  workers?: WorkerRegistry;
   /** Clock, injectable so tests produce reproducible timestamps. */
   now?: () => Date;
   /** Delay used between retries, injectable so tests do not wait. */
@@ -142,6 +152,7 @@ export class StageRunner {
   > & {
     backend?: AgentBackend;
     artifacts?: ArtifactRecorder;
+    workers?: WorkerRegistry;
     now: () => Date;
     sleep: (ms: number) => Promise<void>;
     newAttemptId: () => string;
@@ -158,6 +169,7 @@ export class StageRunner {
       actor: options.actor,
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
       ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
+      ...(options.workers !== undefined ? { workers: options.workers } : {}),
       now: options.now ?? (() => new Date()),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       newAttemptId: options.newAttemptId ?? defaultNewAttemptId,
@@ -473,6 +485,56 @@ export class StageRunner {
       recordOutput: (artifact) => {
         assertValid("ArtifactRef", artifact);
         outputs.push(artifact);
+      },
+      runWorker: async <WI, WO>(request: StageWorkerRequest<WI>) => {
+        const registry = this.#options.workers;
+        // Refuses rather than doing nothing. A capability that exists on the context and is
+        // unreachable from every stage is #67 exactly, and a Worker seam nothing wired would be
+        // the same defect one layer up.
+        if (registry === undefined) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_REGISTRY_UNAVAILABLE,
+            `Stage "${definition.id}" invoked Worker "${request.workerId}", but no Worker ` +
+              "registry is wired. Supply one when constructing the runner (§4.1, ADR-0035).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { runId, stageId: definition.id, workerId: request.workerId },
+            },
+          );
+        }
+
+        const worker = registry.require(request.workerId, request.workerVersion);
+        assertWorkerCapabilities(await worker.capabilities(), request.requiredCapabilities ?? [], {
+          stageId: definition.id,
+          workerId: worker.id,
+          workerVersion: worker.version,
+        });
+
+        // §20: the trace names which implementation ran and what was checked of it, before it
+        // runs. A Worker recorded only on success would leave a failed invocation unattributable.
+        notes.push(
+          `worker ${worker.id}@${worker.version} invoked` +
+            ((request.requiredCapabilities ?? []).length > 0
+              ? ` (capabilities checked: ${(request.requiredCapabilities ?? []).join(", ")})`
+              : ""),
+        );
+
+        const result = await worker.execute({
+          input: request.input,
+          runId,
+          episodeId: manifest.episode.episodeId,
+          stageId: definition.id,
+          attemptId,
+          configurationHash: input.configurationHash,
+          inputHashes: input.inputArtifacts.map((artifact) => artifact.sha256),
+          // The effect key where the stage declared one, the fingerprint otherwise. A Worker
+          // addressing a platform with client-supplied keys hands this through; it never derives
+          // one (ADR-0036).
+          idempotencyKey: effectKey ?? invocationKey,
+          signal: controller.signal,
+        });
+        return result as WorkerResult<WO>;
       },
       registerOutput: async (registration: StageOutputRegistration) => {
         const recorder = this.#options.artifacts;
