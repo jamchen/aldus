@@ -97,6 +97,41 @@ true, one outcome retains both facts — `billing_unresolved` with `paused: true
 would let a caller reading for one miss the other, and unresolved billing is the fact that governs
 what may be done next.
 
+### Silence is answered once, in the shared boundary
+
+A dispatch that comes back reporting nothing has not said it cost nothing — it has said nothing.
+`SpendService.settle` treated an empty observation array as evidence of no charge and appended
+`reservation.released`, restoring authorization on the strength of a provider that was silent.
+
+The same question already had a different answer one method away. `StageRunner`'s Worker path
+guarded before calling `settle` and refused non-retryably; the agent path reached the same `settle`
+and released. That is precisely the divergence this ADR's own port exists to prevent, and it had
+already happened.
+
+**The rule now lives in `settle`**, so every caller gets it rather than whichever caller thought of
+it — the agent path, the Worker path, and `SynthesisGateway`, which reaches the same call. An empty
+observation array retains the reservation as `billing_unknown` with a stated reason; observations
+that are only `free`/`voided` still release, because those are a provider stating nothing is owed.
+
+The Worker path keeps its own earlier guard, message and non-retryable classification. It answers
+the same fact sooner and more specifically, which is not a competing answer.
+
+`AgentExecutionResult.billingUnconfirmed` now also reads the reservation's state. Derived from
+records alone it answered correctly when a record existed and could not answer at all when none
+did — which is exactly the silent case.
+
+### A ceiling never travels from the caller
+
+`maxSpend` is stripped from the caller's request **unconditionally** and re-added only where the
+Runtime has a reserved ceiling and the backend declares it enforces one. The override previously
+lived only in the enforcing branch, so the other passed the caller's object through untouched: a
+Stage-authored ceiling reached a provider that no grant authorized, while `prepareDispatch`
+recorded `ceilingEnforced: false` and the trace therefore said no ceiling was applied.
+
+Omitting the key from `StageOwnedAgentRequest` does not close this on its own, for the reason that
+type's own documentation gives — a request assembled from configuration, or written in JavaScript,
+carries it regardless.
+
 ### Cancellation
 
 The attempt's `AbortSignal` is passed to the backend, and the Runtime invokes

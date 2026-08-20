@@ -556,3 +556,86 @@ describe("an execution that cost nothing releases rather than settling", () => {
     expect(settled.reservation.status).toBe("settled");
   });
 });
+
+describe("silence is not evidence that nothing was charged", () => {
+  /**
+   * The rule lives in `settle` so every caller gets it.
+   *
+   * It used to live in whichever caller thought of it. `StageRunner`'s Worker path guarded before
+   * calling `settle` and refused non-retryably; the agent path reached the same `settle` with an
+   * empty array and `written.length === 0` released the reservation. One question, two answers,
+   * one method apart — and `SynthesisGateway` reaches the same call.
+   *
+   * Covering it here covers all three by construction. The Worker path keeps its own earlier
+   * refusal and its own message, which is a different, sharper answer for the same fact rather
+   * than a competing one.
+   */
+  async function dispatchThenSettle(observations: Parameters<SpendService["settle"]>[1]) {
+    const { spend } = services();
+    const outcome = await spend.reserve({
+      ...reserveInput,
+      effectKey: `effect-silence-${observations.length}-${String(observations[0]?.billingStatus)}`,
+      grant: grant(),
+      expectation: { kind: "estimated", amount: { amount: "1.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+    return spend.settle(prepared, observations, {});
+  }
+
+  it("retains the reservation when the dispatch reported nothing", async () => {
+    const settled = await dispatchThenSettle([]);
+
+    // Not `released`. Releasing would restore authorization on the strength of a provider that
+    // said nothing, which is how a budget is quietly exceeded (§19.3).
+    expect(settled.reservation.status).toBe("billing_unknown");
+    expect(settled.costs).toHaveLength(0);
+  });
+
+  it("says why, so an operator is not left inferring it from an empty cost list", async () => {
+    const { spend } = services();
+    const outcome = await spend.reserve({
+      ...reserveInput,
+      effectKey: "effect-silence-reason",
+      grant: grant(),
+      expectation: { kind: "estimated", amount: { amount: "1.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+    await spend.settle(prepared, [], {});
+
+    // Read from the stream rather than a report: `SpendService.status` arrives with #155 step 5,
+    // and the reason has to be durable regardless of what reads it.
+    const stream = await new FileSpendReservationStore({ root }).readGrant(grant().grantId);
+    const unresolved = stream.transitions.filter(
+      (transition) =>
+        transition.reservationId === prepared.reservationId &&
+        transition.kind === "reservation.billing_unknown",
+    );
+    expect(unresolved).toHaveLength(1);
+    expect(String(unresolved[0]?.detail["reason"])).toContain("silence is not evidence");
+  });
+
+  it("still releases when the dispatch reported that nothing was owed", async () => {
+    // The control, and the distinction the fix turns on: `free` is a provider stating no charge,
+    // which is evidence. An empty array is the absence of a statement.
+    const settled = await dispatchThenSettle([
+      {
+        provider: "provider-a",
+        operation: "completion",
+        billingStatus: "free",
+        actual: { amount: "0.0000", currency: "USD" },
+      },
+    ]);
+
+    expect(settled.reservation.status).toBe("released");
+  });
+});

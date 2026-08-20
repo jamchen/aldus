@@ -427,3 +427,103 @@ describe("a charge whose amount could not be established", () => {
     expect((capture.outcome as { kind: string }).kind).toBe("completed");
   });
 });
+
+describe("a backend that says nothing about billing", () => {
+  it("does not release authorization, and is not reported as completed", async () => {
+    // Silence is not "no charges". The backend was dispatched under a paid expectation and came
+    // back saying nothing, so whether it was charged is unknown — and `settle` treating an empty
+    // observation array as evidence of no charge released the reservation on the strength of a
+    // provider that said nothing.
+    //
+    // The Worker path in this same stack already answers this correctly. Two answers to one
+    // question, one method apart, is what this closes.
+    const recording = recordingBackend();
+    const capture: { outcome?: unknown } = {};
+    const result = await run({ spend: paidSpend, backend: recording.backend, capture });
+
+    expect(result.outcome).toBe("ok");
+    expect(recording.seen).toHaveLength(1);
+    const outcome = capture.outcome as { kind: string };
+    expect(outcome.kind).toBe("billing_unresolved");
+    expect(outcome.kind).not.toBe("completed");
+    // Nothing recorded, and nothing released: the reservation still stands against the grant.
+    expect(await costRecords()).toHaveLength(0);
+  });
+
+  it("still completes when the backend says nothing was owed", async () => {
+    // The control. `free` and `voided` are a provider stating nothing is owed, which is evidence
+    // rather than the absence of it, and must keep releasing.
+    const recording = recordingBackend({
+      costs: [
+        {
+          provider: "provider-a",
+          operation: "completion",
+          billingStatus: "free",
+          actual: { amount: "0.0000", currency: "USD" },
+        },
+      ],
+    });
+    const capture: { outcome?: unknown } = {};
+    const result = await run({ spend: paidSpend, backend: recording.backend, capture });
+
+    expect(result.outcome).toBe("ok");
+    expect((capture.outcome as { kind: string }).kind).toBe("completed");
+    expect(await costRecords()).toHaveLength(1);
+  });
+});
+
+describe("a ceiling never travels from the Stage to the provider", () => {
+  it("strips a smuggled maxSpend before a non-enforcing backend sees it", async () => {
+    // The override existed only in the enforcing branch; the other passed the Stage's object
+    // through untouched, `maxSpend` included. The trace then recorded `ceilingEnforced: false`
+    // while a Stage-authored ceiling had been transmitted — a limit in front of a provider that
+    // nobody authorized and nothing records.
+    const recording = recordingBackend({ costs: charged, enforces: false });
+    stack = await makeStack({
+      agentBackend: recording.backend,
+      dispatchSpendGrants: () => grant,
+      stages: () => [
+        {
+          id: "draft",
+          version: "1",
+          inputSchema: anySchema,
+          outputSchema: anySchema,
+          requiredCapabilities: [],
+          artifacts: { produces: "none" },
+          retrySafety: { kind: "no_external_effects" as const },
+          execute: async (context: {
+            runAgent: (request: Record<string, unknown>) => Promise<{ kind: string }>;
+          }) => {
+            await context.runAgent({
+              request: {
+                instructions: "draft the outline",
+                maxSpend: { amount: "999.0000", currency: "USD" },
+              },
+              effect: { kind: "none" },
+              spend: paidSpend,
+            });
+            return { kind: "completed" as const, output: {} };
+          },
+        } as never,
+      ],
+    });
+    await stack.services.init({ episode: { showId: SHOW_ID, slug: "episode-a" }, actor: OPERATOR });
+    await stack.services.startRun({
+      workflowId: "workflow-a",
+      workflowVersion: "1",
+      runId: RUN_ID,
+      actor: OPERATOR,
+    });
+
+    const result = await stack.services.runStage({
+      runId: RUN_ID,
+      stageId: "draft",
+      actor: OPERATOR,
+    });
+
+    expect(result.outcome).toBe("ok");
+    // Absent, not overridden with a smaller number: this backend declares it enforces nothing, so
+    // any ceiling reaching it would record a protection that does not exist (ADR-0030).
+    expect(recording.seen[0]?.maxSpend).toBeUndefined();
+  });
+});

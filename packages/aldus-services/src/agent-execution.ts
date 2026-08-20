@@ -24,6 +24,7 @@ import {
   type AldusEvent,
   type CostObservation,
   type CostRecord,
+  type SpendReservation,
 } from "@aldus-runtime/core";
 import type { SpendGrant } from "@aldus-runtime/gate-engine";
 import {
@@ -160,8 +161,17 @@ export class AgentExecutionService {
     // ignores it would record a protection that does not exist (ADR-0030).
     const enforces = capabilities.enforcesSpendCeiling === true;
     const ceiling = reservation?.reserved;
+    // Stripped **unconditionally**, then re-added only where the Runtime has a ceiling and this
+    // backend enforces it. The override used to live only in the enforcing branch, so the other
+    // passed the caller's object through untouched with any `maxSpend` it carried — a limit in
+    // front of a provider that no grant authorized, while `prepareDispatch` recorded
+    // `ceilingEnforced: false` and the trace therefore said no ceiling was applied.
+    //
+    // Omitting the key from the caller-facing type does not close this: a request assembled from
+    // configuration, or written in JavaScript, carries it regardless.
+    const { maxSpend: _callerSupplied, ...stated } = input.request;
     const request: AgentRequest =
-      enforces && ceiling !== undefined ? { ...input.request, maxSpend: ceiling } : input.request;
+      enforces && ceiling !== undefined ? { ...stated, maxSpend: ceiling } : stated;
 
     // Before the provider call, so the window in which dispatch may have begun is visible rather
     // than inferred (ADR-0044). What is recorded is what was true of *this* execution: a
@@ -206,6 +216,7 @@ export class AgentExecutionService {
       isChargeBearing(observation.billingStatus),
     );
     let records: CostRecord[];
+    let settledReservation: SpendReservation | undefined;
     if (reservation !== undefined) {
       // One `effectKey` names one independently billed effect and commits one reservation for it.
       // `AgentResult.costs` is plural because one execution may incur several model, provider or
@@ -243,6 +254,7 @@ export class AgentExecutionService {
         ...(input.grant === undefined ? {} : { authorizationId: input.grant.decisionId }),
       });
       records = [...settled.costs];
+      settledReservation = settled.reservation;
     } else {
       // Declared free. A charge reported anyway is an unauthorized divergence: it is recorded so
       // §20 can answer what it cost, and it is not laundered through a grant nobody consulted.
@@ -269,7 +281,12 @@ export class AgentExecutionService {
     return {
       result,
       costs: records,
-      billingUnconfirmed: records.some((record) => record.billingStatus === "unknown"),
+      // From the reservation as well as the records. `records.some(unknown)` is a fact about what
+      // was written, so it answers correctly when a record exists and cannot answer at all when
+      // none does — which is exactly the silent-backend case.
+      billingUnconfirmed:
+        records.some((record) => record.billingStatus === "unknown") ||
+        settledReservation?.status === "billing_unknown",
     };
   }
 
