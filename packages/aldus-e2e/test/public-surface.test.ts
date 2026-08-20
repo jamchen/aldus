@@ -100,4 +100,20 @@ describe("the published surface is what an adopter can reach (#121)", () => {
     registry.register(worker);
     expect(registry.list()).toEqual([{ id: "probe", version: "1" }]);
   });
+
+  it("reaches the evaluation-result shape an evaluator Stage has to construct (#115)", () => {
+    // Same failure mode, one release later. An adopter told to report findings rather than throw
+    // has to name the shape to build it, and `EvaluationFinding` is type-only — invisible to the
+    // value check above, and reachable or not only at compile time.
+    const finding: stageRunner.EvaluationFinding = {
+      findingClass: "warning",
+      message: "example finding",
+    };
+    const outcome: stageRunner.StageOutcome<{ checked: number }> = {
+      kind: "evaluated",
+      output: { checked: 1 },
+      findings: [finding],
+    };
+    expect(outcome.kind).toBe("evaluated");
+  });
 });

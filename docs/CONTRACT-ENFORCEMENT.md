@@ -39,6 +39,7 @@ release.
 | Four levels, and their pairing with enforcement   | `core:QUALITY_LEVELS`                     | `core:validateQualityClaim`          | `packages/aldus-stage-runner/test/evaluation.test.ts` |
 | §12.1 an evaluator may block only once calibrated | `core:PromotionEvidence`                  | `gate-engine:validateGateDefinition` | `packages/aldus-gate-engine/test/definition.test.ts`  |
 | §12.1, for a Stage that runs an evaluator         | `stage-runner:StageEvaluationDeclaration` | `stage-runner:StageRegistry`         | `packages/aldus-stage-runner/test/evaluation.test.ts` |
+| §12 a finding is distinguishable from a crash     | `stage-runner:EvaluationFinding`          | `stage-runner:StageRunner`           | `packages/aldus-stage-runner/test/evaluation.test.ts` |
 
 **Not applicable to:** Workers. A Worker performs a declared operation and reports a result; it
 makes no quality claim, and a Worker whose output is judged is judged by the Stage that invoked it

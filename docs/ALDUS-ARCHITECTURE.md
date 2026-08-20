@@ -617,6 +617,16 @@ Examples:
 
 Machine pass MUST NOT be presented as semantic correctness.
 
+An evaluator that could not execute, could not parse its inputs, or could not produce a valid
+report MUST cause an operational failure. An evaluator that executed successfully and found a
+content problem MUST produce an **evaluation result**, and MUST NOT encode that finding as an
+indistinguishable internal error. Production trace MUST allow "the evaluator failed" and "the
+evaluator found a defect" to be told apart.
+
+Whether an evaluation result stops work is governed by the declared enforcement for that finding's
+class and by §12.1, never by the evaluator itself. A finding whose class has no declared
+enforcement MUST be refused rather than assigned a default.
+
 ### 12.1 Evaluator promotion policy
 
 An evaluator MAY become blocking only after it is calibrated against human-labeled examples. Promotion SHOULD consider:
