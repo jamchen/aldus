@@ -23,6 +23,7 @@ import {
   riskSiteSchema,
   segmentTextSchema,
   synthesisParametersSchema,
+  type SynthesisParameters,
 } from "./request.js";
 
 /**
@@ -227,6 +228,64 @@ export const takeAuthorizationSchema = z
 export type TakeAuthorization = z.infer<typeof takeAuthorizationSchema>;
 
 /**
+ * What the adapter reports it actually did, where that differs from the plan (§15; ADR-0038).
+ *
+ * A take's `text` and `parameters` are the **plan's**. They have to be: they are set before the
+ * adapter runs, and an adapter is free to be something other than the planned provider. An adopter
+ * synthesising locally recorded seven takes reading `"provider": "provider-a"` for audio that
+ * provider never made — each record individually well-formed, and anyone answering "which takes
+ * were paid for" from that field getting seven charges that never happened.
+ *
+ * Stored **beside** the planned values rather than overwriting them, so no field's meaning depends
+ * on whether another field is present. Read them together through {@link effectiveParameters} and
+ * {@link effectiveFinalProviderText}, which is where the precedence rule lives — once, named and
+ * tested, rather than in every reader's head.
+ *
+ * Absence means the adapter did not report, which is **not** the same as "the plan was followed".
+ * An adapter that never learned to report looks identical to one that had nothing to report, and
+ * this record cannot tell you which. That limit is the price of the field being optional, and it
+ * is stated here rather than discovered.
+ */
+export const takeObservationSchema = z
+  .object({
+    /**
+     * The parameters actually used, **complete** where present.
+     *
+     * Whole-value or absent, never partial. A partial observation would mean "provider is what I
+     * say, voice is whatever was planned" — reintroducing one field at a time the exact ambiguity
+     * this record exists to remove.
+     */
+    parameters: synthesisParametersSchema.optional(),
+    /**
+     * The string actually sent to the provider (contract §15 "final provider text").
+     *
+     * Only this stage of {@link segmentTextSchema} is observable. The earlier stages — normalised,
+     * substituted, tagged — are transformations the *planner* performed, so the plan's record of
+     * them is the true one. What an adapter can know, and nothing else can, is the bytes it sent.
+     *
+     * Divergence here is routine and legitimate, not an incident: an adopter's local engine cannot
+     * read the performance tags a hosted provider's model consumes, so their adapter strips them
+     * before synthesis. The take previously claimed text carrying 36 tags the engine never
+     * received.
+     */
+    finalProviderText: z.string().max(20_000).optional(),
+    /** Why the adapter diverged, in its own words. Operator-facing, never parsed. */
+    reason: z.string().min(1).max(2000).optional(),
+  })
+  .meta({
+    id: "TakeObservation",
+    title: "TakeObservation",
+    description:
+      "What a synthesis adapter reports it actually did, where that differs from the plan " +
+      "(architecture contract §15). Stored beside the planned values, never overwriting them. " +
+      "Absence means the adapter did not report, which is not the same as the plan having been " +
+      "followed.",
+  });
+
+/** @see takeObservationSchema */
+export type TakeObservation = z.infer<typeof takeObservationSchema>;
+
+/**
  * One synthesis attempt at one segment (contract §15).
  *
  * The field list covers §15's requirement enumeration: segment ID; text at every stage; voice,
@@ -247,10 +306,23 @@ export const takeRecordSchema = z
     segmentId: nonEmptyString,
     /** Which attempt at that segment, starting at 1. */
     attempt: z.number().int().min(1),
-    /** The text at every stage, as actually sent (contract §15). */
+    /**
+     * The text at every stage, **as planned** (contract §15).
+     *
+     * Not as sent. This is assigned from the synthesis plan before the adapter runs, so it cannot
+     * be a record of what the adapter did with it. For the string actually sent, read
+     * {@link effectiveFinalProviderText}.
+     */
     text: segmentTextSchema,
-    /** Provider, voice, model, settings, seed as actually used (contract §15, §14.4). */
+    /**
+     * Provider, voice, model, settings, seed **as planned** (contract §15, §14.4).
+     *
+     * Not as used, for the same reason as {@link text}: assigned before the adapter runs. Read
+     * {@link effectiveParameters} for what actually produced the audio.
+     */
     parameters: synthesisParametersSchema,
+    /** What the adapter reported it actually did, where it differed (§15; ADR-0038). */
+    observed: takeObservationSchema.optional(),
     /** The provider's own request identifier, for reconciliation (contract §15). */
     providerRequestId: z.string().min(1).max(400).optional(),
     /**
@@ -332,6 +404,66 @@ export const takeRecordSchema = z
 
 /** @see takeRecordSchema */
 export type TakeRecord = z.infer<typeof takeRecordSchema>;
+
+/**
+ * The parameters that actually produced this take's audio (contract §15; ADR-0038).
+ *
+ * The precedence rule, in one place. A take stores planned and observed parameters side by side so
+ * neither field's meaning depends on the other; reading them together is a separate act, and this
+ * is where it happens — named, documented and tested, rather than reimplemented by each caller who
+ * remembers that the distinction exists.
+ *
+ * **This is the function that answers "which takes were paid for."** Reading `take.parameters`
+ * directly answers "which takes were *planned* to be paid for", and the two differ for exactly the
+ * adapters where the question matters.
+ *
+ * Where no observation was reported, the plan is returned. That is a fallback, not a finding: it
+ * means nobody said otherwise, which is the best available answer and not a guarantee.
+ */
+export function effectiveParameters(take: TakeRecord): SynthesisParameters {
+  return take.observed?.parameters ?? take.parameters;
+}
+
+/**
+ * The string actually sent to the provider, where anything knows it (contract §15; ADR-0038).
+ *
+ * Returns `undefined` when neither the adapter reported one nor the plan recorded one — §15 makes
+ * final provider text conditional ("where applicable"), so its absence is a legitimate state and
+ * not an error to paper over with the raw text.
+ */
+export function effectiveFinalProviderText(take: TakeRecord): string | undefined {
+  return take.observed?.finalProviderText ?? take.text.finalProviderText;
+}
+
+/**
+ * Which of a take's planned values the adapter reported doing something else with (§15; ADR-0038).
+ *
+ * Derived on read, never stored. A stored divergence flag would be a third value to keep
+ * consistent with the two it summarises, and the recurring defect in this repository is a recorded
+ * fact that nothing recomputes.
+ *
+ * An empty array means **no divergence was reported**. It does not mean the plan was followed —
+ * an adapter that never learned to report is indistinguishable from one with nothing to report,
+ * and no function over this record can tell them apart.
+ */
+export function takeDivergences(take: TakeRecord): readonly ("parameters" | "text")[] {
+  const diverged: ("parameters" | "text")[] = [];
+  const observed = take.observed;
+  if (observed === undefined) return diverged;
+  if (
+    observed.parameters !== undefined &&
+    JSON.stringify(observed.parameters) !== JSON.stringify(take.parameters)
+  ) {
+    diverged.push("parameters");
+  }
+  if (
+    observed.finalProviderText !== undefined &&
+    observed.finalProviderText !== take.text.finalProviderText
+  ) {
+    diverged.push("text");
+  }
+  return diverged;
+}
 
 /** Whether a take was accepted by a human (contract §13.3). */
 export function isAccepted(take: TakeRecord): boolean {

@@ -98,10 +98,16 @@ export const segmentTextSchema = z
     /** After performance tags were applied (contract §14.3). */
     tagged: z.string().max(20_000).optional(),
     /**
-     * Exactly what was sent to the provider.
+     * The text the planner intends the provider to receive.
      *
-     * This is the string §13.2 binds. If it differs from what the operator approved, the
-     * authorization does not cover the request that was actually made.
+     * **Intends, not received.** This value is assigned before any adapter runs, in a plan and in
+     * the take derived from it, so it cannot be evidence of what an adapter sent. It read
+     * "exactly what was sent to the provider" until ADR-0038, which made a §13.2 comparison
+     * against the approved text tautological: both sides came from the plan, so the check would
+     * pass and mean nothing.
+     *
+     * What an adapter actually sent is `TakeRecord.observed.finalProviderText`, read through
+     * `effectiveFinalProviderText`. §13.2's comparison is between the approval and *that* value.
      */
     finalProviderText: z.string().max(20_000).optional(),
   })

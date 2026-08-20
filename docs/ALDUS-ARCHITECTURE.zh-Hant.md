@@ -516,6 +516,10 @@ flowchart TB
 
 每個 request／segment 必須記錄 segment ID、各階段文字、voice/model/settings/seed、provider request ID、成本、output URI/hash、risk site、ASR finding、人工決定與 regeneration lineage。
 
+Take 上的文字與參數記錄的是**計畫值**，因為它們在 adapter 執行前就已指派。若 adapter 不是計畫中的 provider，或送出的內容與收到的不同，它必須能回報自己實際做了什麼；該回報必須**並存**儲存於計畫值旁，而非取代它。沒有回報表示 adapter 未回報，不得被讀成「計畫被遵守」。
+
+§13.2 要求的「operator 核准內容」與「實際送出內容」比對，必須使用回報值。拿計畫值與核准比對，是拿計畫跟自己比。
+
 修復可以包含 scoped pronunciation substitution、pause mapping、重新分段、provider setting、alternate take、使 Content Freeze 失效的 narration rewrite，或人工錄音。
 
 未被接受的付費 take 應保留唯一 identity，直到 retention policy 允許清除。未經 policy 與 cost authorization，不得靜默重試付費 request。

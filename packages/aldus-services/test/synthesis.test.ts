@@ -12,6 +12,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { SubjectsByGate } from "@aldus-runtime/gate-engine";
+import type { TtsRequestPlan } from "@aldus-runtime/tts-ledger";
+import {
+  effectiveFinalProviderText,
+  effectiveParameters,
+  takeDivergences,
+} from "@aldus-runtime/tts-ledger";
 
 import { ServiceErrorCodes } from "../src/errors.js";
 import { AldusContext, AldusServices } from "../src/index.js";
@@ -43,9 +49,12 @@ afterEach(async () => {
 
 /** A harness whose synthesis gate is registered, with a Run, a script, and a plan recorded. */
 async function armed(
-  options: { subjects?: SubjectsByGate; withGrants?: boolean } = {},
+  options: { subjects?: SubjectsByGate; withGrants?: boolean; plan?: TtsRequestPlan } = {},
 ): Promise<Harness> {
-  const plan = aPlan();
+  // The plan the harness arms must be the plan the test then synthesises. §13.2's approval binds
+  // the plan's digests, so a test that varies the plan and leaves the harness on the default one
+  // is refused by the gate — correctly, and for a reason unrelated to what it meant to assert.
+  const plan = options.plan ?? aPlan();
   const harness = makeComposedServices(workspace.workspace, {
     gates: [synthesisGate(plan)],
     subjects: options.subjects ?? subjectsForPlan(plan),
@@ -344,5 +353,108 @@ describe("recordUnauthorizedCharge is not a synthesis path (§13.2, §20)", () =
     if (result.outcome !== "ok") return;
     expect(result.data.take.unauthorizedCharge?.reason).toContain("without checking");
     expect(result.data.adapterId).toBe("none");
+  });
+});
+
+describe("what the adapter actually did, where it differs from the plan (#133, ADR-0038)", () => {
+  // The reported symptom: an adopter synthesising locally recorded seven takes naming a provider
+  // that never made the audio, because the take took its parameters from the plan and the adapter
+  // had no channel to say otherwise. Each record was individually well-formed, which is why no
+  // amount of reading one of them surfaced it.
+
+  it("records the parameters the adapter reports, beside the plan's", async () => {
+    const harness = await armed();
+    await approveSynthesis(harness);
+    harness.synthesis.observation = {
+      observedParameters: { provider: "provider-b", voice: "voice-b", model: "model-b" },
+      observationReason: "synthesised locally; the planned provider was not called",
+    };
+
+    const result = await harness.services.synthesiseSegment({
+      plan: aPlan(),
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+    const take = result.data.take;
+
+    // Beside, not over. The plan's value is still there and still says what was planned.
+    expect(take.parameters.provider).toBe("provider-a");
+    expect(take.observed?.parameters?.provider).toBe("provider-b");
+    // And the question the adopter was actually asking has a right answer.
+    expect(effectiveParameters(take).provider).toBe("provider-b");
+    expect(takeDivergences(take)).toEqual(["parameters"]);
+  });
+
+  it("records the string the adapter says it sent, beside the planned one", async () => {
+    // The second instance, in the same adapter: a local engine cannot read the performance tags a
+    // hosted model consumes and speaks them aloud, so the adapter strips them before synthesis.
+    const tagged = aPlan({
+      segments: [
+        {
+          segmentId: "seg-1",
+          text: { raw: "The first line.", finalProviderText: "[tag] The first line." },
+        },
+      ],
+    } as never);
+    const harness = await armed({ plan: tagged });
+    await approveSynthesis(harness);
+    harness.synthesis.observation = { observedFinalProviderText: "The first line." };
+
+    const result = await harness.services.synthesiseSegment({
+      plan: tagged,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+    const take = result.data.take;
+
+    expect(take.text.finalProviderText).toBe("[tag] The first line.");
+    expect(effectiveFinalProviderText(take)).toBe("The first line.");
+    expect(takeDivergences(take)).toEqual(["text"]);
+  });
+
+  it("leaves the take unchanged when the adapter reports nothing", async () => {
+    // The ordinary adapter, and the compatibility case. `observed` is absent rather than present
+    // and empty, so "did not report" stays distinguishable from "reported that it matched" — the
+    // second is a claim and the first is a silence, and only one of them is evidence.
+    const harness = await armed();
+    await approveSynthesis(harness);
+
+    const result = await harness.services.synthesiseSegment({
+      plan: aPlan(),
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+    const take = result.data.take;
+
+    expect(take.observed).toBeUndefined();
+    expect(effectiveParameters(take)).toEqual(take.parameters);
+    expect(takeDivergences(take)).toEqual([]);
+  });
+
+  it("reports no divergence when the adapter reports the same values it was given", async () => {
+    // An adapter that echoes its request is saying "I did what you asked", which is a claim worth
+    // storing and not a divergence. Asserted because the obvious implementation — treating any
+    // observation as a divergence — passes every other test in this block.
+    const harness = await armed();
+    await approveSynthesis(harness);
+    harness.synthesis.observation = {
+      observedParameters: { provider: "provider-a", voice: "voice-a", model: "model-a" },
+    };
+
+    const result = await harness.services.synthesiseSegment({
+      plan: aPlan(),
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+    expect(result.data.take.observed?.parameters).toBeDefined();
+    expect(takeDivergences(result.data.take)).toEqual([]);
   });
 });

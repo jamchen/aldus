@@ -799,6 +799,15 @@ Each request or segment record MUST contain:
 - human decision and reason;
 - fallback or regeneration lineage.
 
+Text and parameters on a take record what was **planned**, because they are assigned before the
+adapter runs. Where an adapter is not the planned provider, or sends something other than what it
+was handed, it MUST be able to report what it actually did, and that report MUST be stored beside
+the planned values rather than replacing them. Absence of such a report means the adapter did not
+report; it MUST NOT be read as the plan having been followed.
+
+A comparison required by §13.2 between what an operator approved and what was sent MUST use the
+reported value. Comparing the planned value against the approval compares the plan with itself.
+
 ### 15.1 Repair strategies
 
 Repairs MAY include:

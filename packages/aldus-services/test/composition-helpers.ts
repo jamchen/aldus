@@ -67,12 +67,21 @@ export class RecordingSynthesisAdapter implements SynthesisAdapter {
     this.#gatewayCheck = check;
   }
 
+  /**
+   * What this adapter reports it actually did, where an adopter's adapter would differ.
+   *
+   * Unset by default, because an adapter that reports nothing is the ordinary case and the one
+   * whose behaviour must not change (ADR-0038).
+   */
+  observation: Partial<SynthesisOutcome> = {};
+
   synthesise(request: SynthesisRequest, permit: SynthesisPermit): Promise<SynthesisOutcome> {
     this.calls.push({ request, permitIssued: this.#gatewayCheck?.(permit) ?? false });
     return Promise.resolve({
       providerRequestId: `request-${request.segmentId}`,
       audioSha256: "a".repeat(64),
       costRecordId: "cost-a",
+      ...this.observation,
     });
   }
 }
