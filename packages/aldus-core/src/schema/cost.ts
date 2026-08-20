@@ -108,21 +108,56 @@ const costFields = z.object({
   recordedAt: iso8601,
 });
 
+/**
+ * The one billing-evidence invariant, applied to every composition (contract §19.3; #150).
+ *
+ * A charge must state an amount **or** state that the amount is unknown. Those are the two ways a
+ * billing fact can be true; a record doing neither carries no information and would silently
+ * under-report spend against a budget.
+ *
+ * `billingStatus: "unknown"` with no amount is the third case, and it is the honest one: a
+ * provider may charge a request and withhold or delay the figure. Before #150 that observation was
+ * **valid to report and fatal to append** — the observation schema accepted it, the record schema
+ * refused it, and reporting it threw away the cost record, the event *and* the completed
+ * `AgentResult`, after the money was gone. The record schema's own description said the status
+ * existed so an unconfirmed outcome was representable, which is what the refinement beside it made
+ * impossible.
+ *
+ * Shared rather than attached to one composition, because `.pick()` does not carry refinements:
+ * deriving the observation from the record's fields while refining only the record is how the two
+ * came to disagree by construction.
+ */
+export function hasBillingEvidence(billing: {
+  estimated?: unknown;
+  actual?: unknown;
+  billingStatus: string;
+}): boolean {
+  return (
+    billing.estimated !== undefined ||
+    billing.actual !== undefined ||
+    billing.billingStatus === "unknown"
+  );
+}
+
+/** The message both compositions refuse with, so an operator sees one explanation. */
+const BILLING_EVIDENCE_MESSAGE =
+  "a charge must state an amount or state that the amount is unknown: at least one of " +
+  "`estimated` or `actual` must be present, unless `billingStatus` is `unknown` (architecture " +
+  "contract §19.3). Do not substitute a zero — zero is a numerical assertion and an unknown " +
+  "amount is an uncertainty state, and they are not interchangeable.";
+
 export const costRecordSchema = costFields
-  .refine((record) => record.estimated !== undefined || record.actual !== undefined, {
-    message:
-      "at least one of `estimated` or `actual` must be present (architecture contract §19.3: a cost record must state either a preview or an incurred amount).",
-    path: ["actual"],
-  })
+  .refine(hasBillingEvidence, { message: BILLING_EVIDENCE_MESSAGE, path: ["actual"] })
   .meta({
     id: "CostRecord",
     title: "CostRecord",
     description:
       "A recorded or projected cost attributable to a Run (architecture contract §19.3, §15). " +
-      "ADDITIONAL CONSTRAINT NOT EXPRESSIBLE IN JSON SCHEMA: at least one of `estimated` or " +
-      "`actual` must be present — a cost record that states neither carries no information and " +
-      "would silently under-report spend against a budget. Validators generated from this " +
-      "schema will NOT enforce that; the normative Zod schema does. `provider` and `operation` " +
+      "ADDITIONAL CONSTRAINT NOT EXPRESSIBLE IN JSON SCHEMA: a charge must state an amount or " +
+      "state that the amount is unknown — at least one of `estimated` or `actual` must be " +
+      "present unless `billingStatus` is `unknown`. A record doing neither carries no " +
+      "information and would silently under-report spend against a budget. Validators generated " +
+      "from this schema will NOT enforce that; the normative Zod schema does. `provider` and `operation` " +
       "are open strings because Core names no provider (§4.2). `billingStatus: unknown` exists " +
       "so an unconfirmed billing outcome is representable rather than guessed (§19.3).",
   });
@@ -148,15 +183,19 @@ export type CostRecord = z.infer<typeof costRecordSchema>;
  * request that ultimately fails, and a cost channel that only survives success would lose exactly
  * the spend an operator most needs to see.
  */
-export const costObservationSchema = costFields.pick({
-  provider: true,
-  operation: true,
-  quantity: true,
-  estimated: true,
-  actual: true,
-  billingStatus: true,
-  providerRequestId: true,
-});
+export const costObservationSchema = costFields
+  .pick({
+    provider: true,
+    operation: true,
+    quantity: true,
+    estimated: true,
+    actual: true,
+    billingStatus: true,
+    providerRequestId: true,
+  })
+  // The same invariant the record applies, re-attached because `.pick()` drops refinements. That
+  // omission is exactly what let an observation be valid to report and fatal to append (#150).
+  .refine(hasBillingEvidence, { message: BILLING_EVIDENCE_MESSAGE, path: ["actual"] });
 
 /** @see costObservationSchema */
 export type CostObservation = z.infer<typeof costObservationSchema>;

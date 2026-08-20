@@ -191,6 +191,16 @@ function renderCostSummary(summary: CostSummary): string[] {
         " the charged total may be understated.",
     );
   }
+  // Reported separately, because these charges have no currency to name. Keying the warning off
+  // `currenciesWithUnknownBilling` alone would print nothing for a provider that charged and
+  // withheld the figure entirely — the reader would see clean totals and no note (#150).
+  if (summary.unquantifiedUnknownBillingRecordCount > 0) {
+    lines.push(
+      `  note       ${summary.unquantifiedUnknownBillingRecordCount} charge(s) were billed with` +
+        " no amount reported; the charged total may be understated and the remaining budget is" +
+        " indeterminate.",
+    );
+  }
   return lines;
 }
 

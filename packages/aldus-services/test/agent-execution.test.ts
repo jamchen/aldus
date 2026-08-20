@@ -8,11 +8,17 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ActorRef, AldusEvent, CostRecord } from "@aldus-runtime/core";
-import type { SpendGrant } from "@aldus-runtime/gate-engine";
+import {
+  SCHEMA_VERSION,
+  type ActorRef,
+  type AldusEvent,
+  type CostRecord,
+} from "@aldus-runtime/core";
+import { checkSpend, type SpendGrant } from "@aldus-runtime/gate-engine";
 import type { AgentBackend } from "@aldus-runtime/stage-runner";
 
 import { AgentExecutionService, type CostRecordStore } from "../src/agent-execution.js";
+import { summariseCosts } from "../src/costs.js";
 
 const ACTOR: ActorRef = { kind: "agent", id: "claude" };
 const RUN = "run-a";
@@ -313,5 +319,109 @@ describe("spend is checked before the effect, not after", () => {
 
     expect(seen[0]?.["maxSpend"]).toEqual({ amount: "2.00", currency: "USD" });
     expect(seen[1]?.["maxSpend"]).toBeUndefined();
+  });
+});
+
+describe("a charge whose amount the provider withheld (#150)", () => {
+  // The defect: this observation was **valid to report and fatal to append**. The observation
+  // schema accepted it, the record schema refused it, and reporting it threw away the cost record,
+  // the event and the completed `AgentResult` — after the money was gone.
+
+  const unknownCharge = {
+    provider: "provider-a",
+    operation: "completion",
+    billingStatus: "unknown" as const,
+  };
+
+  it("6/7/8. returns the original result, appends the record, links it from the event", async () => {
+    const { service, costs, events } = serviceWith({
+      backend: backend({
+        execute: () => Promise.resolve({ ok: true, output: "drafted", costs: [unknownCharge] }),
+      }),
+    });
+
+    const result = await service.execute({ ...base, grant: GRANT });
+
+    // The provider's execution completed. Reporting an honest cost must not turn that into a
+    // schema exception.
+    expect(result.result.ok).toBe(true);
+    expect(result.result.output).toBe("drafted");
+
+    expect(costs.records).toHaveLength(1);
+    expect(costs.records[0]?.billingStatus).toBe("unknown");
+    // No fabricated amount introduced during attribution. Zero is a numerical assertion and this
+    // is an uncertainty state.
+    expect(costs.records[0]?.actual).toBeUndefined();
+    expect(costs.records[0]?.estimated).toBeUndefined();
+
+    const details = events.events[0]?.details as { costIds?: string[] };
+    expect(details.costIds).toEqual([costs.records[0]?.costId]);
+
+    // 8.
+    expect(result.billingUnconfirmed).toBe(true);
+  });
+
+  it("10. a later spend check against the same grant is refused as billing-unconfirmed", async () => {
+    const { service, costs } = serviceWith({
+      backend: backend({
+        execute: () => Promise.resolve({ ok: true, costs: [unknownCharge] }),
+      }),
+    });
+    await service.execute({ ...base, grant: GRANT });
+
+    const check = checkSpend(GRANT, costs.records, {
+      amount: { amount: "0.0100", currency: "USD" },
+    });
+
+    if (check.allowed) throw new Error("a spend after an unconfirmed charge must be refused");
+    expect(check.reason).toBe("billing-unconfirmed");
+    // The unresolved charge is neither free, voided, nor a zero draw.
+    expect(check.ledger.unresolvedUnknown).toHaveLength(1);
+    expect(check.ledger.remainingIsDeterminate).toBe(false);
+  });
+
+  it("an estimate does not resolve an unknown charge", async () => {
+    // The ruling is explicit: an estimate is evidence about what was expected, and does not
+    // confirm the final charge. A record carrying both is still unresolved.
+    const { service, costs } = serviceWith({
+      backend: backend({
+        execute: () =>
+          Promise.resolve({
+            ok: true,
+            costs: [{ ...unknownCharge, estimated: { amount: "0.5000", currency: "USD" } }],
+          }),
+      }),
+    });
+    await service.execute({ ...base, grant: GRANT });
+
+    const check = checkSpend(GRANT, costs.records, {
+      amount: { amount: "0.0100", currency: "USD" },
+    });
+
+    if (check.allowed) throw new Error("an estimate must not resolve an unknown charge");
+    expect(check.reason).toBe("billing-unconfirmed");
+  });
+
+  it("9. the summary exposes it without adding to actual or estimated totals", () => {
+    const record = {
+      schemaVersion: SCHEMA_VERSION,
+      costId: "cost-1",
+      runId: RUN,
+      provider: "provider-a",
+      operation: "completion",
+      billingStatus: "unknown" as const,
+      recordedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const summary = summariseCosts([record]);
+
+    expect(summary.recordCount).toBe(1);
+    expect(summary.unknownBillingRecordCount).toBe(1);
+    expect(summary.unquantifiedUnknownBillingRecordCount).toBe(1);
+    expect(summary.actualByCurrency).toEqual({});
+    expect(summary.estimatedByCurrency).toEqual({});
+    // It has no `Money`, so no currency can be derived — which is exactly why a reader must not
+    // treat `currenciesWithUnknownBilling` as the only unknown-billing signal.
+    expect(summary.currenciesWithUnknownBilling).toEqual([]);
   });
 });

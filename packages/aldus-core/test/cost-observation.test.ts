@@ -92,3 +92,63 @@ describe("a cost observation carries billing facts and no attribution", () => {
     expect(parsed.success).toBe(true);
   });
 });
+
+describe("billing evidence is one invariant, applied to both compositions (#150)", () => {
+  const amountLessUnknown = {
+    provider: "provider-a",
+    operation: "completion",
+    billingStatus: "unknown" as const,
+  };
+
+  it("1. an observation may state that the amount is unknown", () => {
+    // The provider charged the request and withheld or delayed the figure. That is a billing fact
+    // and Aldus must be able to hold it without a fabricated number.
+    expect(costObservationSchema.safeParse(amountLessUnknown).success).toBe(true);
+  });
+
+  it("2. the attributed record validates too", () => {
+    const record = {
+      ...amountLessUnknown,
+      schemaVersion: SCHEMA_VERSION,
+      costId: "cost-a",
+      runId: "run-a",
+      recordedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    expect(costRecordSchema.safeParse(record).success).toBe(true);
+  });
+
+  it("3. observation and record apply identical billing-evidence invariants", () => {
+    // The defect this closes: `.pick()` does not carry refinements, so deriving the observation
+    // from the record's fields while refining only the record made them disagree by construction —
+    // valid to report, fatal to append.
+    const cases = [
+      { ...amountLessUnknown, billingStatus: "charged" as const },
+      { ...amountLessUnknown, billingStatus: "free" as const },
+      amountLessUnknown,
+      { ...amountLessUnknown, actual: { amount: "1.0000", currency: "USD" } },
+    ];
+
+    for (const billing of cases) {
+      const asRecord = {
+        ...billing,
+        schemaVersion: SCHEMA_VERSION,
+        costId: "cost-a",
+        runId: "run-a",
+        recordedAt: "2026-01-01T00:00:00.000Z",
+      };
+      expect(
+        costObservationSchema.safeParse(billing).success,
+        `observation and record disagree about ${JSON.stringify(billing)}`,
+      ).toBe(costRecordSchema.safeParse(asRecord).success);
+    }
+  });
+
+  it("4. a charged record with no amount is still invalid", () => {
+    // `unknown` states that the amount is not known, which is evidence. `charged` with no amount
+    // states nothing, and would silently under-report spend against a budget.
+    expect(
+      costObservationSchema.safeParse({ ...amountLessUnknown, billingStatus: "charged" }).success,
+    ).toBe(false);
+  });
+});

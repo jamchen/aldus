@@ -1,9 +1,9 @@
 {
   "schemaVersion": "1.0",
-  "costId": "cost-a",
+  "costId": "cost-b",
   "runId": "run-a",
   "provider": "provider-a",
   "operation": "synthesis",
-  "billingStatus": "charged",
+  "billingStatus": "unknown",
   "recordedAt": "2026-01-01T00:00:00.000Z"
 }

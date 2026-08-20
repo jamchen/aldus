@@ -82,7 +82,7 @@
     "recordedAt"
   ],
   "title": "CostRecord",
-  "description": "A recorded or projected cost attributable to a Run (architecture contract §19.3, §15). ADDITIONAL CONSTRAINT NOT EXPRESSIBLE IN JSON SCHEMA: at least one of `estimated` or `actual` must be present — a cost record that states neither carries no information and would silently under-report spend against a budget. Validators generated from this schema will NOT enforce that; the normative Zod schema does. `provider` and `operation` are open strings because Core names no provider (§4.2). `billingStatus: unknown` exists so an unconfirmed billing outcome is representable rather than guessed (§19.3).",
+  "description": "A recorded or projected cost attributable to a Run (architecture contract §19.3, §15). ADDITIONAL CONSTRAINT NOT EXPRESSIBLE IN JSON SCHEMA: a charge must state an amount or state that the amount is unknown — at least one of `estimated` or `actual` must be present unless `billingStatus` is `unknown`. A record doing neither carries no information and would silently under-report spend against a budget. Validators generated from this schema will NOT enforce that; the normative Zod schema does. `provider` and `operation` are open strings because Core names no provider (§4.2). `billingStatus: unknown` exists so an unconfirmed billing outcome is representable rather than guessed (§19.3).",
   "$defs": {
     "CostQuantity": {
       "type": "object",

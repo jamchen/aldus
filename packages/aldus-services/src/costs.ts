@@ -30,13 +30,21 @@ export function summariseCosts(records: readonly CostRecord[]): CostSummary {
   const actual = new Map<string, Money>();
   const estimated = new Map<string, Money>();
   const unknown = new Set<string>();
+  let unknownBillingRecordCount = 0;
+  let unquantifiedUnknownBillingRecordCount = 0;
 
   for (const record of records) {
     if (record.billingStatus === "voided" || record.billingStatus === "free") continue;
 
     if (record.billingStatus === "unknown") {
+      unknownBillingRecordCount += 1;
       const currency = record.actual?.currency ?? record.estimated?.currency;
       if (currency !== undefined) unknown.add(currency);
+      // A charge whose amount nobody knows and whose currency nobody knows either. It has no
+      // `Money` to derive a currency from, so `currenciesWithUnknownBilling` cannot represent it
+      // — and a reader relying on that field alone would see an empty list and read it as "no
+      // unconfirmed billing" (#150).
+      else unquantifiedUnknownBillingRecordCount += 1;
     }
 
     const committed = CHARGED_STATUSES.has(record.billingStatus) ? record.actual : undefined;
@@ -52,6 +60,8 @@ export function summariseCosts(records: readonly CostRecord[]): CostSummary {
     actualByCurrency: toAmounts(actual),
     estimatedByCurrency: toAmounts(estimated),
     currenciesWithUnknownBilling: [...unknown].sort(),
+    unknownBillingRecordCount,
+    unquantifiedUnknownBillingRecordCount,
   };
 }
 
