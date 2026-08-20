@@ -188,6 +188,7 @@ export function passthroughStage(id: string): StageDefinition<unknown, unknown> 
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     execute: (_context, input): Promise<StageOutcome<unknown>> =>
       Promise.resolve({ kind: "completed", output: input }),
@@ -202,6 +203,7 @@ export function gatedStage(id: string, gateId: string): StageDefinition<unknown,
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     execute: (): Promise<StageOutcome<unknown>> =>
       Promise.resolve({ kind: "gate_required", gateId, subjectHashes: [] }),
@@ -228,6 +230,7 @@ export function objectInputStage(id: string): StageDefinition<unknown, unknown> 
     inputSchema: objectSchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     execute: (_context, input): Promise<StageOutcome<unknown>> =>
       Promise.resolve({ kind: "completed", output: input }),

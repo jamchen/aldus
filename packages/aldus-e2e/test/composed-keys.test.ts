@@ -32,6 +32,7 @@ function resolvesFromTheRun(id: string) {
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" as const },
     execute: () => Promise.resolve({ kind: "completed" as const, output: undefined }),
   };

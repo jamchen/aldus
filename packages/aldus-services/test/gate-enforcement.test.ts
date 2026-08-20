@@ -63,6 +63,7 @@ function countingStage(
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "not_idempotent", reason: "stands in for irreversible work" },
     ...(requiredGates !== undefined ? { requiredGates } : {}),
     execute: (): Promise<StageOutcome<unknown>> => {

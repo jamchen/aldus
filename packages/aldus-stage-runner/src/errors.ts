@@ -65,6 +65,16 @@ export const StageRunnerErrorCodes = {
    * because nothing told the two apart.
    */
   STAGE_EVALUATION_BLOCKED: "ALDUS_STAGE_EVALUATION_BLOCKED",
+  /**
+   * A stage produced a value and did not register the artifacts it owed (§8.1, §11; ADR-0040).
+   *
+   * Non-retryable. Every way to reach it — a missing kind, excess cardinality, an undeclared
+   * registration — is a defect in the stage or in its declaration, and retrying runs the same
+   * stage against the same contract while spending whatever the stage spends.
+   */
+  STAGE_ARTIFACT_CONTRACT_UNMET: "ALDUS_STAGE_ARTIFACT_CONTRACT_UNMET",
+  /** A stage was registered without declaring what it owes the registry (§8.1, §11; ADR-0040). */
+  STAGE_ARTIFACT_DECLARATION_REQUIRED: "ALDUS_STAGE_ARTIFACT_DECLARATION_REQUIRED",
   STAGE_EFFECT_KEY_REQUIRED: "ALDUS_STAGE_EFFECT_KEY_REQUIRED",
   WORKER_NOT_REGISTERED: "ALDUS_WORKER_NOT_REGISTERED",
   /**

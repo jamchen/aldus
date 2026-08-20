@@ -47,6 +47,9 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 /** Extract every `interface X { … }` declared in the contract's TypeScript blocks. */
+/** Contract interfaces this parser cannot read, collected during parse and asserted on below. */
+const UNPARSEABLE = new Set<string>();
+
 function parseContractInterfaces(markdown: string): Map<string, ContractField[]> {
   const interfaces = new Map<string, ContractField[]>();
   const declaration = /interface\s+(\w+)\s*\{([^}]*)\}/g;
@@ -55,6 +58,12 @@ function parseContractInterfaces(markdown: string): Map<string, ContractField[]>
     const name = match[1];
     const body = match[2];
     if (name === undefined || body === undefined) continue;
+    // `[^}]*` cannot see past a nested object type: the body stops at the inner `}` and every
+    // field after it silently disappears from the parsed contract, where it then reads as an
+    // *unsanctioned addition* in the schema. That failure names the wrong fields and sends the
+    // reader hunting for a schema change that never happened — it cost one debugging cycle the
+    // first time a nested type went in. Recorded here and asserted below, on the cause.
+    if (body.includes("{")) UNPARSEABLE.add(name);
     const fields = [...body.matchAll(/^\s*(\w+)(\??):/gm)].flatMap<ContractField>((field) => {
       const fieldName = field[1];
       return fieldName === undefined ? [] : [{ name: fieldName, optional: field[2] === "?" }];
@@ -115,6 +124,19 @@ describe("architecture contract conformance", () => {
     // If the document moves or its code fences change shape, every assertion below would pass
     // vacuously. Fail loudly instead.
     expect(contract.size).toBeGreaterThanOrEqual(VERBATIM_TYPES.length);
+  });
+
+  it("can actually read the types it checks", () => {
+    // Without this, a nested object type in a checked interface degrades the whole file into a
+    // vacuous pass for the fields before it and a misleading failure for the fields after.
+    const unreadable = VERBATIM_TYPES.filter((name) => UNPARSEABLE.has(name));
+    expect(
+      unreadable,
+      "these contract interfaces contain a nested object type. This parser reads a body as " +
+        "everything up to the first `}`, so every field after the nested one is silently dropped " +
+        "and then reported as an unsanctioned schema addition. Extract the nested type into its " +
+        "own named interface in the contract.",
+    ).toEqual([]);
   });
 
   describe.each(VERBATIM_TYPES)("%s", (name) => {

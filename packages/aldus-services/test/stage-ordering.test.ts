@@ -59,6 +59,7 @@ function countingStage(id: string, outcome: "succeed" | "fail" = "succeed") {
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "not_idempotent", reason: "stands in for irreversible work" },
     execute: (): Promise<StageOutcome<unknown>> => {
       sideEffects[id] = (sideEffects[id] ?? 0) + 1;

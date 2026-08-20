@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.7:RunManifest",
+  "$id": "urn:aldus:schema:1.8:RunManifest",
   "type": "object",
   "properties": {
     "schemaVersion": {

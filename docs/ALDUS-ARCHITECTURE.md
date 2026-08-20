@@ -321,6 +321,12 @@ interface RunManifest {
 A Stage Execution represents a logical stage in a Run. An Attempt is one invocation.
 
 ```ts
+interface ExpectedArtifact {
+  kind: string;
+  minCount: number;
+  maxCount?: number;
+}
+
 interface StageAttempt {
   attemptId: string;
   stageId: string;
@@ -329,6 +335,7 @@ interface StageAttempt {
   actor: ActorRef;
   inputArtifacts: ArtifactRef[];
   outputArtifacts: ArtifactRef[];
+  expectedArtifacts?: ExpectedArtifact[];
   startedAt?: string;
   finishedAt?: string;
   error?: StructuredError;
@@ -336,6 +343,26 @@ interface StageAttempt {
 ```
 
 Attempts MUST be append-only audit records. A materialized manifest MAY summarize the current state.
+
+Every Stage MUST declare either that it registers no artifacts, or an artifact contract. The
+contract MUST be resolved before execution, from the validated input, the recorded configuration,
+and the declared input artifacts only. **The Stage's returned output and the artifacts it
+registered MUST NOT determine what it was expected to produce** — an obligation derived from the
+result is satisfied by construction. A resolver MUST NOT be given filesystem or arbitrary I/O
+access; a mode that cannot be derived from the validated invocation is a hidden input and MUST be
+made explicit first.
+
+A resolved contract MUST support cardinality: at minimum a kind and a minimum count, and
+optionally a maximum. Artifact kinds remain adopter-defined opaque strings. The resolved contract
+MUST be recorded on the attempt, so production trace states what the runner expected at that time.
+
+Before an attempt settles as succeeded, registered artifacts MUST be compared with the resolved
+contract. A missing required artifact, excess cardinality, or a registered kind the contract does
+not declare MUST produce a structured, non-retryable failure. Artifacts already registered MUST be
+retained for diagnosis. Cancelled, failed and waiting-for-gate attempts need not satisfy the
+contract.
+
+The absence of a declaration MUST NOT be read as "no artifacts".
 
 ### 6.4 Event log
 

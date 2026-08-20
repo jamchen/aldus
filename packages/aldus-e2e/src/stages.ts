@@ -58,6 +58,15 @@ export function producingStage(
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    // One, of the kind it registers. It registers through the registry directly rather than
+    // through `context.registerOutput`, and the attempt records it either way — so declaring
+    // "none" here made the artifact undeclared and the stage failed its own contract. That is
+    // the check working: the declaration has to describe what the stage does, not which API it
+    // used to do it.
+    artifacts: {
+      produces: "declared",
+      resolve: () => [{ kind: options.kind, minCount: 1, maxCount: 1 }],
+    },
     idempotency: { kind: "idempotent" },
     execute: async (context): Promise<StageOutcome<unknown>> => {
       const path = join(options.workingRoot, options.relativePath);
@@ -107,6 +116,7 @@ export function gatedStage(
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     execute: (): Promise<StageOutcome<unknown>> =>
       Promise.resolve({
@@ -153,6 +163,12 @@ export function selfRegisteringStage(
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    // Exactly one, of the kind it registers. Written from what the stage does rather than
+    // from what it happened to produce — which is ADR-0040's whole constraint.
+    artifacts: {
+      produces: "declared",
+      resolve: () => [{ kind: options.kind, minCount: 1, maxCount: 1 }],
+    },
     idempotency: { kind: "idempotent" },
     execute: async (context): Promise<StageOutcome<unknown>> => {
       const path = join(options.workingRoot, options.relativePath);
