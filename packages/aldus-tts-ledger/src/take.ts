@@ -237,9 +237,8 @@ export type TakeAuthorization = z.infer<typeof takeAuthorizationSchema>;
  * were paid for" from that field getting seven charges that never happened.
  *
  * Stored **beside** the planned values rather than overwriting them, so no field's meaning depends
- * on whether another field is present. Read them together through {@link effectiveParameters} and
- * {@link effectiveFinalProviderText}, which is where the precedence rule lives — once, named and
- * tested, rather than in every reader's head.
+ * on whether another field is present. Read them through {@link producedParameters} and {@link producedFinalProviderText}, and compare
+ * them with {@link compareProducedToRequested}.
  *
  * Absence means the adapter did not report, which is **not** the same as "the plan was followed".
  * An adapter that never learned to report looks identical to one that had nothing to report, and
@@ -249,11 +248,19 @@ export type TakeAuthorization = z.infer<typeof takeAuthorizationSchema>;
 export const producedFactsSchema = z
   .object({
     /**
-     * The parameters actually used, **complete** where present.
+     * The parameters actually used, as **one whole value** or absent.
      *
-     * Whole-value or absent, never partial. A partial observation would mean "provider is what I
-     * say, voice is whatever was planned" — reintroducing one field at a time the exact ambiguity
+     * Never a diff against the requested ones. A partial report would mean "provider is what I
+     * say, voice is whatever was planned" — reintroducing one key at a time the exact ambiguity
      * this record exists to remove.
+     *
+     * **Whole value, not every key.** `settings` and `seed` are optional in
+     * {@link synthesisParametersSchema} and stay optional here: an adapter that ran a different
+     * engine should omit settings the requested provider would have used, because copying them
+     * across would assert that a setting shaped audio it never touched. The first adopter got this
+     * right unprompted — their local engine's produced block carries provider, voice and model and
+     * omits a hosted provider's `stability`. Reporting what you used is the rule; echoing the
+     * request's shape is the thing being replaced.
      */
     parameters: synthesisParametersSchema.optional(),
     /**
@@ -361,14 +368,14 @@ export const takeRecordSchema = z
      *
      * Not as sent. This is assigned from the synthesis plan before the adapter runs, so it cannot
      * be a record of what the adapter did with it. For the string actually sent, read
-     * {@link effectiveFinalProviderText}.
+     * {@link producedFinalProviderText}.
      */
     text: segmentTextSchema,
     /**
      * Provider, voice, model, settings, seed **as planned** (contract §15, §14.4).
      *
      * Not as used, for the same reason as {@link text}: assigned before the adapter runs. Read
-     * {@link effectiveParameters} for what actually produced the audio.
+     * {@link producedParameters} for what actually produced the audio.
      */
     parameters: synthesisParametersSchema,
     /** The facts that produced the bytes, as reported by the adapter (§15; ADR-0038). */

@@ -101,7 +101,7 @@ export function parsePackManifest(
 /**
  * Validate an already-decoded manifest document (contract §9.1).
  *
- * Use when manifests arrive as objects rather than text — from a {@link PackSource}, a test
+ * Use when manifests arrive as objects rather than text — from a {@link ManifestSourceParser}, a test
  * fixture, or an adopter's own loader.
  *
  * @throws {AldusError} `ALDUS_KNOWLEDGE_MANIFEST_INVALID`.

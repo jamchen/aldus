@@ -95,4 +95,5 @@ Not a §-clause, but the shape that produced two of the four gaps.
 | every adopter-supplied capability has an `AldusConfig` field   | `packages/aldus-cli/test/config-reach.test.ts`                            |
 | `loadConfig` accepts every key `AldusConfig` declares          | compile-time, plus `packages/aldus-cli/test/operator-entry-point.test.ts` |
 | every seam is reachable from the published package entry point | `packages/aldus-e2e/test/public-surface.test.ts`                          |
+| documentation names symbols that exist                         | `packages/aldus-core/test/doc-links.test.ts`                              |
 | the operator's actual command reaches the composition          | `packages/aldus-cli/test/operator-entry-point.test.ts`                    |
