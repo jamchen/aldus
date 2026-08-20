@@ -99,23 +99,31 @@ VERSION=0.2.0-next.4   # the release you are cutting
 npm version "${VERSION}" --workspaces --include-workspace-root --no-git-tag-version
 ```
 
+### The stale-pin window, and why it reaches CI
+
 `npm version` runs an install as it goes, and at that moment the workspaces carry the new version
 while their internal pins still carry the old one. npm resolves the mismatch the only way it can —
-by fetching the **previous release** from the registry into `packages/*/node_modules`. Those copies
-outlive the pin update and produce type errors naming two different `FileWorkspace`s.
+by fetching the **previous release** from the registry into `packages/*/node_modules`.
 
-If `npm run verify` fails that way, it is this and not your change:
+**This is written into `package-lock.json`, so it is not a local-only problem.** Committing that
+lockfile makes `npm ci` reproduce the same nested copies on a clean CI checkout, and the build
+fails with type errors naming two different `FileWorkspace`s or `GateEngine`s — one from the
+workspace, one from a registry copy of the previous release. This document previously claimed CI
+was unaffected. It is not; a release was tagged and failed exactly this way.
+
+Deleting the directories is not enough, because the next install restores them from the lock. After
+updating the pins, regenerate the lockfile from nothing:
 
 ```bash
-rm -rf packages/*/node_modules packages/*/dist packages/*/*.tsbuildinfo
+rm -rf node_modules packages/*/node_modules packages/*/dist packages/*/*.tsbuildinfo package-lock.json
+npm install
 ```
 
-**Run that after the pin update and after `npm install`, not before.** Cleaning first does not
-help: the lockfile `npm version` regenerated still records the stale resolutions, so the next
-install puts them straight back. Cleaning last removes the directories once nothing will
-re-create them.
+Then confirm the lock is clean before committing — this must print `0`:
 
-CI is unaffected — it runs `npm ci` from a clean checkout, where the window never exists.
+```bash
+node -e "const l=require('./package-lock.json');console.log(Object.keys(l.packages).filter(k=>k.includes('packages/aldus-')&&k.includes('node_modules/@aldus-runtime')).length)"
+```
 
 Then update every internal dependency to the exact version. Verify:
 
