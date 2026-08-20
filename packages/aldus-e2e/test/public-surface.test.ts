@@ -41,6 +41,11 @@ const PUBLIC_SURFACE: Record<string, { module: object; names: readonly string[] 
       "WorkerRegistry",
       "assertWorkerCapabilities",
       "deriveInvocationKey",
+      // Adopter-facing doubles. Listed because a new export is exactly what gets forgotten — the
+      // Worker module itself was implemented, tested and unexported for a full release (#121).
+      "recordingWorker",
+      "failingWorker",
+      "cancellableWorker",
     ],
   },
   "@aldus-runtime/core": {
