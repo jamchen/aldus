@@ -129,6 +129,27 @@ export interface SynthesisOutcome {
   riskSites?: readonly RiskSite[];
   /** ASR findings over the produced audio. Recorded, never computed by Aldus. */
   asrFindings?: readonly AsrFinding[];
+  /**
+   * The parameters actually used, where they differ from the plan's (§15; ADR-0038).
+   *
+   * An adapter is not obliged to be the planned provider. An adopter synthesising locally recorded
+   * seven takes reading `"provider": "provider-a"` for audio that provider never made, because the
+   * take took its parameters from the plan and the adapter had no channel to say otherwise.
+   *
+   * **Complete where present, never partial.** Reporting only the provider would mean "voice is
+   * whatever was planned", which is the ambiguity this field exists to remove, one key at a time.
+   */
+  producedParameters?: SynthesisParameters;
+  /**
+   * The string actually sent to the provider, where it differs from the plan's (§15; ADR-0038).
+   *
+   * Divergence is routine and legitimate: an adopter's local engine cannot read the performance
+   * tags a hosted model consumes and speaks them aloud instead, so their adapter strips them. The
+   * take previously recorded text carrying 36 tags the engine never received.
+   */
+  producedFinalProviderText?: string;
+  /** Why the adapter diverged, in its own words. Recorded verbatim, never parsed. */
+  productionReason?: string;
 }
 
 /**
@@ -279,6 +300,25 @@ export class SynthesisGateway {
         ...(outcome.audioSha256 === undefined ? {} : { audioSha256: outcome.audioSha256 }),
         ...(outcome.riskSites === undefined ? {} : { riskSites: [...outcome.riskSites] }),
         ...(outcome.asrFindings === undefined ? {} : { asrFindings: [...outcome.asrFindings] }),
+        // Stored beside the plan's values, never over them (ADR-0038). The whole object is omitted
+        // when the adapter reported nothing, so "did not report" stays distinguishable from
+        // "reported that it matched" — the second is a claim, the first is a silence.
+        ...(outcome.producedParameters === undefined &&
+        outcome.producedFinalProviderText === undefined
+          ? {}
+          : {
+              produced: {
+                ...(outcome.producedParameters === undefined
+                  ? {}
+                  : { parameters: outcome.producedParameters }),
+                ...(outcome.producedFinalProviderText === undefined
+                  ? {}
+                  : { finalProviderText: outcome.producedFinalProviderText }),
+                ...(outcome.productionReason === undefined
+                  ? {}
+                  : { reason: outcome.productionReason }),
+              },
+            }),
       },
     });
 

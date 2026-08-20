@@ -23,6 +23,7 @@ import {
   riskSiteSchema,
   segmentTextSchema,
   synthesisParametersSchema,
+  type SynthesisParameters,
 } from "./request.js";
 
 /**
@@ -227,6 +228,64 @@ export const takeAuthorizationSchema = z
 export type TakeAuthorization = z.infer<typeof takeAuthorizationSchema>;
 
 /**
+ * What the adapter reports it actually did, where that differs from the plan (§15; ADR-0038).
+ *
+ * A take's `text` and `parameters` are the **plan's**. They have to be: they are set before the
+ * adapter runs, and an adapter is free to be something other than the planned provider. An adopter
+ * synthesising locally recorded seven takes reading `"provider": "provider-a"` for audio that
+ * provider never made — each record individually well-formed, and anyone answering "which takes
+ * were paid for" from that field getting seven charges that never happened.
+ *
+ * Stored **beside** the planned values rather than overwriting them, so no field's meaning depends
+ * on whether another field is present. Read them together through {@link effectiveParameters} and
+ * {@link effectiveFinalProviderText}, which is where the precedence rule lives — once, named and
+ * tested, rather than in every reader's head.
+ *
+ * Absence means the adapter did not report, which is **not** the same as "the plan was followed".
+ * An adapter that never learned to report looks identical to one that had nothing to report, and
+ * this record cannot tell you which. That limit is the price of the field being optional, and it
+ * is stated here rather than discovered.
+ */
+export const producedFactsSchema = z
+  .object({
+    /**
+     * The parameters actually used, **complete** where present.
+     *
+     * Whole-value or absent, never partial. A partial observation would mean "provider is what I
+     * say, voice is whatever was planned" — reintroducing one field at a time the exact ambiguity
+     * this record exists to remove.
+     */
+    parameters: synthesisParametersSchema.optional(),
+    /**
+     * The string actually sent to the provider (contract §15 "final provider text").
+     *
+     * Only this stage of {@link segmentTextSchema} is observable. The earlier stages — normalised,
+     * substituted, tagged — are transformations the *planner* performed, so the plan's record of
+     * them is the true one. What an adapter can know, and nothing else can, is the bytes it sent.
+     *
+     * Divergence here is routine and legitimate, not an incident: an adopter's local engine cannot
+     * read the performance tags a hosted provider's model consumes, so their adapter strips them
+     * before synthesis. The take previously claimed text carrying 36 tags the engine never
+     * received.
+     */
+    finalProviderText: z.string().max(20_000).optional(),
+    /** Why the adapter diverged, in its own words. Operator-facing, never parsed. */
+    reason: z.string().min(1).max(2000).optional(),
+  })
+  .meta({
+    id: "ProducedFacts",
+    title: "ProducedFacts",
+    description:
+      "What a synthesis adapter reports it actually did, where that differs from the plan " +
+      "(architecture contract §15). Stored beside the planned values, never overwriting them. " +
+      "Absence means the adapter did not report, which is not the same as the plan having been " +
+      "followed.",
+  });
+
+/** @see producedFactsSchema */
+export type ProducedFacts = z.infer<typeof producedFactsSchema>;
+
+/**
  * One synthesis attempt at one segment (contract §15).
  *
  * The field list covers §15's requirement enumeration: segment ID; text at every stage; voice,
@@ -247,10 +306,23 @@ export const takeRecordSchema = z
     segmentId: nonEmptyString,
     /** Which attempt at that segment, starting at 1. */
     attempt: z.number().int().min(1),
-    /** The text at every stage, as actually sent (contract §15). */
+    /**
+     * The text at every stage, **as planned** (contract §15).
+     *
+     * Not as sent. This is assigned from the synthesis plan before the adapter runs, so it cannot
+     * be a record of what the adapter did with it. For the string actually sent, read
+     * {@link effectiveFinalProviderText}.
+     */
     text: segmentTextSchema,
-    /** Provider, voice, model, settings, seed as actually used (contract §15, §14.4). */
+    /**
+     * Provider, voice, model, settings, seed **as planned** (contract §15, §14.4).
+     *
+     * Not as used, for the same reason as {@link text}: assigned before the adapter runs. Read
+     * {@link effectiveParameters} for what actually produced the audio.
+     */
     parameters: synthesisParametersSchema,
+    /** The facts that produced the bytes, as reported by the adapter (§15; ADR-0038). */
+    produced: producedFactsSchema.optional(),
     /** The provider's own request identifier, for reconciliation (contract §15). */
     providerRequestId: z.string().min(1).max(400).optional(),
     /**
@@ -332,6 +404,79 @@ export const takeRecordSchema = z
 
 /** @see takeRecordSchema */
 export type TakeRecord = z.infer<typeof takeRecordSchema>;
+
+/**
+ * The parameters that produced this take's audio, or `undefined` when nothing recorded them.
+ *
+ * **`undefined` means unknown, never "the same as requested."** That distinction is the whole
+ * decision: an adapter that never learned to report produced facts is indistinguishable from one
+ * that produced exactly what was planned, and a function returning the requested parameters here
+ * would state the second while establishing only the first.
+ *
+ * The earlier draft of this function did exactly that, falling back to `take.parameters`. It made
+ * the common case read nicely and it is the reason the owner's ruling says, in as many words,
+ * *never infer that observed equals requested*.
+ *
+ * **This is the function that answers "what made these bytes."** `take.parameters` answers "what
+ * was planned", and for the adapters where the question matters the two differ — an adopter
+ * synthesising locally recorded seven takes naming a hosted provider that never ran.
+ */
+export function producedParameters(take: TakeRecord): SynthesisParameters | undefined {
+  return take.produced?.parameters;
+}
+
+/**
+ * The string actually sent to the provider, or `undefined` when nothing recorded it.
+ *
+ * Same rule as {@link producedParameters}: absent is unknown. Note that `take.text` may carry a
+ * `finalProviderText` and this still return `undefined` — the plan's intended string is not
+ * evidence about what the adapter sent, which is precisely how a §13.2 comparison came to have
+ * the same expression on both sides.
+ */
+export function producedFinalProviderText(take: TakeRecord): string | undefined {
+  return take.produced?.finalProviderText;
+}
+
+/** How a take's produced facts stand against the requested ones (§15; ADR-0038). */
+export type ProducedFactComparison =
+  /** Nothing reported what produced the bytes. Not a match, and not a divergence. */
+  | { status: "unknown" }
+  /** The adapter reported, and what it reported is what was requested. */
+  | { status: "matches" }
+  /** The adapter reported something other than what was requested. */
+  | { status: "diverged"; fields: readonly ("parameters" | "text")[] };
+
+/**
+ * Compare what produced the bytes against what was requested (§15, §13.2; ADR-0038).
+ *
+ * Three-valued on purpose. A boolean, or a list whose emptiness means agreement, would fold
+ * *unknown* into *matches* — the single inference the ruling on #133 forbids, and the one that
+ * makes a record of an unreporting adapter look like evidence of compliance.
+ *
+ * Derived on read, never stored. A stored comparison would be a third value to keep consistent
+ * with the two it summarises, which is a defect class this repository has now hit four times.
+ */
+export function compareProducedToRequested(take: TakeRecord): ProducedFactComparison {
+  const produced = take.produced;
+  if (produced === undefined) return { status: "unknown" };
+  if (produced.parameters === undefined && produced.finalProviderText === undefined) {
+    return { status: "unknown" };
+  }
+  const fields: ("parameters" | "text")[] = [];
+  if (
+    produced.parameters !== undefined &&
+    JSON.stringify(produced.parameters) !== JSON.stringify(take.parameters)
+  ) {
+    fields.push("parameters");
+  }
+  if (
+    produced.finalProviderText !== undefined &&
+    produced.finalProviderText !== take.text.finalProviderText
+  ) {
+    fields.push("text");
+  }
+  return fields.length === 0 ? { status: "matches" } : { status: "diverged", fields };
+}
 
 /** Whether a take was accepted by a human (contract §13.3). */
 export function isAccepted(take: TakeRecord): boolean {

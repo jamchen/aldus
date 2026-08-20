@@ -22,6 +22,7 @@ import * as core from "@aldus-runtime/core";
 import * as gateEngine from "@aldus-runtime/gate-engine";
 import * as services from "@aldus-runtime/services";
 import * as stageRunner from "@aldus-runtime/stage-runner";
+import * as ttsLedger from "@aldus-runtime/tts-ledger";
 
 /**
  * Names an adopter builds against, per package.
@@ -65,6 +66,18 @@ const PUBLIC_SURFACE: Record<string, { module: object; names: readonly string[] 
   "@aldus-runtime/services": {
     module: services,
     names: ["AldusContext", "AldusServices", "AgentExecutionService"],
+  },
+  "@aldus-runtime/tts-ledger": {
+    module: ttsLedger,
+    names: [
+      // The precedence rule between a take's planned and observed values lives in these, and
+      // nowhere else (ADR-0038). Unreachable, an adopter reimplements it — which is worse than the
+      // renegotiated warranty that storing "beside" was chosen to avoid.
+      "producedParameters",
+      "producedFinalProviderText",
+      "compareProducedToRequested",
+      "producedFactsSchema",
+    ],
   },
   "@aldus-runtime/artifact-registry": {
     module: artifactRegistry,
