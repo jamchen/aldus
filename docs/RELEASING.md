@@ -99,6 +99,19 @@ VERSION=0.2.0-next.4   # the release you are cutting
 npm version "${VERSION}" --workspaces --include-workspace-root --no-git-tag-version
 ```
 
+`npm version` runs an install as it goes, and at that moment the workspaces carry the new version
+while their internal pins still carry the old one. npm resolves the mismatch the only way it can —
+by fetching the **previous release** from the registry into `packages/*/node_modules`. Those copies
+outlive the pin update and produce type errors naming two different `FileWorkspace`s.
+
+If `npm run verify` fails that way, it is this and not your change:
+
+```bash
+rm -rf packages/*/node_modules packages/*/dist packages/*/*.tsbuildinfo
+```
+
+CI is unaffected — it runs `npm ci` from a clean checkout, where the window never exists.
+
 Then update every internal dependency to the exact version. Verify:
 
 ```bash
