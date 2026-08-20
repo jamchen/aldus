@@ -60,3 +60,4 @@ Rules:
 | [0041](0041-enumerated-findings-and-aggregate-reports-are-different-evidence.md)            | An enumerated finding and an aggregate report are different evidence                       | Accepted | #140              |
 | [0042](0042-promotion-stays-interactive.md)                                                 | Promotion to `latest` stays interactive, and no bypass token enters CI                     | Accepted | —                 |
 | [0043](0043-an-effect-key-belongs-to-the-effect.md)                                         | An effect key belongs to the effect, not to the attempt containing it                      | Accepted | #148, #149        |
+| [0044](0044-spend-is-reserved-before-the-effect.md)                                         | Spend is reserved before the effect, and settled from what the provider reports            | Accepted | #155              |
