@@ -75,8 +75,22 @@ An adopter wanting one episode-level ceiling above several grants states that as
 aggregate policy. It must not be obtained accidentally by reusing a `decisionId`.
 
 Locking the Run would permit the race the protocol exists to prevent; locking globally would
-serialise unrelated work. The lease goes through `LockManager` — a process-local mutex is not a
-substitute for the contract §19.1 requires.
+serialise unrelated work.
+
+**Check-and-reserve commits through a linearizable compare-and-append operation scoped by
+`grantId`.** The file-backed implementation may use `LockManager` to reduce contention, but **the
+lease is not the correctness mechanism**: it detects lease loss _after_ the body has run and
+supplies no fencing token, so a holder that lost its lease can still write. Correctness rests on a
+storage primitive that permits exactly one writer to install the successor of an expected revision.
+
+> **A revision comparison that is not atomic with installation of the successor revision is not
+> compare-and-append.**
+
+This corrects an earlier reading of this decision. "Under a lease" was taken to mean the lease
+supplied the guarantee; it does not, and a design built on that reading would have let two writers
+both pass a revision check and the slower one overwrite the faster one's committed transition. See
+`docs/design/spend-reservation-store.md` for the file implementation's linearization point. A
+process-local mutex remains no substitute for the contract §19.1 requires.
 
 It goes behind `LockManager`, which §19.1 already requires to admit a distributed lease later. The
 file lease is the current implementation and must not be the contract.
