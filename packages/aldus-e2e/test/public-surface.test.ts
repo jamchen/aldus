@@ -77,6 +77,9 @@ const PUBLIC_SURFACE: Record<string, { module: object; names: readonly string[] 
       "producedFinalProviderText",
       "compareProducedToRequested",
       "producedFactsSchema",
+      "takeDeliverySchema",
+      "takePaidness",
+      "isPaid",
     ],
   },
   "@aldus-runtime/artifact-registry": {

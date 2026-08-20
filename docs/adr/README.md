@@ -55,3 +55,4 @@ Rules:
 | [0036](0036-invocation-key-and-effect-key-are-different-contracts.md)                       | An invocation fingerprint and an external-effect key are different contracts               | Accepted | #113              |
 | [0037](0037-an-evaluator-failing-and-an-evaluator-finding-a-defect-are-different-events.md) | An evaluator failing and an evaluator finding a defect are different events                | Accepted | #115              |
 | [0038](0038-a-take-records-what-was-planned-and-what-was-observed.md)                       | A take records what was requested and what produced the bytes, side by side                | Accepted | #133              |
+| [0039](0039-delivery-is-a-third-fact-and-paidness-comes-from-charge-evidence.md)            | Delivery is a third fact, and paidness comes from charge evidence                          | Accepted | #136              |

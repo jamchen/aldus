@@ -35,6 +35,7 @@
  */
 
 import type { ActorRef, Money } from "@aldus-runtime/core";
+import { formatMoney, isPositiveMoney } from "@aldus-runtime/gate-engine";
 import type { GateEngine, SpendGrant } from "@aldus-runtime/gate-engine";
 import type {
   AsrFinding,
@@ -150,6 +151,24 @@ export interface SynthesisOutcome {
   producedFinalProviderText?: string;
   /** Why the adapter diverged, in its own words. Recorded verbatim, never parsed. */
   productionReason?: string;
+  /**
+   * How the bytes entered the Run, e.g. `"synthesis"`, `"replay"`, `"import"` (§15; #136).
+   *
+   * Distinct from what produced them. A replay adapter delivers audio another provider produced:
+   * its produced facts are honestly that provider's, and its delivery called nobody.
+   */
+  mechanism?: string;
+  /** The take whose bytes this replays, where it replays one (§15 lineage; #136). */
+  sourceTakeId?: string;
+  /** The artifact these bytes were imported from, where they were (§8.1; #136). */
+  sourceArtifactId?: string;
+  /**
+   * Whether this delivery incurred a charge (§13.2, §19.3; #136).
+   *
+   * Where omitted it is derived from {@link charged}. Absent from both means unknown, which is
+   * **not** free — see `takePaidness`.
+   */
+  incurredCharge?: boolean;
 }
 
 /**
@@ -162,8 +181,36 @@ export interface SynthesisOutcome {
 export interface SynthesisAdapter {
   /** Opaque identity of this adapter, for trace (contract §20). */
   readonly id: string;
+  /**
+   * What this adapter may do, declared before it is called (#136).
+   *
+   * Optional, and an adapter that omits it is treated as declaring nothing — which is the safe
+   * reading, not a permissive one: nothing it might do is assumed absent.
+   *
+   * Exists so §13.2's "rejected **before** the provider call" is reachable at all. A divergence
+   * between authorized and produced facts is only visible *after* the call, by which time a paid
+   * provider has been billed and a refusal is a post-mortem. A declaration is the only thing
+   * available beforehand.
+   */
+  capabilities?(): Promise<SynthesisAdapterCapabilities> | SynthesisAdapterCapabilities;
   /** Perform one segment's synthesis. */
   synthesise(request: SynthesisRequest, permit: SynthesisPermit): Promise<SynthesisOutcome>;
+}
+
+/** What an adapter declares about itself before being called (#136). */
+export interface SynthesisAdapterCapabilities {
+  /** How this adapter delivers bytes, e.g. `"synthesis"`, `"replay"`, `"import"`. Open (§4.2). */
+  mechanism?: string;
+  /**
+   * Whether this adapter may send something other than the text or parameters it was handed.
+   *
+   * Declaring `true` is not a licence — it is what makes a **paid** execution refusable before the
+   * provider is called. An adopter's local engine cannot read the performance tags a hosted model
+   * consumes, so it strips them; that is legitimate for a free local render and is exactly what
+   * §13.2 forbids for a paid one, where the operator approved text that would not be what was
+   * sent.
+   */
+  maySubstitute?: boolean;
 }
 
 /** Supplies the spend grant in force for a plan (contract §13.2, §19.3). */
@@ -263,6 +310,32 @@ export class SynthesisGateway {
     } as SynthesisPermit;
     ISSUED_PERMITS.add(permit);
 
+    // §13.2, before the provider call (#136).
+    //
+    // A divergence between what was authorized and what was produced is only visible *after* the
+    // call, by which time a paid provider has been billed — so a refusal there is a post-mortem,
+    // not a refusal. What is available beforehand is the adapter's own declaration, and an adapter
+    // that declares it may substitute is refused when the execution is expected to be paid.
+    //
+    // Free divergence is untouched. An adopter's local engine cannot read the performance tags a
+    // hosted model consumes and speaks them aloud instead, so their adapter strips them; that is
+    // legitimate, costs nothing, and is recorded rather than refused (ADR-0039).
+    const declared = await this.#adapter.capabilities?.();
+    const expectedPaid =
+      segment.estimatedCost !== undefined && isPositiveMoney(segment.estimatedCost);
+    if (declared?.maySubstitute === true && expectedPaid) {
+      return {
+        permitted: false,
+        explanation:
+          `Adapter "${this.#adapter.id}" declares it may send something other than the text or ` +
+          `parameters it is handed, and segment "${input.segmentId}" is expected to be paid ` +
+          `(${formatMoney(segment.estimatedCost as Money)}). §13.2 binds an operator's approval ` +
+          "to what is actually sent, so a paid execution that may diverge from it needs a newly " +
+          "authorized plan rather than a permit issued against the old one. A free render by the " +
+          "same adapter is unaffected.",
+      };
+    }
+
     const outcome = await this.#adapter.synthesise(
       {
         runId: input.plan.runId,
@@ -274,7 +347,29 @@ export class SynthesisGateway {
       permit,
     );
 
-    const take = await this.#ledger.recordTake({
+    // Charge evidence, from whichever channel the adapter used. `charged` existed and nothing read
+    // it — a fake adapter has been reporting a per-request amount since the composed stack was
+    // written and the take dropped it, which is why paidness was being read off the authorization
+    // instead (#136).
+    const incurredCharge =
+      outcome.incurredCharge ??
+      (outcome.charged === undefined ? undefined : isPositiveMoney(outcome.charged));
+    const mechanism = outcome.mechanism ?? declared?.mechanism;
+
+    // A **paid** execution that produced something other than what was authorized (§13.2; #136).
+    //
+    // The pre-call declaration above is the intended defence; this is what catches an adapter that
+    // did not declare. The money is already gone by the time we know, so refusing to record would
+    // only make the charge invisible — §20 requires the trace to answer "what it cost". What the
+    // record must not do is claim the authorization covered it, and the unauthorized-charge path
+    // is precisely the shape that says so.
+    const diverged =
+      (outcome.producedParameters !== undefined &&
+        JSON.stringify(outcome.producedParameters) !== JSON.stringify(input.plan.parameters)) ||
+      (outcome.producedFinalProviderText !== undefined &&
+        outcome.producedFinalProviderText !== segment.text.finalProviderText);
+
+    const recordInput = {
       runId: input.plan.runId,
       planId: input.plan.planId,
       segmentId: segment.segmentId,
@@ -303,6 +398,18 @@ export class SynthesisGateway {
         // Stored beside the plan's values, never over them (ADR-0038). The whole object is omitted
         // when the adapter reported nothing, so "did not report" stays distinguishable from
         // "reported that it matched" — the second is a claim, the first is a silence.
+        // The third fact (§15; #136). Always written, because the gateway always knows which
+        // adapter it called — and an adapter that could state its own identity could state a
+        // false one, so this value is never taken from the outcome.
+        delivery: {
+          adapterId: this.#adapter.id,
+          ...(mechanism === undefined ? {} : { mechanism }),
+          ...(incurredCharge === undefined ? {} : { incurredCharge }),
+          ...(outcome.sourceTakeId === undefined ? {} : { sourceTakeId: outcome.sourceTakeId }),
+          ...(outcome.sourceArtifactId === undefined
+            ? {}
+            : { sourceArtifactId: outcome.sourceArtifactId }),
+        },
         ...(outcome.producedParameters === undefined &&
         outcome.producedFinalProviderText === undefined
           ? {}
@@ -320,7 +427,20 @@ export class SynthesisGateway {
               },
             }),
       },
-    });
+    };
+
+    const take =
+      diverged && incurredCharge === true
+        ? await this.#ledger.recordUnauthorizedCharge({
+            ...recordInput,
+            reason:
+              `Adapter "${this.#adapter.id}" charged for this segment and reported producing ` +
+              "something other than what was authorized. §13.2 binds an approval to what is " +
+              "actually sent, so this charge is recorded without claiming the approval covered " +
+              "it. A newly authorized plan is required before repeating it.",
+            rejectedAuthorizationId: permit.decisionId,
+          })
+        : await this.#ledger.recordTake(recordInput);
 
     return { permitted: true, take, outcome, permit };
   }

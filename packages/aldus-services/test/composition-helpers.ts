@@ -36,6 +36,7 @@ import {
 import { AldusContext, AldusServices, isIssuedSynthesisPermit } from "../src/index.js";
 import type {
   SynthesisAdapter,
+  SynthesisAdapterCapabilities,
   SynthesisOutcome,
   SynthesisPermit,
   SynthesisRequest,
@@ -75,12 +76,26 @@ export class RecordingSynthesisAdapter implements SynthesisAdapter {
    */
   observation: Partial<SynthesisOutcome> = {};
 
+  /** The cost record this double reports. Unset models a delivery that was never charged. */
+  costRecordId: string | undefined = "cost-a";
+
+  /** What this adapter declares before being called (#136). Unset means it declares nothing. */
+  declares: SynthesisAdapterCapabilities | undefined;
+
+  capabilities(): SynthesisAdapterCapabilities {
+    return this.declares ?? {};
+  }
+
   synthesise(request: SynthesisRequest, permit: SynthesisPermit): Promise<SynthesisOutcome> {
     this.calls.push({ request, permitIssued: this.#gatewayCheck?.(permit) ?? false });
     return Promise.resolve({
       providerRequestId: `request-${request.segmentId}`,
       audioSha256: "a".repeat(64),
-      costRecordId: "cost-a",
+      // A cost record is charge evidence and outranks anything the adapter says about itself, so a
+      // double modelling a *free* delivery must not emit one. Leaving this on by default while
+      // asserting `takePaidness` is "free" would have the assertion fail for the right reason and
+      // the test read as though the implementation were wrong.
+      ...(this.costRecordId === undefined ? {} : { costRecordId: this.costRecordId }),
       ...this.observation,
     });
   }

@@ -51,14 +51,17 @@ to perform one is evidence the judgement should be a gate.
 
 ## §13 Gates and authorization
 
-| Clause                                                       | Contract                         | Enforced at                 | Proven by                                               |
-| ------------------------------------------------------------ | -------------------------------- | --------------------------- | ------------------------------------------------------- |
-| §13.1 a content change invalidates approvals                 | `gate-engine:detectDrift`        | `gate-engine:GateEngine`    | `packages/aldus-gate-engine/test/cascade.test.ts`       |
-| §13.2 paid TTS needs an authorization                        | `tts-ledger:SpendAuthorizer`     | `tts-ledger:TtsLedger`      | `packages/aldus-tts-ledger/test/authorization.test.ts`  |
-| §13.3 performance approval is human-owned, for gates         | `gate-engine:GateDefinition`     | `gate-engine:GateEngine`    | `packages/aldus-gate-engine/test/authorization.test.ts` |
-| §13.3 the same, for take decisions                           | `tts-ledger:TtsLedgerOptions`    | `tts-ledger:TtsLedger`      | `packages/aldus-tts-ledger/test/retention.test.ts`      |
-| §13.4 release approval binds to what is released             | `release:deriveIdempotencyKey`   | `release:ReleaseExecutor`   | `packages/aldus-release/test/resume.test.ts`            |
-| §13.2 what was sent is distinguishable from what was planned | `tts-ledger:producedFactsSchema` | `services:SynthesisGateway` | `packages/aldus-services/test/synthesis.test.ts`        |
+| Clause                                                        | Contract                                | Enforced at                 | Proven by                                               |
+| ------------------------------------------------------------- | --------------------------------------- | --------------------------- | ------------------------------------------------------- |
+| §13.1 a content change invalidates approvals                  | `gate-engine:detectDrift`               | `gate-engine:GateEngine`    | `packages/aldus-gate-engine/test/cascade.test.ts`       |
+| §13.2 paid TTS needs an authorization                         | `tts-ledger:SpendAuthorizer`            | `tts-ledger:TtsLedger`      | `packages/aldus-tts-ledger/test/authorization.test.ts`  |
+| §13.3 performance approval is human-owned, for gates          | `gate-engine:GateDefinition`            | `gate-engine:GateEngine`    | `packages/aldus-gate-engine/test/authorization.test.ts` |
+| §13.3 the same, for take decisions                            | `tts-ledger:TtsLedgerOptions`           | `tts-ledger:TtsLedger`      | `packages/aldus-tts-ledger/test/retention.test.ts`      |
+| §13.4 release approval binds to what is released              | `release:deriveIdempotencyKey`          | `release:ReleaseExecutor`   | `packages/aldus-release/test/resume.test.ts`            |
+| §13.2 what was sent is distinguishable from what was planned  | `tts-ledger:producedFactsSchema`        | `services:SynthesisGateway` | `packages/aldus-services/test/synthesis.test.ts`        |
+| §13.2 a paid execution may not diverge from its authorization | `services:SynthesisAdapterCapabilities` | `services:SynthesisGateway` | `packages/aldus-services/test/production-facts.test.ts` |
+| §19.3 paidness comes from charge evidence, not authorization  | `tts-ledger:TakePaidness`               | `tts-ledger:takePaidness`   | `packages/aldus-services/test/production-facts.test.ts` |
+| §15 how bytes entered the Run is recorded                     | `tts-ledger:takeDeliverySchema`         | `services:SynthesisGateway` | `packages/aldus-services/test/production-facts.test.ts` |
 
 **Not applicable to:** generic Stages and release operations, for `permittedActorKinds`. A Stage
 actor records who performed work; it does not grant authority. A Stage requiring human

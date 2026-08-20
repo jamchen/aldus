@@ -808,6 +808,34 @@ report; it MUST NOT be read as the plan having been followed.
 A comparison required by §13.2 between what an operator approved and what was sent MUST use the
 reported value. Comparing the planned value against the approval compares the plan with itself.
 
+A record MUST also carry **how the bytes entered the Run** — the adapter and the mechanism. This is
+distinct from what produced them: a replay MAY deliver audio another provider produced. The
+delivering adapter's identity MUST be supplied by the runtime, never taken from the adapter's own
+report.
+
+Whether a take incurred cost MUST be derived from charge evidence. An authorization means spending
+was **permitted**, not that it **occurred**, and MUST NOT be read as evidence that it did. Where
+nothing establishes either, the answer is unknown, which MUST NOT be reported as free.
+
+A **paid** execution whose text or parameters differ from those the authorization bound MUST be
+refused before the provider is called, or MUST require a newly authorized plan. Where such an
+execution is discovered only after the charge, the record MUST NOT claim the authorization covered
+it. A **free** local render or replay MAY diverge, and its record MUST expose the divergence.
+
+A record MUST also carry **how the bytes entered the Run** — the adapter and the mechanism. This is
+distinct from what produced them: a replay MAY deliver audio another provider produced. The
+delivering adapter's identity MUST be supplied by the runtime, never taken from the adapter's own
+report.
+
+Whether a take incurred cost MUST be derived from charge evidence. An authorization means spending
+was **permitted**, not that it **occurred**, and MUST NOT be read as evidence that it did. Where
+nothing establishes either, the answer is unknown, which MUST NOT be reported as free.
+
+A **paid** execution whose text or parameters differ from those the authorization bound MUST be
+refused before the provider is called, or MUST require a newly authorized plan. Where such an
+execution is discovered only after the charge, the record MUST NOT claim the authorization covered
+it. A **free** local render or replay MAY diverge, and its record MUST expose the divergence.
+
 ### 15.1 Repair strategies
 
 Repairs MAY include:
