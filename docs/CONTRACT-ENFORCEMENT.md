@@ -86,9 +86,24 @@ list.
 | §19.2 private packs never required by Core tests     | `core:knowledge`                        | boundary test                | `packages/aldus-e2e/test/boundary.test.ts`                   |
 | §19.3 a backend can report what it was charged       | `core:costObservationSchema`            | `core:costObservationSchema` | `packages/aldus-core/test/cost-observation.test.ts`          |
 
-**Not yet enforced:** §19.3's composed path — nothing dispatches `AgentBackend.execute()`, so no
-cost observation is persisted as a `CostRecord` yet (#107). The contract exists and the composition
-does not, which is the state this table is designed to make visible rather than hide.
+**Not yet enforced:** §19.3's composed path. Three states, deliberately separated — the previous
+wording said "nothing dispatches `AgentBackend.execute()`" and had become half true, which is worse
+than a gap it named plainly (#107).
+
+- **`SynthesisGateway`** — dispatched, reserved, settled. This one is composed.
+- **`AgentExecutionService`** — dispatches `AgentBackend.execute()` and writes attributed
+  `CostRecord`s, and **no composition constructs it**. `AldusConfig.agentBackend` reaches
+  `StageRunner`, which uses it only for `assertCapabilities` and never calls `execute`, and
+  `StageContext` exposes no member that reaches a backend. An adopter who configures one cannot
+  dispatch it even deliberately.
+- **`StageContext.runWorker`** — dispatches a Worker that may be paid (§3.2 names TTS invocation
+  and rendering), returns `WorkerResult.costs` to the stage, and **records nothing and reserves
+  nothing**. Measured on the composed stack: a Worker reporting a confirmed charge leaves
+  `services.costs(runId)` at `recordCount: 0`.
+
+The second and third are the shape the reachability table below was added for, reproduced by the
+fix for it. Being importable from the entry point is not being wired, and `public-surface.test.ts`
+asks only the first question.
 
 ## Composition reachability
 
@@ -101,3 +116,4 @@ Not a §-clause, but the shape that produced two of the four gaps.
 | every seam is reachable from the published package entry point | `packages/aldus-e2e/test/public-surface.test.ts`                          |
 | documentation names symbols that exist                         | `packages/aldus-core/test/doc-links.test.ts`                              |
 | the operator's actual command reaches the composition          | `packages/aldus-cli/test/operator-entry-point.test.ts`                    |
+| a configured capability reaches a dispatch point               | **nothing** — see "Not yet enforced" above (#107)                         |
