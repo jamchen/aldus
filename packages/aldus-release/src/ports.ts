@@ -16,7 +16,7 @@ import type { EventStore, RunStore } from "@aldus-runtime/file-store";
  * There is no update in place and no delete. §17's receipts are an audit record of what was
  * attempted against a destination: an operation retried after a failure produces a second
  * receipt, not an edit to the first, because the fact that the first attempt failed is what
- * explains the retry. {@link latestFor} resolves the current outcome by reading them in order.
+ * explains the retry. {@link latestByKey} resolves the current outcome by reading them in order.
  */
 export interface ReleaseReceiptStore {
   /** Every receipt recorded for a Run, in the order they were appended. */

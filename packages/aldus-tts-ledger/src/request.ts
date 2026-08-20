@@ -107,7 +107,7 @@ export const segmentTextSchema = z
      * pass and mean nothing.
      *
      * What an adapter actually sent is `TakeRecord.observed.finalProviderText`, read through
-     * `effectiveFinalProviderText`. §13.2's comparison is between the approval and *that* value.
+     * `producedFinalProviderText`. §13.2's comparison is between the approval and *that* value.
      */
     finalProviderText: z.string().max(20_000).optional(),
   })
