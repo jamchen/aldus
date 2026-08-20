@@ -123,5 +123,6 @@ export type {
 export type {
   StageAgentDispatcher,
   StageAgentDispatchInput,
+  StageAgentDispatchResult,
   StageOwnedAgentRequest,
 } from "./agent-dispatch.js";

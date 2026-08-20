@@ -15,9 +15,9 @@ import type { ActorRef, AldusEvent } from "@aldus-runtime/core";
 import type {
   AgentBackend,
   AgentRequest,
-  AgentResult,
   StageAgentDispatcher,
   StageAgentDispatchInput,
+  StageAgentDispatchResult,
 } from "@aldus-runtime/stage-runner";
 
 import { AgentExecutionService } from "./agent-execution.js";
@@ -55,7 +55,7 @@ export class RuntimeStageAgentDispatcher implements StageAgentDispatcher {
     });
   }
 
-  async execute(input: StageAgentDispatchInput): Promise<AgentResult> {
+  async execute(input: StageAgentDispatchInput): Promise<StageAgentDispatchResult> {
     const paid = input.expectation.kind !== "free";
     if (paid && (input.operation === undefined || input.billingEffectKey === undefined)) {
       throw serviceError(
@@ -97,7 +97,10 @@ export class RuntimeStageAgentDispatcher implements StageAgentDispatcher {
       // one reservation. Absent for a free execution, which commits none.
       effectKey: `${this.#backend.id}@${this.#backend.version}:${input.billingEffectKey ?? input.executionId}`,
     });
-    return outcome.result;
+    // Both halves. Returning only `result` erased the lifecycle fact this service computes for
+    // its caller — `billingUnconfirmed` is derived from the durable records, and its own contract
+    // says a caller must not silently retry when it is true.
+    return { result: outcome.result, billingUnconfirmed: outcome.billingUnconfirmed };
   }
 
   async cancel(executionId: string): Promise<void> {

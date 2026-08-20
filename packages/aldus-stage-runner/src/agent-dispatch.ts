@@ -57,20 +57,39 @@ export interface StageAgentDispatchInput {
 }
 
 /**
- * Executes an agent request under the Runtime's authorization and attribution.
+ * What a dispatch came back as, including the lifecycle fact a Stage cannot see for itself.
  *
  * Implemented in the services layer over `AgentExecutionService`, which already owns reservation,
  * `CostRecord` attribution, unauthorized-free divergence, unknown billing and settlement ordering.
+ */
+export interface StageAgentDispatchResult {
+  /** The backend's own answer, unchanged. */
+  result: AgentResult;
+  /**
+   * Whether any recorded charge has an unconfirmed billing status (§19.3).
+   *
+   * **Carried, not derived.** The services layer owns settlement and is the only party that knows
+   * whether billing resolved; a Stage re-deriving it from raw `AgentResult.costs` would be
+   * guessing at the reservation's state from the provider's report. The adapter returning only
+   * `result` erased exactly this fact, and the Stage then saw a completion for an execution whose
+   * reservation was still `billing_unknown` and non-retryable.
+   */
+  billingUnconfirmed: boolean;
+}
+
+/**
+ * Executes an agent request under the Runtime's authorization and attribution.
  */
 export interface StageAgentDispatcher {
   /**
    * Resolve the grant, reserve, dispatch, attribute and settle.
    *
-   * @throws {AldusError} when no grant authorizes the operation, the reservation is refused, or
-   * billing cannot be resolved after dispatch. Every refusal that can happen before the provider
-   * call happens before it.
+   * @throws {AldusError} when no grant authorizes the operation or the reservation is refused.
+   * Every refusal that can happen before the provider call happens before it. Unresolved billing
+   * is **not** thrown: the charge is durable and the caller has to see it, so it comes back on
+   * {@link StageAgentDispatchResult.billingUnconfirmed}.
    */
-  execute(input: StageAgentDispatchInput): Promise<AgentResult>;
+  execute(input: StageAgentDispatchInput): Promise<StageAgentDispatchResult>;
   /**
    * Cancel an execution that cannot observe {@link StageAgentDispatchInput.signal} (§19.1).
    *

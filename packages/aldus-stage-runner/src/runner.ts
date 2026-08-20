@@ -37,9 +37,9 @@ import {
 } from "@aldus-runtime/core";
 import type { EventStore, LockManager, RunStore } from "@aldus-runtime/file-store";
 
-import { assertCapabilities, type AgentBackend, type AgentResult } from "./backend.js";
+import { assertCapabilities, type AgentBackend } from "./backend.js";
 import { isChargeBearing } from "./paid-dispatch.js";
-import type { StageAgentDispatcher } from "./agent-dispatch.js";
+import type { StageAgentDispatcher, StageAgentDispatchResult } from "./agent-dispatch.js";
 import type { PaidDispatchController, PaidDispatchReservation } from "./paid-dispatch.js";
 import {
   isGateRequiredSignal,
@@ -952,9 +952,9 @@ export class StageRunner {
         };
         controller.signal.addEventListener("abort", onAgentAbort, { once: true });
 
-        let result: AgentResult;
+        let dispatched: StageAgentDispatchResult;
         try {
-          result = await dispatcher.execute({
+          dispatched = await dispatcher.execute({
             request: request.request,
             executionId,
             signal: controller.signal,
@@ -975,12 +975,36 @@ export class StageRunner {
           controller.signal.removeEventListener("abort", onAgentAbort);
         }
 
-        notes.push(`agent execution ${executionId} dispatched`);
+        const result = dispatched.result;
+        const paused = result.session !== undefined;
+        notes.push(
+          `agent execution ${executionId} dispatched` +
+            (dispatched.billingUnconfirmed ? " (billing unresolved)" : "") +
+            (paused ? " (paused)" : ""),
+        );
+
+        // Unresolved billing is checked **first**, and carries the pause with it rather than
+        // yielding to it. It is the fact that governs what a caller may do next — the effect is
+        // non-retryable — and splitting the two into separate arms would let one disappear
+        // whenever both are true.
+        if (dispatched.billingUnconfirmed) {
+          return {
+            kind: "billing_unresolved" as const,
+            paused,
+            explanation:
+              `Execution ${executionId} recorded a charge whose amount or billing status could ` +
+              "not be confirmed, so its reservation stays unresolved and the effect is not " +
+              "retryable: an unconfirmed charge may have landed, and re-running would spend " +
+              "again on the assumption it did not (§19.3)." +
+              (paused ? " The backend also paused and offered a session Aldus cannot resume." : ""),
+            result,
+          };
+        }
 
         // A pause is its own outcome, read from the backend's own session offer but **surfaced as
         // a distinct arm** rather than left as a nullable field on a result whose `ok` a caller
         // would otherwise read as completion. V1 cannot resume, so saying so is the honest answer.
-        if (result.session !== undefined) {
+        if (paused) {
           return {
             kind: "paused_unsupported" as const,
             explanation:

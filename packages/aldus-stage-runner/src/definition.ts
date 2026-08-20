@@ -357,6 +357,34 @@ export type StageAgentOutcome =
       explanation: string;
       /** The billing facts reported before the pause, already recorded. */
       result: AgentResult;
+    }
+  | {
+      /**
+       * The execution finished or paused, and what it was charged could not be established.
+       *
+       * Distinct from `completed` because the reservation is still `billing_unknown` and the
+       * effect is **non-retryable**: an unconfirmed charge may have landed, and re-running would
+       * spend again on the assumption it did not (§19.3). The adapter used to return only the
+       * backend's `AgentResult`, so this fact — computed by the services layer from durable
+       * records, and the reason `AgentExecutionResult.billingUnconfirmed` exists — never reached
+       * the Stage, which then saw a completion.
+       *
+       * A Stage cannot re-derive it from `AgentResult.costs`: settlement is the services layer's,
+       * and whether the reservation resolved is a fact about the reservation, not the report.
+       */
+      kind: "billing_unresolved";
+      /** What happened, for the operator (§20). */
+      explanation: string;
+      /** The backend's answer. Its `ok` says nothing about whether the charge is known. */
+      result: AgentResult;
+      /**
+       * Whether the backend also paused.
+       *
+       * Carried here rather than split into a fourth arm so the two facts cannot separate: an
+       * execution that paused *and* has unresolved billing must not be readable as only one of
+       * them, and unresolved billing is the fact that governs what a caller may do next.
+       */
+      paused: boolean;
     };
 
 /**

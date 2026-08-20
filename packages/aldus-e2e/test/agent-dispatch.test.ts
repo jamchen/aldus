@@ -368,3 +368,62 @@ describe("one declared billing effect cannot cover several agent charges", () =>
     expect(await costRecords()).toHaveLength(2);
   });
 });
+
+describe("a charge whose amount could not be established", () => {
+  /** An unknown, unquantified charge — the case §19.3 exists for. */
+  const unknownCharge: readonly CostObservation[] = [
+    { provider: "provider-a", operation: "completion", billingStatus: "unknown" },
+  ];
+
+  it("is not reported to the Stage as completed", async () => {
+    // The defect: `AgentExecutionService` computes `billingUnconfirmed` from durable records and
+    // its contract says a caller must not silently retry when it is true. The adapter returned
+    // only `outcome.result`, and `runAgent` discriminated on `result.session` alone — so an
+    // execution whose reservation was still `billing_unknown` arrived as `completed`.
+    const recording = recordingBackend({ costs: unknownCharge });
+    const capture: { outcome?: unknown } = {};
+    const result = await run({ spend: paidSpend, backend: recording.backend, capture });
+
+    expect(result.outcome).toBe("ok");
+    const outcome = capture.outcome as { kind: string; paused: boolean; explanation: string };
+    expect(outcome.kind).toBe("billing_unresolved");
+    expect(outcome.kind).not.toBe("completed");
+    expect(outcome.paused).toBe(false);
+    expect(outcome.explanation).toContain("not retryable");
+  });
+
+  it("keeps the reservation unresolved, so authorization is not restored", async () => {
+    const recording = recordingBackend({ costs: unknownCharge });
+    await run({ spend: paidSpend, backend: recording.backend });
+
+    // The charge is durable — an unknown amount is still a charge — and the reservation still
+    // stands against the grant.
+    const records = await costRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.billingStatus).toBe("unknown");
+    expect(records[0]?.actual).toBeUndefined();
+  });
+
+  it("retains both facts when the backend also pauses", async () => {
+    // One unambiguous outcome. Splitting these into separate arms would let a caller reading for
+    // a pause miss the unresolved billing, or the reverse — and unresolved billing is the fact
+    // that governs what may be done next.
+    const recording = recordingBackend({ costs: unknownCharge, pauses: true });
+    const capture: { outcome?: unknown } = {};
+    await run({ spend: paidSpend, backend: recording.backend, capture });
+
+    const outcome = capture.outcome as { kind: string; paused: boolean; explanation: string };
+    expect(outcome.kind).toBe("billing_unresolved");
+    expect(outcome.paused).toBe(true);
+    expect(outcome.explanation).toContain("paused");
+  });
+
+  it("still reports a resolved charge as completed", async () => {
+    // The control. `billing_unresolved` must not swallow the ordinary path.
+    const recording = recordingBackend({ costs: charged });
+    const capture: { outcome?: unknown } = {};
+    await run({ spend: paidSpend, backend: recording.backend, capture });
+
+    expect((capture.outcome as { kind: string }).kind).toBe("completed");
+  });
+});

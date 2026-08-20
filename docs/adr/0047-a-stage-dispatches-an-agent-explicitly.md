@@ -79,6 +79,24 @@ narrow before it can claim anything happened.
 **A pause is not evidence of no charge.** Whatever was billed before it is recorded and settled, or
 retained as unresolved where the backend said nothing.
 
+### Unresolved billing survives the adapter
+
+`AgentExecutionService` computes `billingUnconfirmed` from the durable records, and its own
+documentation says a caller **must not** silently retry when it is true. The first version of the
+adapter returned only `outcome.result`, and `runAgent` discriminated on `result.session` alone — so
+an execution whose reservation was still `billing_unknown` and non-retryable arrived at the Stage
+as `completed`. The adapter erased the lifecycle fact the service exists to publish.
+
+`StageAgentDispatchResult` carries it, and `StageAgentOutcome` gains a `billing_unresolved` arm.
+A Stage is not asked to re-derive it from `AgentResult.costs`: settlement belongs to the services
+layer, and whether the reservation resolved is a fact about the reservation rather than about the
+provider's report.
+
+**Unresolved billing is checked before the pause, and carries the pause with it.** Where both are
+true, one outcome retains both facts — `billing_unresolved` with `paused: true`. Separate arms
+would let a caller reading for one miss the other, and unresolved billing is the fact that governs
+what may be done next.
+
 ### Cancellation
 
 The attempt's `AbortSignal` is passed to the backend, and the Runtime invokes
