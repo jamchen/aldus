@@ -59,10 +59,24 @@ the log is sufficient and the cache is a rebuildable projection, and this is the
 mutable row is least defensible. The atomic unit is _append a transition having derived
 availability inside the same lease_, not _update a balance_.
 
-**3. The lock scope is the authorization, not the Run.** The grant is the contended resource: two
-Runs drawing on one grant contend, two Runs on different grants do not. Locking the Run would
-permit exactly the race the protocol exists to prevent, and locking globally would serialise
-unrelated work.
+**3. The lock scope is `grantId`.**
+
+The first version of this said "the authorization", conflating two identities `SpendGrant` already
+distinguishes: `decisionId` is the human decision that authorized the terms, `grantId` is the budget
+pool whose headroom is consumed. **The contended resource is the pool.**
+
+Partitioning by decision would make one `GateDecision` mean one budget pool — an implementation
+shortcut hardened into a workflow restriction. Concretely: a gate authorizing agent spend that
+shares a decision with `performance.freeze` would have an unresolved agent charge quietly reduce
+what synthesis may spend, while a gate with its own decision would not, and **the two designs look
+identical at the point someone chooses between them.**
+
+An adopter wanting one episode-level ceiling above several grants states that as an explicit
+aggregate policy. It must not be obtained accidentally by reusing a `decisionId`.
+
+Locking the Run would permit the race the protocol exists to prevent; locking globally would
+serialise unrelated work. The lease goes through `LockManager` — a process-local mutex is not a
+substitute for the contract §19.1 requires.
 
 It goes behind `LockManager`, which §19.1 already requires to admit a distributed lease later. The
 file lease is the current implementation and must not be the contract.
@@ -169,6 +183,18 @@ them as settled charges, which they are. Same rule as `expectedArtifacts` and `r
 and its reason on the attempt because the ruling on #148 required the retry decision to _read_ them
 rather than file them. Reservations extend the same requirement: a `billing_unknown` reservation
 must appear in the refusal an operator sees and in `aldus budget status`, not only in the trace.
+
+### A grant states what it may be spent on
+
+`SpendGrant.scope.operations` — adopter-defined open strings, `"agent.execute"`,
+`"tts.synthesize"` — checked before reserving. Without it a grant is a pool of money with no
+statement about its purpose, and the only thing separating agent spend from a synthesis ledger is
+which decision each happened to name.
+
+Scope is bound into the authorization digest, so `grantLimitsDigest` becomes `grantTermsDigest`:
+widening a grant from agent-only to TTS-capable changes what an approval permits exactly as raising
+its ceiling does, and an approval that survives that change did not bind what it appeared to bind
+(§13.2).
 
 ### Settlement ordering fails closed
 

@@ -15,7 +15,7 @@ import type { FileWorkspace } from "@aldus-runtime/file-store";
 import {
   GateRegistry,
   digestSubjectValue,
-  grantLimitsDigest,
+  grantTermsDigest,
   type GateDefinition,
   type SpendGrant,
   type SubjectsByGate,
@@ -141,14 +141,14 @@ export const SPEND_LIMITS_KEY = "spend-limits";
  * separately because ADR-0009 puts the spend limits in `subjectHashes` as a digest, so raising a
  * limit drifts the approval rather than silently widening it.
  *
- * `grantLimitsDigest` covers only the limits, never the grant's identity, which is why a template
+ * `grantTermsDigest` covers only the limits, never the grant's identity, which is why a template
  * grant can be digested before the decision it will cite even exists.
  */
 export function subjectsForPlan(plan: TtsRequestPlan, gateId = SYNTHESIS_GATE): SubjectsByGate {
   return {
     [gateId]: [
       ...Object.entries(planSubjectDigests(plan)).map(([key, sha256]) => ({ key, sha256 })),
-      { key: SPEND_LIMITS_KEY, sha256: grantLimitsDigest(aGrant()) },
+      { key: SPEND_LIMITS_KEY, sha256: grantTermsDigest(aGrant()) },
     ],
   };
 }
@@ -167,7 +167,7 @@ export function subjectsBindingTheWrongPlan(plan: TtsRequestPlan): SubjectsByGat
         key,
         sha256: digestSubjectValue(`unrelated-${key}`),
       })),
-      { key: SPEND_LIMITS_KEY, sha256: grantLimitsDigest(aGrant()) },
+      { key: SPEND_LIMITS_KEY, sha256: grantTermsDigest(aGrant()) },
     ],
   };
 }
@@ -179,6 +179,7 @@ export function aGrant(overrides: Partial<SpendGrant> = {}): SpendGrant {
     runId: RUN_ID,
     gateId: SYNTHESIS_GATE,
     decisionId: "decision-a",
+    scope: { operations: ["tts.synthesize"] },
     maxTotal: { amount: "10.00", currency: "USD" } satisfies Money,
     ...overrides,
   };
@@ -327,5 +328,5 @@ export async function writeWorkingFile(
 
 /** The digest a grant's ceiling must be bound by, for a gate that binds spend limits. */
 export function grantSubject(grant: SpendGrant): { key: string; sha256: string } {
-  return { key: "spend-limits", sha256: grantLimitsDigest(grant) };
+  return { key: "spend-limits", sha256: grantTermsDigest(grant) };
 }

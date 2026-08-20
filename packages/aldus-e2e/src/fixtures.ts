@@ -11,7 +11,7 @@ import type { Money } from "@aldus-runtime/core";
 import { SCHEMA_VERSION, formatEpisodeId } from "@aldus-runtime/core";
 import {
   digestSubjectValue,
-  grantLimitsDigest,
+  grantTermsDigest,
   type GateDefinition,
   type SpendGrant,
   type SubjectsByGate,
@@ -105,6 +105,7 @@ export function aGrant(overrides: Partial<SpendGrant> = {}): SpendGrant {
     runId: RUN_ID,
     gateId: PERFORMANCE_FREEZE_GATE,
     decisionId: "decision-a",
+    scope: { operations: ["tts.synthesize"] },
     maxTotal: { amount: "10.00", currency: "USD" } satisfies Money,
     ...overrides,
   };
@@ -190,7 +191,7 @@ export function journeySubjects(state: JourneySubjects): SubjectsByGate {
     [CONTENT_FREEZE_GATE]: [{ key: CONTENT_KEY, sha256: digestSubjectValue(state.content) }],
     [PERFORMANCE_FREEZE_GATE]: [
       ...Object.entries(planSubjectDigests(state.plan)).map(([key, sha256]) => ({ key, sha256 })),
-      { key: SPEND_LIMITS_KEY, sha256: grantLimitsDigest(state.grant) },
+      { key: SPEND_LIMITS_KEY, sha256: grantTermsDigest(state.grant) },
     ],
     [UPLOAD_GATE]: render,
     [PUBLISH_GATE]: render,

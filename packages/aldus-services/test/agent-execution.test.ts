@@ -28,6 +28,7 @@ const GRANT: SpendGrant = {
   runId: RUN,
   gateId: "performance.freeze",
   decisionId: "decision-7",
+  scope: { operations: ["tts.synthesize"] },
   maxTotal: { amount: "10.00", currency: "USD" },
   maxPerRequest: { amount: "2.00", currency: "USD" },
 };
