@@ -5,9 +5,9 @@ semantics, and the one place it sharpens them is noted at the end.
 
 **Not implemented.** This is the shape for review.
 
-## 0. The finding that shapes everything below
+## 0. Two findings, and the second corrects the first
 
-**`LockManager` does not fence. It detects.**
+### `LockManager` does not fence. It detects.
 
 `FileLockManager` acquires with `O_CREAT | O_EXCL`, and a contender may reclaim a lease it judges
 stale — by TTL expiry or by the holder's process being gone. `withLock` then checks on the way out:
@@ -21,16 +21,38 @@ That reports _"the operation's result is not trustworthy"_ **after the body has 
 a holder that lost its lease from writing in the interval before it finds out. There is no fencing
 token, and the port could not carry one today.
 
-So a design of the form _acquire the lease, then append_ is safe only while nothing goes wrong, and
-"nothing goes wrong" is the condition a concurrency mechanism exists to survive without.
+**No distributed safety is claimed from this lock**, and none may be claimed unless the chosen
+storage primitive supplies it.
 
-**This is why compare-and-append is the recommendation rather than a preference.** The revision
-check is the fence. The lease is an optimisation that reduces contention; correctness does not
-depend on it, and must not, because the lock contract cannot supply it.
+### A revision check is not itself a fence — and the first draft of this document said it was
 
-Do not claim distributed safety from this lock. What the file implementation provides is
-mutual exclusion in the common case plus a conflict-detecting write; what makes it correct is the
-second half.
+The first draft concluded _"the revision check is the fence"_. That is wrong, and it is wrong in the
+way this repository keeps finding: a statement that sounds like a guarantee while naming no
+mechanism that provides it.
+
+A revision comparison followed by an ordinary write is still check-then-act:
+
+```text
+stream revision = N
+  A reads N, passes the revision check
+  A pauses, or loses its lease
+  B reclaims the lease, reads N, passes the revision check, commits N+1
+  A resumes and writes its own N+1
+```
+
+If the commit is a temp file renamed over the whole stream, **A's rename destroys B's committed
+transition.** Both writers checked. The check fenced nothing, because no primitive made _"revision
+is still N"_ and _"install N+1"_ one indivisible operation. `LOCK_LOST` afterwards does not restore
+B's transition; it reports untrustworthiness once the loss has already happened.
+
+**The correct statement, and the one this design is now built on:**
+
+> A revision comparison that is not atomic with installation of the successor revision is not
+> compare-and-append.
+
+So the port's contract is a **linearizable conditional commit**, and every implementation must be
+able to name its linearization point — the single operation at which exactly one writer wins the
+successor of revision N. §6 names the file implementation's.
 
 ## 1. The port
 
@@ -125,8 +147,11 @@ resumes.** `billing_unknown` keeps consuming its full reserved amount and may re
 `reservation.reconciled` records how a `billing_unknown` was decided and is always accompanied by
 the `settled` or `released` transition it justifies.
 
-Any other transition is rejected at append time, inside the atomic boundary — not at read time,
-where the stream would already be wrong.
+**Where that is enforced.** `SpendService` decides legality against the projection it reduced, then
+commits with the expected revision it read. If another writer moved the state in between, the
+commit conflicts and the service re-reduces and re-decides. The store does not know the state
+machine; it enforces schema, identity and atomicity, and the expected revision is what makes a
+policy decision taken a moment ago still safe to apply.
 
 ## 4. Reserve and settle
 
@@ -157,13 +182,37 @@ exists.
 
 ```text
 settle(reservation, observations):
-  costIds = costs.append(...)          # 1. cost record durable FIRST
-  store.compareAndAppend([settled])    # 2. then the transition
-  # inactive only once both facts exist
+  # Cost ids are derived ONCE, before the loop, and are stable across every retry.
+  costIds = deriveCostIds(reservation.reservationId, observations)
+  costs.appendIdempotent(costIds, observations)      # 1. cost record durable FIRST
+
+  for attempt in 1..MAX_CONFLICT_RETRIES:
+    stream = store.readGrant(reservation.grantId)
+    state  = reduce(stream)
+    current = state.byId(reservation.reservationId)
+
+    if current.terminal and current.costIds == costIds:  return current    # already settled by us
+    if current.terminal and current.costIds != costIds:  refuse SETTLEMENT_CONFLICT
+
+    result = store.compareAndAppend({ expectedRevision: stream.revision, transitions: [settled] })
+    if result.kind in ("appended", "already_present"):  return projection
+    # conflict: an UNRELATED transition advanced this grant. Re-read and try again — it is not a
+    # reason to send an operator to reconciliation.
+  refuse SETTLEMENT_CONTENDED
 ```
 
-If step 1 succeeds and step 2 fails, the reservation stays active and authorization is
-conservatively over-counted until reconciliation — recoverable. The reverse would release
+**Cost ids are derived once and reused.** Retrying after a transition conflict must not append a
+second cost record under fresh ids: the money was charged once, and a retry loop that mints new
+identities each pass turns a storage conflict into duplicated spend. `appendIdempotent` is a
+no-op when the ids are already present.
+
+**A conflict here is usually somebody else's reservation.** Grants are shared, so an unrelated
+transition advancing the stream between the cost append and the settlement is ordinary — and
+forcing manual reconciliation for it would make every busy grant look broken. Only a reservation
+that reached a terminal state under _different_ cost ids is a genuine conflict.
+
+If step 1 succeeds and the loop exhausts, the reservation stays active and authorization is
+conservatively over-counted until reconciliation — recoverable. The reverse ordering would release
 authorization while the charge is absent, which is not.
 
 ## 5. Failure and atomicity matrix
@@ -189,16 +238,73 @@ carrying `dispatch_prepared` is proof it **may** have been.
 
 ## 6. File-backed implementation
 
-| requirement                   | how                                                                                                                                                                                    |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| lease namespace               | `spend-reservation:${grantId}`, canonical grant identity, so separate grants never contend                                                                                             |
-| validate before acquiring     | grant exists, scope permits the operation, amount well-formed — refuse before taking a lease nobody needs                                                                              |
-| revision re-check under lease | re-read the stream inside `withLock` and compare to `expectedRevision`; append only on a match                                                                                         |
-| crash-safe append             | write to a temp file in the same directory, `fsync`, atomic `rename`                                                                                                                   |
-| stale writer                  | **cannot be prevented — see §0.** The revision check is what makes a stale write fail, and `withLock` additionally raises `LOCK_LOST` afterwards. The lease is not the safety property |
-| bounded retry                 | small fixed cap, recomputing every time; then a structured `RESERVATION_CONTENDED` refusal                                                                                             |
-| recovery after termination    | nothing to recover: the stream is the state, and a partial append leaves the previous file intact                                                                                      |
-| concurrent grants             | different lease resources and different files, so they proceed independently                                                                                                           |
+### The linearization point is `link()`, not `rename()`
+
+The stream is **not** one file rewritten. It is a directory of immutable, single-writer commit
+records:
+
+```text
+spend/<grantId>/commits/000001.json
+spend/<grantId>/commits/000002.json
+```
+
+One file **is** one revision. Installing revision N+1 is installing `00000(N+1).json`, and the
+commit sequence is:
+
+```text
+write the complete commit payload to a temp file in the same directory
+fsync the temp file
+link(temp, commits/<N+1>.json)      ← THE LINEARIZATION POINT
+    ├── succeeds        → appended
+    └── EEXIST          → conflict; somebody else won N+1
+unlink the temp file
+fsync the directory
+```
+
+`link()` refuses to replace an existing target and is atomic on a POSIX filesystem. **Exactly one
+writer can create a given name**, so the interleaving in §0 ends differently: A resumes, attempts
+`link` to `000002.json`, gets `EEXIST`, and learns it lost — with B's transition intact.
+
+`rename()` is what makes the first draft's design wrong: it replaces silently, so the loser
+overwrites the winner and neither is told. `open(…, "wx")` also refuses to clobber, but the write
+that follows is not atomic — a crash mid-write leaves a file that _exists_ and cannot be parsed,
+blocking the true winner from ever claiming that revision. Only the temp-then-link split gives both
+properties: complete before visible, and visible only once.
+
+Revision is then `the highest N for which 000001..N all exist` — derived from the directory, never
+stored. A gap is not producible by a correct writer (you may only claim N+1 having read N as
+current), so a gap is corruption: refuse to project, with a structured error naming the missing
+revision, rather than silently reducing a shorter stream.
+
+### The lease is a contention optimisation, and correctness survives without it
+
+Correctness must hold under lease expiry, a paused former holder, stale-lock reclamation,
+`LOCK_LOST` after the body, and two writers reaching `link()` at once. It does, because none of
+those can make `link()` succeed twice for one name.
+
+**If the lease is lost after a successful commit, the commit still won.** The store re-reads
+`commits/<N+1>.json` and compares its `transitionId` set to what it wrote: if they match, it
+reports `appended`. Turning a durable, immutable, provably-ours commit into an ambiguous failure
+because `withLock` complained on the way out would manufacture a reconciliation case out of a
+success.
+
+| requirement                   | how                                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| lease namespace               | `spend-reservation:${grantId}` — canonical grant identity, so separate grants never contend             |
+| validate before acquiring     | grant exists, scope permits the operation, amount well-formed                                           |
+| revision re-check under lease | re-read the directory inside `withLock`; the `link` still decides                                       |
+| crash-safe append             | temp file, `fsync`, `link`, `fsync` directory                                                           |
+| stale writer                  | **cannot write over a winner** — `link` returns `EEXIST`. The lease does not provide this and never did |
+| bounded retry                 | small fixed cap, recomputing availability every pass, then `RESERVATION_CONTENDED`                      |
+| recovery after termination    | nothing to recover: committed files are immutable, and an orphaned temp file is unreferenced garbage    |
+| concurrent grants             | separate directories and separate lease resources                                                       |
+
+### What is still not claimed
+
+`link()` gives single-writer-wins on **one filesystem**. It is not a distributed guarantee: two
+hosts against one network filesystem inherit that filesystem's semantics, which are not this
+design's to assert. A distributed deployment needs a store whose primitive supplies it — SQLite,
+a database transaction, or a service with compare-and-swap — behind the same port.
 
 ## 7. Rebuildability
 
@@ -216,7 +322,10 @@ and no cached figure is ever the answer to "how much is available".
 
 ## 8. Acceptance and mutation tests
 
-Acceptance: two concurrent reservations against insufficient headroom and only one succeeds; the
+Acceptance: two writers reaching the commit primitive for the same revision and exactly one
+winning, with the loser's payload absent from the stream; a paused writer resuming after another
+committed and being refused rather than clobbering; two concurrent reservations against
+insufficient headroom and only one succeeds; the
 same `effectKey` reserved twice returns one reservation; the same `effectKey` with different terms
 refuses; N billed effects create N reservations; no provider call before the reservation commits; a
 refused reservation produces no provider call; conflict retry recomputes rather than reusing;
@@ -228,6 +337,12 @@ an illegal transition is refused rather than projected.
 Mutations that must fail:
 
 - check and reserve separated into a race-prone sequence — **the ruling names this one**;
+- `link()` replaced by `rename()`, so a loser silently overwrites a winner;
+- the commit written directly with `open(…, "wx")`, so a crash mid-write blocks the revision;
+- `already_present` reported as `appended`, so a replay reads as a new durable fact;
+- identity precedence inverted, so a caller whose commit already won loops on `conflict`;
+- cost ids regenerated inside the settlement retry, so a conflict duplicates spend;
+- a lost lease after a successful commit reported as failure;
 - `expectedRevision` ignored, or the append made unconditional;
 - availability reused after a conflict instead of recomputed;
 - the lease held across the provider call;
@@ -261,10 +376,19 @@ the port describes a property a file, a transaction or a remote CAS can each hon
 keeps the policy and visibly owns its retry loop; and it is the only option whose correctness does
 not rest on the fencing `LockManager` cannot give.
 
-## What this sharpens in ADR-0044
+## ADR-0044 amendment (required, applied)
 
-Nothing contradicts it. One thing is more specific than the ADR could be: **the lease is not the
-atomicity mechanism**, because the lock contract detects loss rather than preventing writes. ADR-0044
-says check-and-reserve happens "under a lease"; this says it happens under a _revision check_, with
-the lease reducing contention. If that reads as a change to accepted atomicity semantics rather than
-a realization of them, the ADR should be amended and this design should wait.
+ADR-0044 said check-and-reserve happens _"under a lease"_, which reads as though the lease provides
+atomicity. The design pass proved `LockManager` does not. The ADR now says:
+
+> Check-and-reserve commits through a **linearizable compare-and-append** operation scoped by
+> `grantId`. The file-backed implementation may use `LockManager` to reduce contention, but the
+> lease is not the correctness mechanism: it detects lease loss after the body and supplies no
+> fencing token. Correctness rests on a storage primitive that permits exactly one writer to
+> install the successor of an expected revision.
+>
+> **A revision comparison that is not atomic with installation of the successor revision is not
+> compare-and-append.**
+
+Recorded there rather than only here, because the sentence it replaces is the one an implementer
+would have read.
