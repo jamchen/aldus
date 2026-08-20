@@ -78,6 +78,14 @@ export interface StageArtifactRecorder {
  *
  * The digest is not passed through: {@link ArtifactRegistry.register} computes it from the bytes,
  * because §8.1 makes it half of an artifact's identity and §13 binds approvals to it.
+ *
+ * **This is what to pass as a `StageRunner`'s `artifacts` option**, including in a test that wants
+ * a runner behaving like the composed stack's. `@aldus-runtime/services` uses it internally and
+ * does not re-export it, which led an adopter to conclude it was internal and hand-write a
+ * substitute rather than drive a real runner. It is public, from here.
+ *
+ * Worth the hand-written substitute being avoidable: a stub that satisfies the runner lets a stage
+ * "record" an artifact nowhere while every assertion in the test still passes.
  */
 export function stageArtifactRecorder(registry: ArtifactRegistry): StageArtifactRecorder {
   return {

@@ -84,7 +84,16 @@ const PUBLIC_SURFACE: Record<string, { module: object; names: readonly string[] 
   },
   "@aldus-runtime/artifact-registry": {
     module: artifactRegistry,
-    names: ["ArtifactRegistry", "localPathFromUri"],
+    names: [
+      "ArtifactRegistry",
+      "localPathFromUri",
+      // The adapter between a registry and a `StageRunner`'s `artifacts` option. Listed because an
+      // adopter went looking for it in `services` — where the composition uses it — and concluded
+      // it was internal, then hand-wrote a replacement rather than test against a real runner.
+      // It was public all along, from here. A symbol reachable only by knowing which package to
+      // guess is reachable in the same sense a seam nobody can import is a seam (#121).
+      "stageArtifactRecorder",
+    ],
   },
 };
 
