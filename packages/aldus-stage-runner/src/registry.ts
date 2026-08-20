@@ -7,6 +7,8 @@
  * `v2` is registered.
  */
 
+import { validateQualityClaim } from "@aldus-runtime/core";
+
 import type { StageDefinition } from "./definition.js";
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
 
@@ -68,6 +70,64 @@ export class StageRegistry {
           details: { stageId: definition.id, stageVersion: definition.version },
         },
       );
+    }
+
+    // §12's claims are checked at registration, before anything can run the stage (#115). The
+    // rule itself is Core's, shared with `validateGateDefinition`, so a gate and an evaluator
+    // Stage making the same claim are refused for the same reasons in the same words.
+    const evaluation = definition.evaluation;
+    if (evaluation !== undefined) {
+      if (evaluation.channels.length === 0) {
+        throw stageRunnerError(
+          StageRunnerErrorCodes.STAGE_EVALUATION_INVALID,
+          `Stage "${definition.id}" declares that it executes an evaluator but names no finding ` +
+            "classes. An empty declaration claims nothing while looking like a claim; omit " +
+            "`evaluation` for an ordinary stage (contract §12).",
+          { category: "validation", retryable: false, details: { stageId: definition.id } },
+        );
+      }
+
+      const seen = new Set<string>();
+      for (const channel of evaluation.channels) {
+        if (seen.has(channel.findingClass)) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.STAGE_EVALUATION_INVALID,
+            `Stage "${definition.id}" declares "${channel.findingClass}" twice. Two claims about ` +
+              "one class of finding cannot both be authoritative, and which one governs is not " +
+              "guessable (contract §12).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { stageId: definition.id, findingClass: channel.findingClass },
+            },
+          );
+        }
+        seen.add(channel.findingClass);
+
+        const problems = validateQualityClaim({
+          level: channel.level,
+          enforcement: channel.enforcement,
+          promotionEvidence: channel.promotionEvidence,
+        });
+        if (problems.length > 0) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.STAGE_EVALUATION_INVALID,
+            `Stage "${definition.id}" makes an invalid quality claim for "${channel.findingClass}" ` +
+              `findings: ${problems.map((problem) => problem.message).join(" ")}`,
+            {
+              category: "validation",
+              retryable: false,
+              details: {
+                stageId: definition.id,
+                findingClass: channel.findingClass,
+                level: channel.level,
+                enforcement: channel.enforcement,
+                problems: problems.map((problem) => problem.kind),
+              },
+            },
+          );
+        }
+      }
     }
 
     this.#byKey.set(key, definition as unknown as StageDefinition<never, unknown>);
