@@ -364,6 +364,34 @@ contract.
 
 The absence of a declaration MUST NOT be read as "no artifacts".
 
+An external-effect idempotency key MUST identify the independently deduplicated effect, not the
+attempt containing it. Where a Stage performs several such effects, each MUST carry its own key;
+one key MUST NOT be reused for several destination objects.
+
+Every Stage-to-Worker request MUST declare whether that operation performs an external effect, and
+an effectful request MUST carry the key its destination deduplicates on. **An invocation
+fingerprint MUST NEVER be supplied as an external idempotency key**, and where no effect-specific
+key exists the correct value is absent — never `runId`, an attempt id, a configuration digest, or
+an empty input-hash set.
+
+A Stage MUST declare what re-running it does outside the workspace. The retry decision MUST read
+and surface that declaration and its stated reason; recording it only for later audit is
+insufficient.
+
+An external-effect idempotency key MUST identify the independently deduplicated effect, not the
+attempt containing it. Where a Stage performs several such effects, each MUST carry its own key;
+one key MUST NOT be reused for several destination objects.
+
+Every Stage-to-Worker request MUST declare whether that operation performs an external effect, and
+an effectful request MUST carry the key its destination deduplicates on. **An invocation
+fingerprint MUST NEVER be supplied as an external idempotency key**, and where no effect-specific
+key exists the correct value is absent — never `runId`, an attempt id, a configuration digest, or
+an empty input-hash set.
+
+A Stage MUST declare what re-running it does outside the workspace. The retry decision MUST read
+and surface that declaration and its stated reason; recording it only for later audit is
+insufficient.
+
 ### 6.4 Event log
 
 Every state mutation MUST emit an immutable event containing:

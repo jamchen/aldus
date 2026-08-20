@@ -154,7 +154,7 @@ describe("registerOutput", () => {
     temp.registry.register(
       aStage({
         id: "stage-a",
-        idempotency: { kind: "not_idempotent", reason: "writes a file" },
+        retrySafety: { kind: "not_idempotent", reason: "writes a file" },
         execute: async (context) => {
           await context.registerOutput({
             path: "/tmp/first.bin",

@@ -48,10 +48,10 @@ function flaky(options: {
   let calls = 0;
   const definition = aStage({
     retryPolicy: { maxAttempts: options.maxAttempts ?? 3 },
-    idempotency:
+    retrySafety:
       options.idempotent === false
         ? { kind: "not_idempotent", reason: "each run issues a paid synthesis request" }
-        : { kind: "idempotent" },
+        : { kind: "no_external_effects" },
     execute: async () => {
       calls += 1;
       if (calls <= options.failures) {
@@ -222,8 +222,9 @@ describe("idempotency (§11, §15.1, §19.1)", () => {
     // only `input`, which could not reach a stage whose input is `{}` — the class this replaced.
     harness.registry.register(
       aStage<{ segment: string; noise: number }, unknown>({
-        idempotency: {
-          kind: "idempotent_external_effect",
+        retrySafety: {
+          kind: "deduplicated_external_effects",
+          keyScope: "stage",
           effectKey: (context) =>
             `${context.episodeId}:${(context.input as { segment: string }).segment}`,
         },
@@ -358,7 +359,7 @@ describe("invocation keys and effect keys are different contracts (ADR-0036, #11
       harness.registry.register(
         aStage({
           id: "publishes",
-          idempotency: { kind: "idempotent_external_effect" } as never,
+          retrySafety: { kind: "deduplicated_external_effects", keyScope: "stage" } as never,
         }),
       ),
     ).toThrow(/effectKey/);
@@ -369,8 +370,9 @@ describe("invocation keys and effect keys are different contracts (ADR-0036, #11
     harness.registry.register(
       aStage({
         id: "declares-effect",
-        idempotency: {
-          kind: "idempotent_external_effect",
+        retrySafety: {
+          kind: "deduplicated_external_effects",
+          keyScope: "stage",
           effectKey: (context) => {
             seen = { ...context } as unknown as Record<string, unknown>;
             return "effect-key-1";
@@ -403,8 +405,9 @@ describe("invocation keys and effect keys are different contracts (ADR-0036, #11
       temp.registry.register(
         aStage({
           id: "declares-effect",
-          idempotency: {
-            kind: "idempotent_external_effect",
+          retrySafety: {
+            kind: "deduplicated_external_effects",
+            keyScope: "stage",
             effectKey: () => "stable-effect-key",
           },
         }),

@@ -76,6 +76,10 @@ export const StageRunnerErrorCodes = {
   /** A stage was registered without declaring what it owes the registry (§8.1, §11; ADR-0040). */
   STAGE_ARTIFACT_DECLARATION_REQUIRED: "ALDUS_STAGE_ARTIFACT_DECLARATION_REQUIRED",
   STAGE_EFFECT_KEY_REQUIRED: "ALDUS_STAGE_EFFECT_KEY_REQUIRED",
+  /** A stage claiming no external effects asked a Worker to perform one (§19.1; #148). */
+  STAGE_EFFECT_UNDECLARED: "ALDUS_STAGE_EFFECT_UNDECLARED",
+  /** A stage-scoped effect key was asked to cover more than one effect (§19.1; #148). */
+  STAGE_EFFECT_SCOPE_EXCEEDED: "ALDUS_STAGE_EFFECT_SCOPE_EXCEEDED",
   WORKER_NOT_REGISTERED: "ALDUS_WORKER_NOT_REGISTERED",
   /**
    * A different Worker object was registered under an id and version already in use.

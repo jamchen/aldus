@@ -86,14 +86,14 @@ describe("StageRegistry", () => {
         retryPolicy: { maxAttempts: 3 },
         costPolicy: { supportsPreview: true, requiresAuthorization: true },
         artifacts: { produces: "none" },
-        idempotency: { kind: "not_idempotent", reason: "issues a paid request" },
+        retrySafety: { kind: "not_idempotent", reason: "issues a paid request" },
       }),
     );
     const definition = registry.require("stage-a", "1.0.0");
     expect(definition.requiredCapabilities).toEqual(["filesystem"]);
     expect(definition.retryPolicy?.maxAttempts).toBe(3);
     expect(definition.costPolicy?.requiresAuthorization).toBe(true);
-    expect(definition.idempotency).toEqual({
+    expect(definition.retrySafety).toEqual({
       kind: "not_idempotent",
       reason: "issues a paid request",
     });

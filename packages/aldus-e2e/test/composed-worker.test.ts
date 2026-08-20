@@ -39,7 +39,7 @@ function invokingStage(worker: { id: string; version: string }, required: string
     outputSchema: anySchema,
     requiredCapabilities: [],
     artifacts: { produces: "none" },
-    idempotency: { kind: "idempotent" as const },
+    retrySafety: { kind: "no_external_effects" as const },
     execute: async (context: {
       runWorker: (request: Record<string, unknown>) => Promise<{ output: unknown }>;
     }) => {
@@ -48,6 +48,7 @@ function invokingStage(worker: { id: string; version: string }, required: string
         workerVersion: worker.version,
         input: { path: "take.wav" },
         requiredCapabilities: required,
+        effect: { kind: "none" },
       });
       return { kind: "completed" as const, output: result.output };
     },

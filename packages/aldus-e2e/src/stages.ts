@@ -67,7 +67,7 @@ export function producingStage(
       produces: "declared",
       resolve: () => [{ kind: options.kind, minCount: 1, maxCount: 1 }],
     },
-    idempotency: { kind: "idempotent" },
+    retrySafety: { kind: "no_external_effects" },
     execute: async (context): Promise<StageOutcome<unknown>> => {
       const path = join(options.workingRoot, options.relativePath);
       await mkdir(join(path, ".."), { recursive: true });
@@ -117,7 +117,7 @@ export function gatedStage(
     outputSchema: anySchema,
     requiredCapabilities: [],
     artifacts: { produces: "none" },
-    idempotency: { kind: "idempotent" },
+    retrySafety: { kind: "no_external_effects" },
     execute: (): Promise<StageOutcome<unknown>> =>
       Promise.resolve({
         kind: "gate_required",
@@ -169,7 +169,7 @@ export function selfRegisteringStage(
       produces: "declared",
       resolve: () => [{ kind: options.kind, minCount: 1, maxCount: 1 }],
     },
-    idempotency: { kind: "idempotent" },
+    retrySafety: { kind: "no_external_effects" },
     execute: async (context): Promise<StageOutcome<unknown>> => {
       const path = join(options.workingRoot, options.relativePath);
       await mkdir(join(path, ".."), { recursive: true });

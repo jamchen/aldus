@@ -387,7 +387,7 @@ export class StageRunner {
     // A stage that told us re-running duplicates an external effect is never retried on its
     // behalf. §15.1: "Aldus MUST NOT silently retry paid requests without policy and cost
     // authorization." An operator can still re-run explicitly, having read the reason.
-    if (definition.idempotency.kind === "not_idempotent") return false;
+    if (definition.retrySafety.kind === "not_idempotent") return false;
     if (error === undefined) return false;
     if (NEVER_RETRIED_CATEGORIES.has(error.category)) return false;
     return error.retryable;
@@ -409,6 +409,9 @@ export class StageRunner {
     const attemptId = this.#options.newAttemptId();
     const controller = new AbortController();
     const outputs: ArtifactRef[] = [];
+    // Counted per attempt: `keyScope: "stage"` is a claim about how many effects this attempt
+    // performs, and nothing but a count can check it.
+    let effectfulInvocations = 0;
     const notes: string[] = [];
 
     // Two keys, because they are two contracts (ADR-0036). The invocation key fingerprints the
@@ -425,9 +428,10 @@ export class StageRunner {
       inputArtifacts: input.inputArtifacts,
     });
 
+    const retrySafety = definition.retrySafety;
     const effectKey =
-      definition.idempotency.kind === "idempotent_external_effect"
-        ? definition.idempotency.effectKey({
+      retrySafety.kind === "deduplicated_external_effects" && retrySafety.keyScope === "stage"
+        ? retrySafety.effectKey({
             episodeId: input.manifest.episode.episodeId,
             stageId: definition.id,
             stageVersion: definition.version,
@@ -446,10 +450,17 @@ export class StageRunner {
       configuration: redact(input.configuration) as Record<string, unknown>,
       invocationKey,
       ...(effectKey !== undefined ? { effectKey } : {}),
-      idempotent: definition.idempotency.kind !== "not_idempotent",
-      ...(definition.idempotency.kind === "not_idempotent"
-        ? { nonIdempotentReason: definition.idempotency.reason }
+      idempotent: retrySafety.kind !== "not_idempotent",
+      // The declaration and its reason, on every attempt. The ruling on #148 is explicit that the
+      // retry decision must *read and surface* these — recording them for a later audit is
+      // insufficient, because an audit nobody performs is the better-documented silence a false
+      // claim already provides.
+      retrySafety: retrySafety.kind,
+      ...(retrySafety.kind === "deduplicated_external_effects"
+        ? { effectKeyScope: retrySafety.keyScope }
         : {}),
+      ...("reason" in retrySafety ? { retrySafetyReason: retrySafety.reason } : {}),
+      ...(retrySafety.kind === "not_idempotent" ? { nonIdempotentReason: retrySafety.reason } : {}),
     };
 
     const base: StageAttempt = {
@@ -508,6 +519,77 @@ export class StageRunner {
         outputs.push(artifact);
       },
       runWorker: async <WI, WO>(request: StageWorkerRequest<WI>) => {
+        // The declarations are enforced before the Worker is reached, not after (#148). A refusal
+        // arriving once an external system has been written to is not a refusal.
+        //
+        // Checked for presence first: the type requires it, so this catches the request that did
+        // not come through the type — built from configuration, or written by a JavaScript
+        // adopter. Without it the reads below throw a TypeError the runner reports as an ordinary
+        // stage failure, which tells the author nothing about what they omitted.
+        const effect = (request as { effect?: { kind?: string } }).effect;
+        if (effect?.kind !== "none" && effect?.kind !== "deduplicated") {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.STAGE_EFFECT_UNDECLARED,
+            `Stage "${definition.id}" invoked Worker "${request.workerId}" without declaring ` +
+              'whether the operation performs an external effect. State `effect: { kind: "none" }` ' +
+              "or supply the key the destination deduplicates on (contract §19.1).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { stageId: definition.id, workerId: request.workerId },
+            },
+          );
+        }
+        if (request.effect.kind === "deduplicated") {
+          if (retrySafety.kind === "no_external_effects") {
+            throw stageRunnerError(
+              StageRunnerErrorCodes.STAGE_EFFECT_UNDECLARED,
+              `Stage "${definition.id}" declares no external effects and asked a Worker to ` +
+                "perform a deduplicated one. One of the two is wrong and the runtime cannot tell " +
+                "which — but a stage claiming to touch nothing outside the workspace must not " +
+                "write to a destination (contract §19.1).",
+              {
+                category: "validation",
+                retryable: false,
+                details: { stageId: definition.id, workerId: request.workerId },
+              },
+            );
+          }
+          if (request.effect.idempotencyKey.trim().length === 0) {
+            throw stageRunnerError(
+              StageRunnerErrorCodes.STAGE_EFFECT_KEY_REQUIRED,
+              `Stage "${definition.id}" declared a deduplicated effect for Worker ` +
+                `"${request.workerId}" and supplied an empty key. An empty key deduplicates ` +
+                "nothing, and offering one is worse than declaring no effect at all.",
+              {
+                category: "validation",
+                retryable: false,
+                details: { stageId: definition.id, workerId: request.workerId },
+              },
+            );
+          }
+          effectfulInvocations += 1;
+          // A stage-scoped key identifies one effect. A second effectful invocation has more
+          // effects than that key can identify, and would proceed under a key describing the
+          // first (#149).
+          if (
+            retrySafety.kind === "deduplicated_external_effects" &&
+            retrySafety.keyScope === "stage" &&
+            effectfulInvocations > 1
+          ) {
+            throw stageRunnerError(
+              StageRunnerErrorCodes.STAGE_EFFECT_SCOPE_EXCEEDED,
+              `Stage "${definition.id}" declares a stage-scoped effect key, which identifies ` +
+                `exactly one external effect, and has now performed ${effectfulInvocations}. ` +
+                "Declare per-invocation key scope so each effect carries its own key (§19.1).",
+              {
+                category: "validation",
+                retryable: false,
+                details: { stageId: definition.id, effectfulInvocations },
+              },
+            );
+          }
+        }
         const registry = this.#options.workers;
         // Refuses rather than doing nothing. A capability that exists on the context and is
         // unreachable from every stage is #67 exactly, and a Worker seam nothing wired would be
@@ -549,10 +631,18 @@ export class StageRunner {
           attemptId,
           configurationHash: input.configurationHash,
           inputHashes: input.inputArtifacts.map((artifact) => artifact.sha256),
-          // The effect key where the stage declared one, the fingerprint otherwise. A Worker
-          // addressing a platform with client-supplied keys hands this through; it never derives
-          // one (ADR-0036).
-          idempotencyKey: effectKey ?? invocationKey,
+          // Present only when this invocation declared a deduplicated effect and supplied its own
+          // key (#149). It used to be `effectKey ?? invocationKey`, which did the one thing
+          // ADR-0036 forbids in as many words: a fingerprint of declared work reaching an external
+          // system as a deduplication credential. For a stage with an empty input schema and no
+          // declared artifacts that fingerprint is a *constant*, so a platform deduplicating on it
+          // would treat every episode's first request as a repeat of the first episode's, forever.
+          //
+          // A stage-level key is not propagated here either. It has a different cardinality, and
+          // copying it onto every invocation is how N writes become one.
+          ...(request.effect.kind === "deduplicated"
+            ? { idempotencyKey: request.effect.idempotencyKey }
+            : {}),
           signal: controller.signal,
         });
         return result as WorkerResult<WO>;

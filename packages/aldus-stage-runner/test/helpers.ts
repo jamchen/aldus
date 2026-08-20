@@ -151,7 +151,7 @@ export function aStage<I = unknown, O = unknown>(
     // would let every test in the package register a stage the type forbids, and the check that
     // absence is refused would be the only one that noticed (ADR-0040).
     artifacts: { produces: "none" },
-    idempotency: { kind: "idempotent" },
+    retrySafety: { kind: "no_external_effects" },
     execute: async () => ({ kind: "completed", output: undefined as O }),
     ...overrides,
   };

@@ -279,7 +279,47 @@ export interface StageWorkerRequest<I = unknown> {
    * Worker offering none — the check fails closed on what was asked for, not on what was offered.
    */
   requiredCapabilities?: readonly string[];
+  /**
+   * Whether **this invocation** performs an external effect, and what deduplicates it (#148).
+   *
+   * Required, and `{ kind: "none" }` is the explicit answer. A Worker invocation is one
+   * deduplication unit: an effect key belongs to the independently deduplicated effect, never
+   * automatically to the attempt containing it. Previously every invocation in an attempt received
+   * one attempt-level key, so a stage performing N writes handed the receiving platform N requests
+   * carrying the same value — and a platform deduplicating on it drops writes 2..N as repeats of
+   * the first. Every call returns successfully and N-1 of them did nothing.
+   *
+   * If one invocation internally performs N independently deduplicated writes, it must expose them
+   * as N invocations with N keys, or own a real batch protocol whose key identifies the exact batch
+   * effect. One key for N unrelated destination objects is the defect, not a shortcut.
+   */
+  effect: WorkerEffect;
 }
+
+/**
+ * What one Worker invocation does outside the workspace (§19.1; #148).
+ *
+ * Two arms, and the effectful one carries its key rather than inheriting one. A key that arrives
+ * by inheritance describes the thing that passed it down, not the effect it is deduplicating.
+ */
+export type WorkerEffect =
+  | {
+      /** This invocation touches nothing outside the workspace. */
+      kind: "none";
+    }
+  | {
+      /** The receiving system deduplicates this effect on the key below. */
+      kind: "deduplicated";
+      /**
+       * What the destination deduplicates on, for **this** effect.
+       *
+       * Must identify the effect's content, not its container. ADR-0033 established by measurement
+       * that a reassembled bundle with a fresh id re-published everything; a digest over the
+       * collection an effect happens to belong to has the same defect, because enclosure and
+       * content move independently.
+       */
+      idempotencyKey: string;
+    };
 
 /**
  * Fingerprint the declared work of one stage invocation (contract §20; ADR-0036).
@@ -353,34 +393,56 @@ export interface EffectKeyContext {
  * reproducible rather than because re-running has an external effect — §15.1's retry refusal is
  * right for the second and merely conservative for the first.
  */
-export type StageIdempotency =
+export type StageRetrySafety =
   | {
       /**
        * Re-running touches nothing outside the workspace.
        *
-       * The ordinary case. `invocationKey` identifies the declared work for the trace and nothing
-       * is deduplicated externally, so there is no effect key to get wrong.
+       * Named for what it claims. It was `idempotent`, which reads as a property of the
+       * computation and was taken as one: a stage uploading to a cloud drive declared it, because
+       * the author was reasoning about the invocation key's precision and never re-read what the
+       * arm asserts. The claim is about the **world**, and nothing can check it — which is why the
+       * name has to carry the whole meaning.
        */
-      kind: "idempotent";
+      kind: "no_external_effects";
     }
   | {
       /**
-       * Re-running repeats an external effect that the receiving system can deduplicate.
+       * One independently deduplicated external effect, keyed at the stage.
        *
-       * `effectKey` is **required**. A stage in this state without one is refused before
-       * execution (ADR-0036): the runtime-derived invocation key must never be used as an
-       * external deduplication guarantee, and silently falling back to it is how a stage that is
-       * right about its semantics gets a key that is wrong about its content.
+       * Valid **only** when the stage performs exactly one such effect. A stage-level key has one
+       * cardinality and N effects have another, and propagating one key across several effects is
+       * how N writes become one (#149).
        */
-      kind: "idempotent_external_effect";
+      kind: "deduplicated_external_effects";
+      keyScope: "stage";
       /**
        * Derive the key the external system deduplicates on.
        *
-       * For a content-bearing effect this must ultimately depend on effect identity and content
-       * digests (ADR-0033). `runId`, attempt id, path and bundle identity are not substitutes for
-       * content identity, which ADR-0033 established by measurement rather than by argument.
+       * Must depend on effect identity and content digests (ADR-0033). `runId`, attempt id, path
+       * and bundle identity are not substitutes, which ADR-0033 established by measurement rather
+       * than argument — and neither is a digest over the collection an effect belongs to.
        */
       effectKey: (context: EffectKeyContext) => string;
+    }
+  | {
+      /**
+       * Every external effect crosses the Worker seam, and each invocation supplies its own key.
+       *
+       * The arm for a stage whose effects are N and individually deduplicated — a content-addressed
+       * archive uploading each artifact under its own digest. Nothing here is a stage-wide key,
+       * because there is no stage-wide effect to key.
+       *
+       * **This is not a trust arm.** It does not say "the adapter promises this is safe"; it says
+       * every effect is declared and keyed at the seam where it happens. The runtime cannot prove
+       * a destination honours a key, just as it cannot prove a stage has no hidden effects — what
+       * it enforces is that the claim is explicit, correctly scoped, supplied at the execution
+       * seam, recorded, and read by retry policy.
+       */
+      kind: "deduplicated_external_effects";
+      keyScope: "worker_invocation";
+      /** Why per-invocation deduplication is sound here. Read at retry-decision time, not filed. */
+      reason: string;
     }
   | {
       /**
@@ -388,6 +450,10 @@ export type StageIdempotency =
        *
        * Never auto-retried: §15.1's "Aldus MUST NOT silently retry paid requests without policy
        * and cost authorization". An operator can still re-run explicitly, having read the reason.
+       *
+       * Individual Worker calls may still carry keys. That does not make the stage retry-safe —
+       * the arm is about the stage, and a keyed call inside an unkeyed whole is still an unkeyed
+       * whole.
        */
       kind: "not_idempotent";
       /** Why re-running duplicates an effect. Recorded on every attempt and surfaced to operators. */
@@ -810,11 +876,17 @@ export interface StageDefinition<I = unknown, O = unknown> {
    * What this stage owes the artifact registry (§8.1, §11; ADR-0040).
    *
    * Required, and `{ produces: "none" }` is the explicit answer for a value-only stage. §11 permits
-   * no silent answer here for the same reason it permits none for {@link idempotency}.
+   * no silent answer here for the same reason it permits none for {@link retrySafety}.
    */
   artifacts: StageArtifactDeclaration<I>;
-  /** Idempotency declaration. Required — §11 permits no silent answer. */
-  idempotency: StageIdempotency;
+  /**
+   * What re-running this stage does outside the workspace (§19.1; #148).
+   *
+   * Required — §11 permits no silent answer. Named `retrySafety` rather than `idempotency` because
+   * the arms make claims about the world rather than about the computation, and the old name
+   * invited reading `idempotent` as "the function is pure".
+   */
+  retrySafety: StageRetrySafety;
   /**
    * Gates that must be satisfied before this stage should be offered (contract §11 "stop at
    * required gates", §13).

@@ -44,7 +44,12 @@ describe("a stage invoking a Worker through the runner", () => {
     harness.registry.register(
       aStage({
         execute: async (context) => {
-          await context.runWorker({ workerId: "checksum", workerVersion: "1", input: {} });
+          await context.runWorker({
+            workerId: "checksum",
+            workerVersion: "1",
+            input: {},
+            effect: { kind: "none" },
+          });
           return { kind: "completed", output: undefined };
         },
       }),
@@ -71,6 +76,7 @@ describe("a stage invoking a Worker through the runner", () => {
             workerVersion: "1",
             input: { path: "a.wav" },
             requiredCapabilities: ["filesystem.read"],
+            effect: { kind: "none" },
           });
           return { kind: "completed", output: undefined };
         },
@@ -105,6 +111,7 @@ describe("a stage invoking a Worker through the runner", () => {
             workerVersion: "1",
             input: {},
             requiredCapabilities: ["network.write"],
+            effect: { kind: "none" },
           });
           return { kind: "completed", output: undefined };
         },
@@ -126,7 +133,12 @@ describe("a stage invoking a Worker through the runner", () => {
     temp.registry.register(
       aStage({
         execute: async (context) => {
-          await context.runWorker({ workerId: "checksum", workerVersion: "1", input: {} });
+          await context.runWorker({
+            workerId: "checksum",
+            workerVersion: "1",
+            input: {},
+            effect: { kind: "none" },
+          });
           return { kind: "completed", output: undefined };
         },
       }),
@@ -152,6 +164,7 @@ describe("a stage invoking a Worker through the runner", () => {
             workerVersion: "1",
             input: {},
             requiredCapabilities: ["filesystem.read"],
+            effect: { kind: "none" },
           });
           return { kind: "completed", output: undefined };
         },
