@@ -67,25 +67,54 @@ describe("every paid dispatch path reserves before the effect", () => {
   });
 });
 
-describe("the composed operator path (#155 step 5)", () => {
-  it("reaches reconcile and status through the published surface, not an internal import", async () => {
-    // The ruling's condition: unit tests using a relative internal import are not evidence that a
-    // supported composed path exists. This imports by package name, the way an adopter does.
-    expect(Object.hasOwn(services, "openOperatorConsole")).toBe(true);
-
-    // And the class itself is deliberately absent as a value: exporting it would expose the mint,
-    // letting a caller construct a console with an actor it chose.
-    expect(Object.hasOwn(services, "OperatorSpendConsole")).toBe(false);
+describe("no published surface mints reconciliation authority (#155 step 5)", () => {
+  /**
+   * The third correction, and the one that finally has the right shape.
+   *
+   * Two earlier versions tried to establish "a human decided this" from an `ActorRef` the caller
+   * supplied — first a public constructor, then a public factory. Both put the evidence-free half
+   * of the pair in a caller's hands while a `WeakSet` made the result look established. The
+   * composed path did not repair it: `AldusContext.actor` comes from `--actor` or `ALDUS_ACTOR`,
+   * which says who a command claims to be and nothing more.
+   *
+   * Aldus has no boundary that authenticates an operator, so it does not claim one. Status ships
+   * read-only, `reconcile` requires an authority nothing published can mint, and these tests are
+   * what keeps that true.
+   */
+  it("publishes no way to obtain an operator console", () => {
+    for (const name of ["openOperatorConsole", "OperatorSpendConsole", "OperatorAuthority"]) {
+      expect(
+        Object.hasOwn(services, name),
+        `"${name}" is exported from @aldus-runtime/services. Anything a caller can reach that ` +
+          "yields an OperatorAuthority is a mint, and the actor it would take is a claim rather " +
+          "than evidence.",
+      ).toBe(false);
+    }
   });
 
-  it("refuses a console for an actor the invocation did not establish", () => {
-    // The hole the first version had: a public constructor taking an arbitrary ActorRef meant a
-    // caller could mint a valid authority from its own assertion.
-    expect(() =>
-      services.openOperatorConsole({
-        spend: undefined as never,
-        actor: { kind: "agent", id: "claude" },
-      }),
-    ).toThrow(/human decision/);
+  it("gives the composition root a read-only spend surface and no console", async () => {
+    const { AldusContext } = services as unknown as {
+      AldusContext: { prototype: Record<string, unknown> };
+    };
+    expect(typeof AldusContext.prototype["spendStatus"]).toBe("function");
+    // Removed rather than never added. It existed, wired to the self-declared CLI actor, and that
+    // is exactly the composition that made the mint look trustworthy.
+    expect(AldusContext.prototype["operatorConsole"]).toBeUndefined();
+  });
+
+  it("refuses an assembled authority, so reconcile is unreachable rather than weakly guarded", async () => {
+    // The only remaining way in is to build the object. `isIssuedOperatorAuthority` is set
+    // membership, so a literal with the right fields proves only that a caller can type them.
+    const spend = services.SpendService.prototype as unknown as {
+      reconcile: (...args: unknown[]) => Promise<unknown>;
+    };
+    await expect(
+      spend.reconcile.call(
+        Object.create(services.SpendService.prototype) as unknown,
+        { reservationId: "res-a", grantId: "grant-a" },
+        { decisionId: "d", evidenceRef: "e", resolution: { kind: "investigation_ended" } },
+        { actor: { kind: "human", id: "whoever" } },
+      ),
+    ).rejects.toThrow(/did not come through an operator console/);
   });
 });

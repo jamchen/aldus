@@ -87,6 +87,28 @@ export interface DispatchEvidence {
  * set aside as what a provider charged. §19.3 already says an estimate does not resolve an unknown
  * charge, and this is the same substitution wearing a human's signature.
  */
+/**
+ * One billing observation that was dispatched and never durably recorded (#152, #155 step 5).
+ *
+ * Identity plus the two non-secret facts the provider already stated. A count told an operator
+ * *how many* charges were unrecorded and nothing about *which*, so reconciling "the remainder"
+ * meant reconstructing it from an English sentence — and a reservation holding several
+ * observations from different providers cannot be reconciled from prose without either losing one
+ * or double-counting a record that is already durable.
+ *
+ * `observationId` is the cost id the failed write would have used, so a pending observation and
+ * the record that eventually resolves it share one identity. That is what makes settling the
+ * missing portion idempotent rather than additive.
+ */
+export interface PendingObservation {
+  /** Stable identity, and the `costId` its eventual record carries. */
+  observationId: string;
+  /** Who charged. From the backend's own observation, never invented. */
+  provider: string;
+  /** What was billed. From the backend's own observation. */
+  operation: string;
+}
+
 export type ReconciliationResolution =
   | {
       /** Provider evidence or a cited operator finding established the charge. */
@@ -98,6 +120,15 @@ export type ReconciliationResolution =
        * the mismatch is reported; converting implicitly would invent a rate nobody approved.
        */
       amount: Money;
+      /**
+       * Which unrecorded observation this settles, when the reservation has pending ones.
+       *
+       * Required whenever {@link ReservationStatus.pendingObservations} is non-empty, and refused
+       * when it names something not pending. Without it a decision would settle "the remainder" as
+       * a single figure while the remainder is several charges from different providers — and the
+       * operator would have to reconstruct which from prose.
+       */
+      observationId?: string;
       /**
        * Who charged, and for what — required unless a linked unknown observation already says.
        *
@@ -168,16 +199,41 @@ export interface ReservationStatus {
   }[];
   /** Why this reservation is unresolved and non-retryable, in the operator's terms. */
   unresolvedReason?: string;
+  /**
+   * Charges that are durably recorded, with who charged and for what (#152).
+   *
+   * The other half of {@link pendingObservations}. An operator reconciling a partial settlement
+   * needs to see what is already on the books, or the figure they state will cover it twice.
+   */
+  durableCosts: readonly { costId: string; provider: string; operation: string }[];
+  /**
+   * Charges dispatched and never recorded, each identified (#152).
+   *
+   * Empty for the ordinary unresolved charge, where the record exists and its amount is unknown.
+   * Non-empty only after a settlement failed partway, and then each entry needs its own
+   * reconciliation decision naming its `observationId`.
+   */
+  pendingObservations: readonly PendingObservation[];
 }
 
 /**
- * Proof that a reconciliation was initiated by a trusted operator invocation (#155 step 5).
+ * Proof that a reconciliation was initiated by a boundary that established a human (#155 step 5).
  *
  * A caller-supplied `ActorRef` proves nothing: any caller can write `{ kind: "human" }`, so a check
  * on that field tests whether a caller is *honest about being an agent*, not whether a human
  * decided. The brand is a phantom — declared as a type, absent at runtime — and the runtime proof
- * is membership of a set only {@link OperatorSpendConsole} can add to, following the same pattern
- * `SynthesisPermit` uses for the same reason.
+ * is membership of a set only {@link OperatorSpendConsole} can add to.
+ *
+ * **Nothing public mints one.** Aldus has no boundary that authenticates an operator: the CLI's
+ * actor comes from `--actor` or `ALDUS_ACTOR`, which is an attribution convention rather than
+ * evidence of human presence. Two earlier attempts got this wrong in the same way — first a public
+ * constructor taking an `ActorRef`, then a public factory taking one — and both amounted to
+ * minting authority from the caller's own assertion while the `WeakSet` made it look established.
+ *
+ * So the mint is package-internal and reconciliation is unreachable from the published surface.
+ * That is the honest state: `status` answers what is unresolved, and no API claims a human
+ * enforced anything. When a boundary exists that genuinely establishes operator identity or human
+ * presence, **that** boundary becomes the mint, and this type is what it hands over.
  */
 export type OperatorAuthority = { readonly actor: ActorRef } & {
   readonly __operatorAuthority: unique symbol;
@@ -194,14 +250,9 @@ export function isIssuedOperatorAuthority(authority: OperatorAuthority): boolean
 /**
  * The only path to a reconciliation (#155 step 5).
  *
- * **Not publicly constructible.** The class value is deliberately unexported and only its type is
- * published, so the sole way to obtain one is {@link openOperatorConsole}, which the composition
- * root calls with the actor the invocation boundary already established.
- *
- * The first version exported a constructor taking an arbitrary `ActorRef`, which meant a caller
- * could write `new OperatorSpendConsole({ actor: { kind: "human" } })` and receive a valid
- * authority. That is not the `SynthesisPermit` pattern it claimed to be: a permit is minted *after*
- * the ledger establishes authorization, whereas that console minted from the caller's assertion.
+ * **Package-internal, and neither this nor {@link openOperatorConsole} is exported from the package
+ * index.** It exists so the reconciliation protocol can be built and tested against the boundary
+ * that will eventually establish a human, not so a caller can reach it today.
  */
 class OperatorSpendConsole {
   readonly #spend: SpendService;
@@ -229,22 +280,29 @@ class OperatorSpendConsole {
   }
 }
 
-/** @see OperatorSpendConsole */
+/**
+ * @internal Deliberately absent from `@aldus-runtime/services`. Naming the type publicly would
+ * advertise a console no published surface can hand out.
+ */
 export type { OperatorSpendConsole };
 
 /**
- * Open an operator console for an actor the **invocation boundary** established (#155 step 5).
+ * Mint an operator console from an actor a trusted boundary established (#155 step 5).
  *
- * Called by the composition root with the identity the CLI or Remote Control authenticated, never
- * with one a caller chose. It refuses a non-human actor here as well as at the decision, so a
- * composition that wired an agent identity fails when the console is opened rather than when
- * somebody tries to release authorization.
+ * @internal **Not exported from `@aldus-runtime/services`, and it must not become so while its
+ * only caller would be a composition root reading a self-declared actor.** The `actor` parameter
+ * is not evidence; it is what a boundary that *has* evidence passes along. Exporting this would
+ * put the evidence-free half of the pair in a caller's hands, which is the defect twice corrected.
+ *
+ * The kind check below is therefore a consistency check on a trusted boundary's output, not the
+ * proof. Nothing here can tell a chosen `{ kind: "human" }` from an established one — which is
+ * exactly why the function stays inside the package.
  *
  * @throws {AldusError} when no actor is established, or the established actor is not a human.
  */
 export function openOperatorConsole(options: {
   spend: SpendService;
-  /** From the trusted invocation boundary. Not a parameter a request body may set. */
+  /** From a boundary that established it. Never a value a caller or request body supplied. */
   actor: ActorRef | undefined;
 }): OperatorSpendConsole {
   if (options.actor === undefined) {
@@ -489,6 +547,18 @@ export class SpendService {
       // Every record that *did* land is named. Passing an empty list dropped them from the
       // reservation, so a later reconciliation had no way to know part of the charge was already
       // durable — and could settle a total that double-counted it.
+      // Writes are sequential, so every index at or past `written.length` is unrecorded. Each one
+      // keeps the identity its record would have had, together with the provider and operation the
+      // backend already stated — so the pending portion is described rather than counted, and a
+      // reservation holding several observations from different providers can be settled one at a
+      // time without either losing one or re-settling a durable record.
+      const pendingObservations: PendingObservation[] = observations
+        .slice(written.length)
+        .map((observation, offset) => ({
+          observationId: `${reservation.reservationId}:cost:${written.length + offset}`,
+          provider: observation.provider,
+          operation: observation.operation,
+        }));
       await this.markUnknown(
         reservation,
         written.map((record) => record.costId),
@@ -498,7 +568,7 @@ export class SpendService {
             `${observations.length} billing observation(s) were recorded, and the remainder could ` +
             "not be written. The provider may have charged for all of them, so this is " +
             "non-retryable until reconciled; reconcile only the unrecorded portion (#152).",
-          unresolvedObservations: observations.length - written.length,
+          pendingObservations,
         },
       );
       throw thrown;
@@ -547,17 +617,45 @@ export class SpendService {
   async markUnknown(
     reservation: SpendReservation,
     costIds: readonly string[] = [],
-    options: { reason?: string; unresolvedObservations?: number } = {},
+    options: { reason?: string; pendingObservations?: readonly PendingObservation[] } = {},
   ): Promise<SpendReservation> {
     return this.#appendOne(reservation, "reservation.billing_unknown", {
       costIds: [...costIds],
       // Why it is unresolved, in the operator's terms. `budget status` surfaces this, because
       // "non-retryable" with no reason gives a human nothing to act on.
       ...(options.reason === undefined ? {} : { reason: options.reason }),
-      ...(options.unresolvedObservations === undefined
+      // Which charges are unrecorded, structurally. There is deliberately no companion count:
+      // the length is the count, and two records of one fact is how they come to disagree.
+      ...(options.pendingObservations === undefined
         ? {}
-        : { unresolvedObservations: options.unresolvedObservations }),
+        : { pendingObservations: [...options.pendingObservations] }),
     });
+  }
+
+  /**
+   * Observations still awaiting a record, from the transition stream (#155 step 5).
+   *
+   * The last `billing_unknown` states what was pending when settlement failed; every reconciliation
+   * decision naming one removes it. Derived rather than stored, so the two cannot drift.
+   */
+  #pendingObservations(
+    transitions: readonly SpendReservationTransition[],
+    reservationId: string,
+  ): readonly PendingObservation[] {
+    const mine = transitions.filter((transition) => transition.reservationId === reservationId);
+    const declared = mine
+      .filter((transition) => transition.kind === "reservation.billing_unknown")
+      .map((transition) => transition.detail["pendingObservations"])
+      .filter((value): value is PendingObservation[] => Array.isArray(value))
+      .at(-1);
+    if (declared === undefined) return [];
+    const settledIds = new Set(
+      mine
+        .filter((transition) => transition.kind === "reservation.reconciled")
+        .map((transition) => transition.detail["observationId"])
+        .filter((value): value is string => typeof value === "string"),
+    );
+    return declared.filter((observation) => !settledIds.has(observation.observationId));
   }
 
   /**
@@ -609,6 +707,9 @@ export class SpendService {
                 ? ("decision_recorded" as const)
                 : ("completed" as const),
         }));
+      const reservationCosts = costs.filter(
+        (record) => record.reservationId === reservation.reservationId,
+      );
       const unresolvedReason = transitions
         .filter((transition) => transition.kind === "reservation.billing_unknown")
         .map((transition) => transition.detail["reason"])
@@ -636,9 +737,8 @@ export class SpendService {
         requiresReconciliation: reservation.status === "billing_unknown",
         // From the cost records, not from the reservation: an unresolved charge is a billing fact
         // and the reservation is an authorization one.
-        unquantifiedUnknownBillingCount: costs.filter(
+        unquantifiedUnknownBillingCount: reservationCosts.filter(
           (record) =>
-            record.reservationId === reservation.reservationId &&
             record.billingStatus === "unknown" &&
             // Regardless of an estimate. §19.3 is explicit that an estimate does not resolve an
             // unknown charge, and requiring both to be absent counted an estimated-but-unknown
@@ -646,6 +746,15 @@ export class SpendService {
             record.actual === undefined,
         ).length,
         reconciliationHistory: history,
+        durableCosts: reservationCosts.map((record) => ({
+          costId: record.costId,
+          provider: record.provider,
+          operation: record.operation,
+        })),
+        pendingObservations: this.#pendingObservations(
+          byGrant.get(reservation.grantId)?.transitions ?? [],
+          reservation.reservationId,
+        ),
         ...(unresolvedReason === undefined ? {} : { unresolvedReason }),
       };
     });
@@ -730,11 +839,22 @@ export class SpendService {
     // and continues from where it stopped. A *different* decision, or the same id carrying
     // different contents, conflicts rather than overwriting.
     const stream = await this.#store.readGrant(current.grantId);
-    const priorDecision = stream.transitions.find(
-      (transition) =>
-        transition.reservationId === current.reservationId &&
-        transition.kind === "reservation.reconciled",
-    );
+    const pending = this.#pendingObservations(stream.transitions, current.reservationId);
+    // With observations still unrecorded, a second decision is a second charge rather than a
+    // rewrite of the first, so the "one decision per reservation" guard applies only once nothing
+    // is pending. Same-identity-different-contents is refused either way, by digest.
+    const priorDecision =
+      pending.length > 0
+        ? stream.transitions.find(
+            (transition) =>
+              transition.reservationId === current.reservationId &&
+              transition.transitionId === `${current.reservationId}:reconciled:${input.decisionId}`,
+          )
+        : stream.transitions.find(
+            (transition) =>
+              transition.reservationId === current.reservationId &&
+              transition.kind === "reservation.reconciled",
+          );
 
     // Every field a decision consists of, canonicalised. Comparing only the id let a retry reuse
     // one decision's identity while carrying a different amount — or turn `settled_with_amount`
@@ -755,6 +875,10 @@ export class SpendService {
         input.resolution.kind === "settled_with_amount"
           ? (input.resolution.billedOperation ?? null)
           : null,
+      observationId:
+        input.resolution.kind === "settled_with_amount"
+          ? (input.resolution.observationId ?? null)
+          : null,
     });
 
     const decisionDetail: Record<string, unknown> = {
@@ -766,6 +890,11 @@ export class SpendService {
       ...(input.resolution.kind === "settled_with_amount"
         ? {
             amount: input.resolution.amount,
+            // Recorded on the transition because `#pendingObservations` subtracts by it: a
+            // decision that settles observation A must remove A and nothing else.
+            ...(input.resolution.observationId === undefined
+              ? {}
+              : { observationId: input.resolution.observationId }),
             ...(input.resolution.provider === undefined
               ? {}
               : { provider: input.resolution.provider }),
@@ -831,15 +960,55 @@ export class SpendService {
 
     // `settled_with_amount`: the record is durable before authorization is released.
     //
-    // Provider and operation are preserved from a surviving unresolved observation where one
-    // exists, because that is who actually charged. Where nothing was written, the evidence must
-    // supply them — Aldus does not invent a provider to fill a required field.
-    const linked = (await this.#costs.list(current.runId)).find(
-      (record) =>
-        record.reservationId === current.reservationId && record.billingStatus === "unknown",
-    );
-    const provider = linked?.provider ?? input.resolution.provider;
-    const operation = linked?.operation ?? input.resolution.billedOperation;
+    // Where observations are pending, the decision must name the one it settles, and who charged
+    // comes from that observation rather than from the operator. Two pending observations can have
+    // two providers, and a decision that named neither would settle "the remainder" as one figure
+    // against one arbitrary provider.
+    let covered: PendingObservation | undefined;
+    if (pending.length > 0) {
+      const named = input.resolution.observationId;
+      if (named === undefined) {
+        throw serviceError(
+          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+          `Reservation "${current.reservationId}" has ${pending.length} unrecorded billing ` +
+            `observation(s) — ${pending.map((entry) => entry.observationId).join(", ")} — and a ` +
+            "settlement must name which one it covers. Settling them as a single amount would " +
+            "attribute several providers' charges to one of them (#152).",
+          {
+            category: "validation",
+            retryable: false,
+            details: { reservationId: current.reservationId },
+          },
+        );
+      }
+      covered = pending.find((entry) => entry.observationId === named);
+      if (covered === undefined) {
+        throw serviceError(
+          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+          `Observation "${named}" is not awaiting a record on reservation ` +
+            `"${current.reservationId}". Either it was already settled — in which case settling it ` +
+            "again would double-count a durable record — or it never existed (#152).",
+          {
+            category: "conflict",
+            retryable: false,
+            details: { reservationId: current.reservationId },
+          },
+        );
+      }
+    }
+
+    // With nothing pending the record already exists and only its amount is unknown, so provider
+    // and operation are preserved from it. Where neither source has them, the evidence must supply
+    // them — Aldus does not invent a provider to fill a required field.
+    const linked =
+      covered === undefined
+        ? (await this.#costs.list(current.runId)).find(
+            (record) =>
+              record.reservationId === current.reservationId && record.billingStatus === "unknown",
+          )
+        : undefined;
+    const provider = covered?.provider ?? linked?.provider ?? input.resolution.provider;
+    const operation = covered?.operation ?? linked?.operation ?? input.resolution.billedOperation;
     if (provider === undefined || operation === undefined) {
       throw serviceError(
         ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
@@ -855,7 +1024,10 @@ export class SpendService {
       );
     }
 
-    const costId = `${current.reservationId}:reconciled`;
+    // A settled pending observation keeps its own identity, so the record that resolves it lands
+    // where its failed write would have — one record per observation, and a repeat of the same
+    // decision writes the same id rather than adding a second.
+    const costId = covered?.observationId ?? `${current.reservationId}:reconciled`;
     const record: CostRecord = {
       schemaVersion: SCHEMA_VERSION,
       costId,
@@ -873,6 +1045,13 @@ export class SpendService {
     };
     await this.#costs.append(current.runId, record);
 
+    // Terminal only when nothing is left unrecorded. Settling observation A while B is still
+    // pending would release authorization for a charge nobody has accounted for, which is the
+    // release-before-durable ordering ADR-0044 forbids, one observation over.
+    const remaining = pending.filter((entry) => entry.observationId !== covered?.observationId);
+    if (remaining.length > 0) {
+      return { reservation: audited, costs: [record] };
+    }
     const settled = await this.#appendOne(audited, "reservation.settled", { costIds: [costId] });
     return { reservation: settled, costs: [record] };
   }
@@ -915,6 +1094,37 @@ export class SpendService {
           { category: "not_found", retryable: false, details: {} },
         );
       }
+      // An explicit transition id names one decision, and re-recording that decision must be a
+      // no-op rather than a conflict. `#transition` stamps a fresh `at`, so a byte comparison in
+      // the store sees the same identity carrying different content and refuses — which turned a
+      // retry across an advancing clock into a permanent failure. Presence plus an identical
+      // payload is a resume; presence plus a changed payload is still refused, because that is a
+      // second decision wearing the first one's identity.
+      if (transitionId !== undefined) {
+        const existing = stream.transitions.find(
+          (transition) => transition.transitionId === transitionId,
+        );
+        if (existing !== undefined) {
+          // The detail only, never the transition: `at` is the clock reading that made an
+          // identical decision compare unequal in the first place.
+          if (digestJson(existing.detail) !== digestJson(detail)) {
+            throw serviceError(
+              ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+              `Transition "${transitionId}" already exists on reservation ` +
+                `"${current.reservationId}" carrying different contents. Re-recording the same ` +
+                "decision resumes; changing what it says would overwrite a durable finding " +
+                "(ADR-0044).",
+              {
+                category: "conflict",
+                retryable: false,
+                details: { reservationId: current.reservationId },
+              },
+            );
+          }
+          return current;
+        }
+      }
+
       if (!isLegalSuccessor(lastKindOf(stream.transitions, current.reservationId), kind)) {
         throw serviceError(
           ServiceErrorCodes.SPEND_NOT_AUTHORIZED,

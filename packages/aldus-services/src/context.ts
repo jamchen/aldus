@@ -23,12 +23,7 @@ import {
 } from "@aldus-runtime/artifact-registry";
 import { FileSpendReservationStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import type { CostRecordStore } from "./cost-store.js";
-import {
-  openOperatorConsole,
-  SpendService,
-  type OperatorSpendConsole,
-  type ReservationStatus,
-} from "./spend-service.js";
+import { SpendService, type ReservationStatus } from "./spend-service.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   AdapterRegistry,
@@ -337,20 +332,19 @@ export class AldusContext {
    * thing that holds it, and the gateway authorizes before it calls.
    */
   /**
-   * The operator console for this invocation's established identity (#155 step 5).
+   * Reservation status for a Run — read-only, and the whole of the supported spend surface.
    *
-   * The actor comes from the context — which the CLI and Remote Control set from the invocation
-   * they authenticated — and never from a caller. This is the only supported way to obtain a
-   * console: the class value is unexported, so a caller cannot construct one with an actor it
-   * chose.
+   * There is deliberately no `operatorConsole()` here. Reconciliation releases authorization for
+   * money, and the only identity this composition has is `AldusContextOptions.actor`, which the
+   * CLI fills from the `--actor` flag or `ALDUS_ACTOR`. That is an attribution convention: it says
+   * who a command claims to be, and nothing authenticates it. Handing it to a reconciliation would
+   * have made "a human decided this" a fact derived from a string the caller chose.
    *
-   * @throws {AldusError} when no actor is established, or the established actor is not a human.
+   * So status ships and reconciliation does not. `SpendService.reconcile` exists and requires an
+   * authority no public surface can mint, which makes it unreachable rather than weakly guarded —
+   * until Aldus has a boundary that establishes operator identity or human presence, at which
+   * point that boundary becomes the mint.
    */
-  operatorConsole(): OperatorSpendConsole {
-    return openOperatorConsole({ spend: this.#spend, actor: this.actor });
-  }
-
-  /** Reservation status for a Run, for readers that need it without a console. */
   spendStatus(runId: string): Promise<readonly ReservationStatus[]> {
     return this.#spend.status(runId);
   }

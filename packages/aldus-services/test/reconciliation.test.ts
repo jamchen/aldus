@@ -19,6 +19,9 @@ import { availableAuthorization, type SpendGrant } from "@aldus-runtime/gate-eng
 import type { CostRecordStore } from "../src/cost-store.js";
 import { openOperatorConsole, SpendService } from "../src/spend-service.js";
 
+/** The store returns `SpendReservation | undefined`; every call site here knows it exists. */
+type SpendReservationLike = Parameters<SpendService["reconcile"]>[0];
+
 const HUMAN: ActorRef = { kind: "human", id: "operator-a" };
 const AGENT: ActorRef = { kind: "agent", id: "claude" };
 const RUN = "run-a";
@@ -524,6 +527,16 @@ describe("#152 — the provider may have executed and the cost write failed", ()
     expect(entry?.unresolvedReason).toContain("settlement persistence failed");
     expect(entry?.providerRequestId).toBe("provider-request-9");
     expect(entry?.execution?.backendVersion).toBe("1.0.0");
+    // The unrecorded charge is named, not counted. A human is told which observation to look up
+    // with the provider rather than how many to reconstruct from the sentence above.
+    expect(entry?.pendingObservations).toEqual([
+      {
+        observationId: `${identified.reservationId}:cost:0`,
+        provider: "provider-a",
+        operation: "completion",
+      },
+    ]);
+    expect(entry?.durableCosts).toEqual([]);
 
     // A human resolves it from that surfaced state, through the operator console.
     const operator = openOperatorConsole({
@@ -537,12 +550,14 @@ describe("#152 — the provider may have executed and the cost write failed", ()
       resolution: {
         kind: "settled_with_amount",
         amount: { amount: "1.0000", currency: "USD" },
-        provider: "provider-a",
-        billedOperation: "completion",
+        observationId: `${identified.reservationId}:cost:0`,
       },
     });
 
     expect(resolved.reservation.status).toBe("settled");
+    // The record lands under the identity the failed write would have used, so reconciling twice
+    // rewrites one record rather than adding a second.
+    expect(resolved.costs[0]?.costId).toBe(`${identified.reservationId}:cost:0`);
     // Truthful attribution: the provider that charged, and the authorization it drew on.
     expect(resolved.costs[0]?.provider).toBe("provider-a");
     expect(resolved.costs[0]?.operation).toBe("completion");
@@ -803,5 +818,312 @@ describe("unknown billing is counted by the absence of an actual amount", () => 
     );
 
     expect(entry?.unquantifiedUnknownBillingCount).toBe(1);
+  });
+});
+
+describe("a settlement that failed partway (#152)", () => {
+  /**
+   * Two observations, two providers, and a cost store that dies after the first.
+   *
+   * The shape the previous review rejected: carrying a count told an operator that one of two
+   * charges was unrecorded and nothing about which, so the only way to reconcile "the remainder"
+   * was to read an English sentence and guess. With two different providers there is no figure
+   * that describes the remainder — it is two charges, and attributing both to one provider is a
+   * fabricated record.
+   */
+  async function partiallySettled() {
+    const outcome = await spend.reserve({
+      grant,
+      operation: "agent.execute",
+      runId: RUN,
+      stageId: "outline.draft",
+      attemptId: "att-1",
+      effectKey: "effect-partial",
+      expectation: { kind: "estimated", amount: { amount: "2.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+
+    // Fails on the second append only, so observation 0 is genuinely durable.
+    let appended = 0;
+    const flaky: CostRecordStore = {
+      list: costs.list,
+      append: (runId, record) => {
+        appended += 1;
+        if (appended > 1) return Promise.reject(new Error("cost store unavailable"));
+        return costs.append(runId, record);
+      },
+    };
+    const flakySpend = new SpendService({
+      store,
+      costs: flaky,
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    await expect(
+      flakySpend.settle(
+        prepared,
+        [
+          {
+            provider: "provider-a",
+            operation: "completion",
+            billingStatus: "charged",
+            actual: { amount: "0.5000", currency: "USD" },
+          },
+          {
+            provider: "provider-b",
+            operation: "embedding",
+            billingStatus: "charged",
+            actual: { amount: "0.2500", currency: "USD" },
+          },
+        ],
+        {},
+      ),
+    ).rejects.toThrow(/cost store unavailable/);
+    return prepared.reservationId;
+  }
+
+  it("identifies the durable and the unrecorded portion across a restart", async () => {
+    const reservationId = await partiallySettled();
+
+    // A new service over the same directory: the operator comes back tomorrow, and everything
+    // they need is in the stream rather than in the process that failed.
+    const restarted = new SpendService({
+      store: new FileSpendReservationStore({ root }),
+      costs,
+      now: () => new Date("2026-01-02T00:00:00.000Z"),
+    });
+    const [entry] = (await restarted.status(RUN)).filter(
+      (item) => item.reservationId === reservationId,
+    );
+
+    expect(entry?.durableCosts).toEqual([
+      { costId: `${reservationId}:cost:0`, provider: "provider-a", operation: "completion" },
+    ]);
+    expect(entry?.pendingObservations).toEqual([
+      {
+        observationId: `${reservationId}:cost:1`,
+        provider: "provider-b",
+        operation: "embedding",
+      },
+    ]);
+  });
+
+  it("settles only the named portion, with neither loss nor double count", async () => {
+    const reservationId = await partiallySettled();
+    const restarted = new SpendService({
+      store: new FileSpendReservationStore({ root }),
+      costs,
+      now: () => new Date("2026-01-02T00:00:00.000Z"),
+    });
+    const operator = openOperatorConsole({ spend: restarted, actor: HUMAN });
+    const stuck = await store.get(reservationId);
+
+    const resolved = await operator.reconcile(stuck as NonNullable<typeof stuck>, {
+      evidenceRef: "provider-b invoice line 7",
+      decisionId: "dec-partial",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.2500", currency: "USD" },
+        observationId: `${reservationId}:cost:1`,
+      },
+    });
+
+    // Who charged comes from the observation, not from the operator: provider-b billed it, and a
+    // decision that could name a provider could name the wrong one.
+    expect(resolved.costs[0]?.provider).toBe("provider-b");
+    expect(resolved.costs[0]?.operation).toBe("embedding");
+    expect(resolved.costs[0]?.costId).toBe(`${reservationId}:cost:1`);
+    expect(resolved.reservation.status).toBe("settled");
+
+    // Neither loss nor double count: two records, one per observation, summing to what was
+    // actually charged. The durable one was not rewritten and the pending one was not added twice.
+    const mine = costs.records.filter((record) => record.reservationId === reservationId);
+    expect(mine.map((record) => record.costId).sort()).toEqual([
+      `${reservationId}:cost:0`,
+      `${reservationId}:cost:1`,
+    ]);
+    expect(
+      mine.reduce((total, record) => total + Number(record.actual?.amount ?? 0), 0),
+    ).toBeCloseTo(0.75, 4);
+
+    const [entry] = (await restarted.status(RUN)).filter(
+      (item) => item.reservationId === reservationId,
+    );
+    expect(entry?.pendingObservations).toEqual([]);
+  });
+
+  it("refuses a settlement that does not say which charge it covers", async () => {
+    const reservationId = await partiallySettled();
+    const stuck = await store.get(reservationId);
+    await expect(
+      console_.reconcile(stuck as NonNullable<typeof stuck>, {
+        evidenceRef: "provider statement",
+        decisionId: "dec-unnamed",
+        resolution: {
+          kind: "settled_with_amount",
+          amount: { amount: "0.2500", currency: "USD" },
+          provider: "provider-b",
+          billedOperation: "embedding",
+        },
+      }),
+    ).rejects.toThrow(/must name which one it covers/);
+  });
+
+  it("refuses to settle an observation that is already durable", async () => {
+    // The double count, attempted directly. Observation 0 was written before the failure, so it
+    // is not pending, and settling it again would put a second record against one charge.
+    const reservationId = await partiallySettled();
+    const stuck = await store.get(reservationId);
+    await expect(
+      console_.reconcile(stuck as NonNullable<typeof stuck>, {
+        evidenceRef: "provider statement",
+        decisionId: "dec-dup",
+        resolution: {
+          kind: "settled_with_amount",
+          amount: { amount: "0.5000", currency: "USD" },
+          observationId: `${reservationId}:cost:0`,
+        },
+      }),
+    ).rejects.toThrow(/is not awaiting a record/);
+  });
+
+  it("keeps the reservation unresolved while a second observation is still pending", async () => {
+    // Three observations, two unrecorded. Settling one must not release authorization for the
+    // other — the release-before-durable ordering ADR-0044 forbids, one observation over.
+    const outcome = await spend.reserve({
+      grant,
+      operation: "agent.execute",
+      runId: RUN,
+      stageId: "outline.draft",
+      attemptId: "att-1",
+      effectKey: "effect-three",
+      expectation: { kind: "estimated", amount: { amount: "2.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+    const flaky: CostRecordStore = {
+      list: costs.list,
+      append: () => Promise.reject(new Error("cost store unavailable")),
+    };
+    const flakySpend = new SpendService({
+      store,
+      costs: flaky,
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    await expect(
+      flakySpend.settle(
+        prepared,
+        [
+          {
+            provider: "provider-a",
+            operation: "completion",
+            billingStatus: "charged",
+            actual: { amount: "0.5000", currency: "USD" },
+          },
+          {
+            provider: "provider-b",
+            operation: "embedding",
+            billingStatus: "charged",
+            actual: { amount: "0.2500", currency: "USD" },
+          },
+        ],
+        {},
+      ),
+    ).rejects.toThrow();
+
+    const id = prepared.reservationId;
+    const first = await console_.reconcile((await store.get(id)) as SpendReservationLike, {
+      evidenceRef: "provider-a invoice line 1",
+      decisionId: "dec-a",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.5000", currency: "USD" },
+        observationId: `${id}:cost:0`,
+      },
+    });
+    expect(first.reservation.status).toBe("billing_unknown");
+
+    const second = await console_.reconcile((await store.get(id)) as SpendReservationLike, {
+      evidenceRef: "provider-b invoice line 2",
+      decisionId: "dec-b",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.2500", currency: "USD" },
+        observationId: `${id}:cost:1`,
+      },
+    });
+    expect(second.reservation.status).toBe("settled");
+    expect(
+      costs.records
+        .filter((record) => record.reservationId === id)
+        .map((record) => record.provider)
+        .sort(),
+    ).toEqual(["provider-a", "provider-b"]);
+  });
+});
+
+describe("re-recording one decision as the clock advances", () => {
+  it("is idempotent for an investigation that ended unresolved", async () => {
+    // `#transition` stamps a fresh `at`, and the store compares an existing transition id
+    // byte-for-byte. Without a presence-and-digest check that made a retry a permanent conflict:
+    // the same finding, recorded a minute later, could never be re-recorded.
+    let tick = 0;
+    const advancing = new SpendService({
+      store,
+      costs,
+      now: () => new Date(Date.UTC(2026, 0, 1, 0, tick++)),
+    });
+    const operator = openOperatorConsole({ spend: advancing, actor: HUMAN });
+    const reservation = await unresolved("effect-clock");
+
+    const input = {
+      evidenceRef: evidence,
+      decisionId: "dec-clock",
+      resolution: { kind: "investigation_ended" as const },
+    };
+    await operator.reconcile(reservation, input);
+    const again = await operator.reconcile(reservation, input);
+
+    expect(again.reservation.status).toBe("billing_unknown");
+    const [entry] = (await advancing.status(RUN)).filter(
+      (item) => item.reservationId === reservation.reservationId,
+    );
+    // Once, not twice. A second entry would tell a later investigator two people looked.
+    expect(
+      entry?.reconciliationHistory.filter((item) => item.outcome === "audit_only"),
+    ).toHaveLength(1);
+  });
+
+  it("still refuses the same decision id carrying a changed finding", async () => {
+    let tick = 0;
+    const advancing = new SpendService({
+      store,
+      costs,
+      now: () => new Date(Date.UTC(2026, 0, 1, 0, tick++)),
+    });
+    const operator = openOperatorConsole({ spend: advancing, actor: HUMAN });
+    const reservation = await unresolved("effect-clock-2");
+
+    await operator.reconcile(reservation, {
+      evidenceRef: evidence,
+      decisionId: "dec-clock-2",
+      resolution: { kind: "investigation_ended" },
+    });
+    await expect(
+      operator.reconcile(reservation, {
+        evidenceRef: "a different statement entirely",
+        decisionId: "dec-clock-2",
+        resolution: { kind: "investigation_ended" },
+      }),
+    ).rejects.toThrow(/carrying different contents|already carries/);
   });
 });

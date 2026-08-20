@@ -315,7 +315,17 @@ const ALLOWED_AFTER: Record<string, readonly SpendTransitionKind[]> = {
   // Terminal. A reservation that stopped consuming authorization never resumes.
   "reservation.settled": [],
   "reservation.released": [],
-  "reservation.reconciled": ["reservation.settled", "reservation.released"],
+  // Repeatable, because one reservation may hold several independently billed observations. A
+  // partial settlement failure leaves each unwritten observation needing its own decision — they
+  // can have different providers, and one record cannot name two. The reservation stays
+  // `billing_unknown` until the last one is resolved, so a decision covering observation A does
+  // not release authorization for B.
+  "reservation.reconciled": [
+    "reservation.reconciled",
+    "reservation.investigation_recorded",
+    "reservation.settled",
+    "reservation.released",
+  ],
 };
 
 /** Why a proposed transition is not legal for the current stream. */
