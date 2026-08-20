@@ -11,6 +11,8 @@
  * first (ADR-0035).
  */
 
+import type { CostObservation } from "@aldus-runtime/core";
+
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
 
 /** What a Worker can do (contract §10, §11). */
@@ -87,6 +89,16 @@ export interface WorkerResult<O = unknown> {
    * Redacted before it reaches a durable record (§19.2), like any other adopter-supplied value.
    */
   details?: Readonly<Record<string, unknown>>;
+  /**
+   * What this invocation was charged (contract §19.3; #107).
+   *
+   * The same observation contract an `AgentBackend` reports, deliberately — §3.2's Workers
+   * include TTS invocation and rendering, which are paid, and a Worker that knows what it spent
+   * must be able to say so through the same channel rather than a parallel one.
+   *
+   * Billing facts only; the Runtime supplies the attribution.
+   */
+  costs?: readonly CostObservation[];
 }
 
 /**
