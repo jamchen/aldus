@@ -29,6 +29,19 @@ import { describe, expect, it } from "vitest";
 
 import { fixtureId, loadValidFixtures } from "../src/fixtures.js";
 
+/**
+ * One minor version above the current one.
+ *
+ * Derived rather than written. This was the literal `"1.9"`, which was newer until the release
+ * that made it current — at which point a forward-compatibility test was asserting forwardness
+ * against the version in the tree. A version literal in a version test goes stale on exactly the
+ * change it exists to cover (ADR-0031).
+ */
+function nextMinor(version: string): string {
+  const [major, minor] = version.split(".").map(Number) as [number, number];
+  return `${major}.${minor + 1}`;
+}
+
 const validFixtures = loadValidFixtures();
 const versionedFixtures = validFixtures.filter((fixture) =>
   isVersionedSchemaName(fixture.entry.schema),
@@ -167,7 +180,7 @@ describe("forward compatibility", () => {
   it("classifies a newer minor version as forward and still reads it", () => {
     for (const fixture of versionedFixtures) {
       const name = fixture.entry.schema as VersionedSchemaName;
-      const result = validateRecord(name, withVersion(fixture.record, "1.9"));
+      const result = validateRecord(name, withVersion(fixture.record, nextMinor(SCHEMA_VERSION)));
       expect(result.ok, `${name} could not read a 1.9 record`).toBe(true);
       if (result.ok) expect(result.compatibility).toBe("forward");
     }

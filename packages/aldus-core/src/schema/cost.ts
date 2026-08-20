@@ -104,6 +104,18 @@ const costFields = z.object({
   authorizationId: nonEmptyString.optional(),
   /** Provider-side request identifier, for reconciliation (contract §15). */
   providerRequestId: nonEmptyString.optional(),
+  /**
+   * The reservation this charge settles (ADR-0044).
+   *
+   * The other half of `SpendReservation.costIds`, so lineage is navigable from either end —
+   * reconciliation starts from whichever record survived.
+   *
+   * Runtime-supplied, exactly like {@link authorizationId}: a backend that could name its own
+   * reservation could name one that did not authorize it. Optional **only** for records written
+   * before the reservation protocol existed; absent reads as *predates reservations*, never as
+   * *unreserved and therefore unauthorized*.
+   */
+  reservationId: nonEmptyString.optional(),
   /** When this record was written. */
   recordedAt: iso8601,
 });

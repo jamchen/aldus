@@ -412,6 +412,14 @@ export class StageRunner {
     // Counted per attempt: `keyScope: "stage"` is a claim about how many effects this attempt
     // performs, and nothing but a count can check it.
     let effectfulInvocations = 0;
+    // Every invocation, effectful or not (#148). Recording only the effectful ones would leave an
+    // auditor unable to tell a stage that declared no effects from one that predates the field.
+    const workerInvocations: {
+      workerId: string;
+      workerVersion: string;
+      effect: string;
+      idempotencyKey?: string;
+    }[] = [];
     const notes: string[] = [];
 
     // Two keys, because they are two contracts (ADR-0036). The invocation key fingerprints the
@@ -590,6 +598,15 @@ export class StageRunner {
             );
           }
         }
+        workerInvocations.push({
+          workerId: request.workerId,
+          workerVersion: request.workerVersion,
+          effect: effect.kind,
+          ...(request.effect.kind === "deduplicated"
+            ? { idempotencyKey: request.effect.idempotencyKey }
+            : {}),
+        });
+
         const registry = this.#options.workers;
         // Refuses rather than doing nothing. A capability that exists on the context and is
         // unreachable from every stage is #67 exactly, and a Worker seam nothing wired would be
@@ -704,8 +721,19 @@ export class StageRunner {
     // and a value captured earlier silently drops whatever came after it. An advisory evaluation
     // finding lost that way would leave a green record that looks like semantic correctness, which
     // is the one thing §12 says a green record never means.
-    const withNotes = (): AttemptMetadata =>
-      notes.length > 0 ? { ...metadata, notes: [...notes] } : metadata;
+    const withNotes = (): AttemptMetadata => ({
+      ...metadata,
+      ...(notes.length > 0 ? { notes: [...notes] } : {}),
+      // Late-bound like the notes, and for the same reason: invocations accumulate right up to the
+      // point a stage settles, and a value captured earlier silently drops whatever came after it.
+      ...(workerInvocations.length > 0
+        ? {
+            workerInvocations: redact(
+              workerInvocations.map((entry) => ({ ...entry })),
+            ) as typeof workerInvocations,
+          }
+        : {}),
+    });
 
     if (controller.signal.aborted) {
       return this.#terminal(manifest, definition, settled, withNotes(), {

@@ -66,11 +66,13 @@ export {
 
 export {
   SPEND_LIMIT_SUBJECT_KEY,
+  availableAuthorization,
   checkSpend,
   computeLedger,
   consumesBudget,
   costRecordDraw,
   grantLimitsDigest,
+  type SpendAvailability,
   type SpendCheck,
   type SpendGrant,
   type SpendLedger,
