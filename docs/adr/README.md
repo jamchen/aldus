@@ -56,3 +56,4 @@ Rules:
 | [0037](0037-an-evaluator-failing-and-an-evaluator-finding-a-defect-are-different-events.md) | An evaluator failing and an evaluator finding a defect are different events                | Accepted | #115              |
 | [0038](0038-a-take-records-what-was-planned-and-what-was-observed.md)                       | A take records what was requested and what produced the bytes, side by side                | Accepted | #133              |
 | [0039](0039-delivery-is-a-third-fact-and-paidness-comes-from-charge-evidence.md)            | Delivery is a third fact, and paidness comes from charge evidence                          | Accepted | #136              |
+| [0040](0040-a-stage-declares-what-it-owes-the-registry.md)                                  | A stage declares what it owes the registry, resolved before it runs                        | Accepted | #138              |

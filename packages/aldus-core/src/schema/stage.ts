@@ -61,6 +61,30 @@ export const stageAttemptSchema = z
     inputArtifacts: z.array(artifactRefSchema).max(4096),
     /** Artifacts produced (contract §11 "produce declared outputs or a structured failure"). */
     outputArtifacts: z.array(artifactRefSchema).max(4096),
+    /**
+     * What the runner expected this attempt to register, resolved before it ran (ADR-0040).
+     *
+     * §20 asks what the runner expected **at that time**. The expectation comes from a resolver —
+     * a function whose answer changes with a later edit — so a trace holding only the outcome
+     * could not tell "the stage failed to produce it" from "the rule changed afterwards".
+     *
+     * Absent on attempts recorded before ADR-0040, and on stages declaring `produces: "none"`.
+     * Absent reads as *nothing recorded an expectation*, never as *nothing was expected*: that
+     * conflation is the defect this field exists to end.
+     */
+    expectedArtifacts: z
+      .array(
+        z.object({
+          /** Adopter-defined artifact kind, opaque to Core (§4.2). */
+          kind: nonEmptyString,
+          /** Fewest registrations that satisfy the contract. */
+          minCount: z.number().int().min(0),
+          /** Most permitted. Absent means unbounded. */
+          maxCount: z.number().int().min(0).optional(),
+        }),
+      )
+      .max(1024)
+      .optional(),
     /** When the attempt began. Absent while still `queued`. */
     startedAt: iso8601.optional(),
     /** When the attempt reached a terminal state. Absent while still in flight. */

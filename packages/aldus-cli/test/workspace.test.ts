@@ -93,6 +93,7 @@ async function writeConfig(
       "const stageFor = (workspace) => ({",
       "  id: workspace.split('/').pop(),",
       '  version: "1",',
+      "  artifacts: { produces: 'none' },",
       "  idempotency: { kind: 'idempotent' },",
       "  requiredCapabilities: [],",
       "  inputSchema: { safeParse: (value) => ({ success: true, data: value }) },",

@@ -38,6 +38,7 @@ function invokingStage(worker: { id: string; version: string }, required: string
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" as const },
     execute: async (context: {
       runWorker: (request: Record<string, unknown>) => Promise<{ output: unknown }>;

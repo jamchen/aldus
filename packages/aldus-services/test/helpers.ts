@@ -90,6 +90,7 @@ export function passthroughStage(id: string, version = "1"): StageDefinition<unk
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     execute: (_context, input): Promise<StageOutcome<unknown>> =>
       Promise.resolve({ kind: "completed", output: input }),
@@ -113,6 +114,7 @@ export function failingStage(
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     retryPolicy: { maxAttempts: 1 },
     execute: (): Promise<StageOutcome<unknown>> =>
@@ -137,6 +139,7 @@ export function gatedStage(
     inputSchema: anySchema,
     outputSchema: anySchema,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     execute: (): Promise<StageOutcome<unknown>> =>
       Promise.resolve({ kind: "gate_required", gateId, subjectHashes: [] }),

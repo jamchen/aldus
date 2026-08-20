@@ -46,6 +46,9 @@ import {
   type StageOutputRegistration,
   type StageRunResult,
   deriveInvocationKey,
+  resolveArtifactContract,
+  checkArtifactContract,
+  type ArtifactObligation,
   type StageWorkerRequest,
   type EvaluationFinding,
 } from "./definition.js";
@@ -238,6 +241,15 @@ export class StageRunner {
     const configurationHash = digestJson(configuration);
     const inputArtifacts = [...(options.inputArtifacts ?? [])];
 
+    // Resolved before execution, from the validated invocation only (ADR-0040). Once per run
+    // rather than per attempt, because the obligation is a property of what was asked for, not of
+    // how many times it was tried.
+    const expectedArtifacts = resolveArtifactContract(definition, {
+      input: parsedInput.data,
+      configuration,
+      inputArtifacts,
+    });
+
     await this.#assertClaimable(runId, definition, options.force ?? false);
 
     const maxAttempts = Math.max(1, definition.retryPolicy?.maxAttempts ?? 1);
@@ -252,6 +264,7 @@ export class StageRunner {
         configuration,
         configurationHash,
         inputArtifacts,
+        ...(expectedArtifacts === undefined ? {} : { expectedArtifacts }),
         ordinal,
         ...(options.signal !== undefined ? { signal: options.signal } : {}),
       });
@@ -386,6 +399,7 @@ export class StageRunner {
     configuration: Record<string, unknown>;
     configurationHash: string;
     inputArtifacts: ArtifactRef[];
+    expectedArtifacts?: readonly ArtifactObligation[];
     ordinal: number;
     signal?: AbortSignal;
   }): Promise<StageRunResult<O>> {
@@ -445,6 +459,11 @@ export class StageRunner {
       actor: this.#options.actor,
       inputArtifacts: input.inputArtifacts,
       outputArtifacts: [],
+      // Recorded on the attempt as it is created, so §20 can answer what was expected even if the
+      // stage crashes before producing anything.
+      ...(input.expectedArtifacts === undefined
+        ? {}
+        : { expectedArtifacts: input.expectedArtifacts.map((entry) => ({ ...entry })) }),
     };
 
     await this.#record(manifest, definition, base, metadata, {
@@ -743,6 +762,47 @@ export class StageRunner {
             "output schema (contract §11).",
           retryable: false,
           details: { stageId: definition.id, stageVersion: definition.version },
+        },
+      });
+    }
+
+    // §11's "produce declared outputs or a structured failure", for the half that lives in the
+    // registry rather than the return value (ADR-0040). Checked here, on the way to `succeeded`,
+    // and deliberately not on the failed, cancelled or gate-halted paths: a stage that stopped
+    // halfway owes nothing, and demanding a complete artifact set from an incomplete attempt would
+    // turn every ordinary failure into two.
+    const breaches = checkArtifactContract(input.expectedArtifacts, settled.outputArtifacts);
+    if (breaches.length > 0) {
+      // The artifacts already registered stay on the attempt. They are evidence of how far the
+      // stage got, and the diagnosis this failure exists to enable needs them.
+      return this.#terminal(manifest, definition, settled, withNotes(), {
+        status: "failed",
+        invocationKey,
+        error: {
+          code: StageRunnerErrorCodes.STAGE_ARTIFACT_CONTRACT_UNMET,
+          category: "validation",
+          message:
+            `Stage "${definition.id}" produced a value but did not satisfy the artifact contract ` +
+            `resolved for this invocation (contract §8.1, §11): ` +
+            breaches
+              .map((breach) =>
+                breach.reason === "undeclared"
+                  ? `registered ${breach.registered} artifact(s) of undeclared kind "${breach.kind}"`
+                  : `kind "${breach.kind}" registered ${breach.registered} time(s), expected ` +
+                    `at least ${breach.expected?.minCount ?? 0}` +
+                    (breach.expected?.maxCount === undefined
+                      ? ""
+                      : ` and at most ${breach.expected.maxCount}`),
+              )
+              .join("; ") +
+            ". Suspect the declaration before the stage: a kind that was never going to be " +
+            "registered is the likelier cause than a stage that stopped registering one.",
+          retryable: false,
+          details: {
+            stageId: definition.id,
+            stageVersion: definition.version,
+            breaches: breaches.map((breach) => ({ ...breach })),
+          },
         },
       });
     }

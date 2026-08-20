@@ -71,16 +71,18 @@ list.
 
 ## §19 Reliability, security, governance
 
-| Clause                                           | Contract                        | Enforced at                  | Proven by                                           |
-| ------------------------------------------------ | ------------------------------- | ---------------------------- | --------------------------------------------------- |
-| §19.1 idempotency keys for external effects      | `stage-runner:StageIdempotency` | `stage-runner:StageRegistry` | `packages/aldus-stage-runner/test/retry.test.ts`    |
-| §19.1 the same, for release operations           | `release:deriveIdempotencyKey`  | `release:ReleaseExecutor`    | `packages/aldus-release/test/resume.test.ts`        |
-| §19.1 cancellation reaches a running operation   | `stage-runner:WorkerRequest`    | `stage-runner:StageRunner`   | `packages/aldus-stage-runner/test/doubles.test.ts`  |
-| §19.2 mutating actions record actor identity     | `core:actorRefSchema`           | `services:requireActor`      | `packages/aldus-services/test/services.test.ts`     |
-| §19.2 logs redact credentials                    | `core:redact`                   | `core:redact`                | `packages/aldus-core/test/redaction.test.ts`        |
-| §19.2 validation errors carry no received value  | `core:StructuredError`          | `core:validate`              | `packages/aldus-core/test/validate.test.ts`         |
-| §19.2 private packs never required by Core tests | `core:knowledge`                | boundary test                | `packages/aldus-e2e/test/boundary.test.ts`          |
-| §19.3 a backend can report what it was charged   | `core:costObservationSchema`    | `core:costObservationSchema` | `packages/aldus-core/test/cost-observation.test.ts` |
+| Clause                                               | Contract                                | Enforced at                  | Proven by                                                    |
+| ---------------------------------------------------- | --------------------------------------- | ---------------------------- | ------------------------------------------------------------ |
+| §11 a stage produces its declared artifacts or fails | `stage-runner:StageArtifactDeclaration` | `stage-runner:StageRunner`   | `packages/aldus-stage-runner/test/artifact-contract.test.ts` |
+| §8.1 an absent artifact declaration is refused       | `stage-runner:StageArtifactDeclaration` | `stage-runner:StageRegistry` | `packages/aldus-stage-runner/test/artifact-contract.test.ts` |
+| §19.1 idempotency keys for external effects          | `stage-runner:StageIdempotency`         | `stage-runner:StageRegistry` | `packages/aldus-stage-runner/test/retry.test.ts`             |
+| §19.1 the same, for release operations               | `release:deriveIdempotencyKey`          | `release:ReleaseExecutor`    | `packages/aldus-release/test/resume.test.ts`                 |
+| §19.1 cancellation reaches a running operation       | `stage-runner:WorkerRequest`            | `stage-runner:StageRunner`   | `packages/aldus-stage-runner/test/doubles.test.ts`           |
+| §19.2 mutating actions record actor identity         | `core:actorRefSchema`                   | `services:requireActor`      | `packages/aldus-services/test/services.test.ts`              |
+| §19.2 logs redact credentials                        | `core:redact`                           | `core:redact`                | `packages/aldus-core/test/redaction.test.ts`                 |
+| §19.2 validation errors carry no received value      | `core:StructuredError`                  | `core:validate`              | `packages/aldus-core/test/validate.test.ts`                  |
+| §19.2 private packs never required by Core tests     | `core:knowledge`                        | boundary test                | `packages/aldus-e2e/test/boundary.test.ts`                   |
+| §19.3 a backend can report what it was charged       | `core:costObservationSchema`            | `core:costObservationSchema` | `packages/aldus-core/test/cost-observation.test.ts`          |
 
 **Not yet enforced:** §19.3's composed path — nothing dispatches `AgentBackend.execute()`, so no
 cost observation is persisted as a `CostRecord` yet (#107). The contract exists and the composition

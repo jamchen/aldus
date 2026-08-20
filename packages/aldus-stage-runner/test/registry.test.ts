@@ -85,6 +85,7 @@ describe("StageRegistry", () => {
         requiredCapabilities: ["filesystem"],
         retryPolicy: { maxAttempts: 3 },
         costPolicy: { supportsPreview: true, requiresAuthorization: true },
+        artifacts: { produces: "none" },
         idempotency: { kind: "not_idempotent", reason: "issues a paid request" },
       }),
     );

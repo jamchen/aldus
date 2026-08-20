@@ -74,6 +74,154 @@ export interface StageEvaluationChannel {
 }
 
 /**
+ * Resolve what an invocation owes, before it runs (ADR-0040).
+ *
+ * Returns `undefined` for a stage declaring `produces: "none"` — distinct from an empty array,
+ * which is a `declared` stage whose resolver decided *this* invocation owes nothing. Both are
+ * satisfied by registering nothing; they differ in what the record says, and §20 cares.
+ */
+export function resolveArtifactContract<I>(
+  definition: Pick<StageDefinition<I, unknown>, "artifacts">,
+  context: ArtifactContractContext<I>,
+): readonly ArtifactObligation[] | undefined {
+  const declaration = definition.artifacts;
+  if (declaration.produces === "none") return undefined;
+  return declaration.resolve(context);
+}
+
+/** What a resolved artifact contract found wrong with a set of registrations (ADR-0040). */
+export interface ArtifactContractBreach {
+  kind: string;
+  reason: "missing" | "excess" | "undeclared";
+  /** How many of this kind were registered. */
+  registered: number;
+  /** The bound that was not met. Absent for `undeclared`, which has no bound to state. */
+  expected?: { minCount: number; maxCount?: number };
+}
+
+/**
+ * Compare what a stage registered against what it owed (contract §8.1, §11; ADR-0040).
+ *
+ * All three breaches matter, and the third is the one an author would not think to ask for: a kind
+ * registered that the contract does not declare is a stage doing something its declaration does
+ * not describe. Letting it through would make the declaration advisory, and an advisory
+ * declaration is worse than none because it reads as a check.
+ *
+ * Pure and derived on read. Nothing stores a breach — the attempt stores the expectation and the
+ * registrations, and this recomputes, so the two can never disagree.
+ */
+export function checkArtifactContract(
+  expected: readonly ArtifactObligation[] | undefined,
+  registered: readonly ArtifactRef[],
+): readonly ArtifactContractBreach[] {
+  const breaches: ArtifactContractBreach[] = [];
+  const counts = new Map<string, number>();
+  for (const artifact of registered) {
+    counts.set(artifact.kind, (counts.get(artifact.kind) ?? 0) + 1);
+  }
+
+  // A stage declaring `produces: "none"` owes nothing and may register nothing. Anything it did
+  // register is undeclared by definition.
+  const obligations = expected ?? [];
+  for (const obligation of obligations) {
+    const found = counts.get(obligation.kind) ?? 0;
+    if (found < obligation.minCount) {
+      breaches.push({
+        kind: obligation.kind,
+        reason: "missing",
+        registered: found,
+        expected: {
+          minCount: obligation.minCount,
+          ...(obligation.maxCount === undefined ? {} : { maxCount: obligation.maxCount }),
+        },
+      });
+    } else if (obligation.maxCount !== undefined && found > obligation.maxCount) {
+      breaches.push({
+        kind: obligation.kind,
+        reason: "excess",
+        registered: found,
+        expected: { minCount: obligation.minCount, maxCount: obligation.maxCount },
+      });
+    }
+  }
+
+  const declared = new Set(obligations.map((obligation) => obligation.kind));
+  for (const [kind, found] of counts) {
+    if (!declared.has(kind)) {
+      breaches.push({ kind, reason: "undeclared", registered: found });
+    }
+  }
+  return breaches;
+}
+
+/**
+ * One kind of artifact a stage owes the registry, and how many (contract §8.1, §11; ADR-0040).
+ *
+ * `kind` is an adopter-defined opaque string (§4.2). Aldus checks that *something claiming that
+ * kind* was registered; it cannot check that `"video"` is a video, and does not pretend to.
+ */
+export interface ArtifactObligation {
+  /** Adopter-defined artifact kind. Opaque to Core. */
+  kind: string;
+  /** Fewest registrations of this kind that satisfy the contract. `0` makes the kind permitted. */
+  minCount: number;
+  /** Most registrations permitted. Absent means unbounded. */
+  maxCount?: number;
+}
+
+/**
+ * What the resolver may see when deciding what a stage owes (ADR-0040).
+ *
+ * Exactly the validated invocation, and nothing else. The stage's return value and the artifacts
+ * it registered are **deliberately absent**: an obligation derived from what a stage produced is
+ * satisfied by construction, and the defect this exists to catch would define away its own
+ * postcondition — a stage that registered nothing would be found to have owed nothing.
+ *
+ * There is no filesystem or I/O access either. A mode that cannot be derived from these three is a
+ * hidden input and has to be made explicit before it can decide an obligation; letting the resolver
+ * read the world would make a contract depend on state nothing recorded, which is ADR-0036's defect
+ * in a new place.
+ */
+export interface ArtifactContractContext<I = unknown> {
+  /** The stage's input, after `inputSchema` validated it. */
+  readonly input: I;
+  /** The configuration recorded on this attempt (§11, §20). */
+  readonly configuration: Record<string, unknown>;
+  /** Artifacts declared as inputs to this invocation (§11). */
+  readonly inputArtifacts: readonly ArtifactRef[];
+}
+
+/**
+ * What a stage owes the registry (contract §8.1, §11; ADR-0040, #138).
+ *
+ * **Required on every stage, and `"none"` is written down.** An optional field left off by an
+ * author who forgot is indistinguishable from one left off by an author who meant it — and the
+ * whole defect being fixed is that an absence was unreadable. A stage that registered nothing
+ * settled `succeeded` with an empty artifact list, identical to a stage that correctly produced
+ * none, and an adopter's 34 MB video went unregistered on every render for months because a typo
+ * and a skipped output were the same observation.
+ *
+ * Making this required turns each existing stage into a decision someone made once, at a compiler
+ * error, which is the only moment the question is cheap.
+ */
+export type StageArtifactDeclaration<I = unknown> =
+  | {
+      /** This stage registers no artifacts. Stated, not inferred from an empty list. */
+      produces: "none";
+    }
+  | {
+      produces: "declared";
+      /**
+       * What this invocation owes, decided before the stage runs.
+       *
+       * Called once, after `inputSchema` validates and before `execute`. Returning an empty list
+       * is legal and means *this* invocation owes nothing — distinct from `"none"`, which says the
+       * stage never registers anything.
+       */
+      resolve(context: ArtifactContractContext<I>): readonly ArtifactObligation[];
+    };
+
+/**
  * A Stage's declaration that it executes an evaluator (contract §12; #115).
  *
  * Optional, and an ordinary Stage stays ordinary. What this prevents is an evaluator Stage
@@ -558,6 +706,13 @@ export interface StageDefinition<I = unknown, O = unknown> {
    * whose enforcement Aldus refuses to accept if the claim is internally inconsistent.
    */
   evaluation?: StageEvaluationDeclaration;
+  /**
+   * What this stage owes the artifact registry (§8.1, §11; ADR-0040).
+   *
+   * Required, and `{ produces: "none" }` is the explicit answer for a value-only stage. §11 permits
+   * no silent answer here for the same reason it permits none for {@link idempotency}.
+   */
+  artifacts: StageArtifactDeclaration<I>;
   /** Idempotency declaration. Required — §11 permits no silent answer. */
   idempotency: StageIdempotency;
   /**

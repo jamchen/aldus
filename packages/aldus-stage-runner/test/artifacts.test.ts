@@ -56,6 +56,10 @@ describe("registerOutput", () => {
     temp.registry.register(
       aStage({
         id: "stage-a",
+        artifacts: {
+          produces: "declared",
+          resolve: () => [{ kind: "ApprovedAudio", minCount: 1, maxCount: 1 }],
+        },
         execute: async (context) => {
           // Note what is *not* passed: no run id, no stage id, no code revision, no config hash.
           await context.registerOutput({
@@ -93,6 +97,10 @@ describe("registerOutput", () => {
     temp.registry.register(
       aStage({
         id: "stage-a",
+        artifacts: {
+          produces: "declared",
+          resolve: () => [{ kind: "RenderManifest", minCount: 1, maxCount: 1 }],
+        },
         execute: async (context) => {
           await context.registerOutput({
             path: "/tmp/out.bin",
@@ -116,6 +124,10 @@ describe("registerOutput", () => {
     temp.registry.register(
       aStage({
         id: "stage-a",
+        artifacts: {
+          produces: "declared",
+          resolve: () => [{ kind: "ApprovedAudio", minCount: 1, maxCount: 1 }],
+        },
         execute: async (context) => {
           await context.registerOutput({
             path: "/tmp/out.bin",
@@ -169,6 +181,10 @@ describe("registerOutput", () => {
     temp.registry.register(
       aStage({
         id: "stage-a",
+        artifacts: {
+          produces: "declared",
+          resolve: () => [{ kind: "ApprovedAudio", minCount: 1, maxCount: 1 }],
+        },
         execute: async (context) => {
           try {
             await context.registerOutput({
@@ -204,6 +220,10 @@ describe("recordOutput is unchanged", () => {
     temp.registry.register(
       aStage({
         id: "stage-a",
+        artifacts: {
+          produces: "declared",
+          resolve: () => [{ kind: "CanonicalScript", minCount: 1, maxCount: 1 }],
+        },
         execute: async (context) => {
           context.recordOutput(artifact);
           return { kind: "completed", output: undefined };
@@ -223,6 +243,10 @@ describe("recordOutput is unchanged", () => {
     temp.registry.register(
       aStage({
         id: "stage-a",
+        artifacts: {
+          produces: "declared",
+          resolve: () => [{ kind: "CanonicalScript", minCount: 1, maxCount: 1 }],
+        },
         execute: async (context) => {
           context.recordOutput(anArtifact());
           return { kind: "completed", output: undefined };

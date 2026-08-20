@@ -44,6 +44,30 @@ export class StageRegistry {
         },
       );
     }
+    // Refused at registration, for the same reason as the effect key below: the type already
+    // requires it, so this catches the definition that did not come through the type — built from
+    // configuration, or handed over by a JavaScript adopter (ADR-0040).
+    //
+    // A missing declaration must never be read as "no artifacts". That conflation is the entire
+    // defect: a stage that registered nothing settled `succeeded` with an empty list, identical to
+    // one that correctly produced none, and an adopter's 34 MB video went unregistered on every
+    // render because a typo and a skipped output were the same observation.
+    const declaration = definition.artifacts as { produces?: unknown } | undefined;
+    if (declaration?.produces !== "none" && declaration?.produces !== "declared") {
+      throw stageRunnerError(
+        StageRunnerErrorCodes.STAGE_ARTIFACT_DECLARATION_REQUIRED,
+        `Stage "${definition.id}" declares nothing about the artifacts it registers. Every stage ` +
+          'must state either `{ produces: "none" }` or an artifact contract (contract §8.1, §11, ' +
+          "ADR-0040). A stage that registers nothing says so explicitly, because an absent " +
+          "declaration and a deliberate absence of artifacts must not look the same.",
+        {
+          category: "validation",
+          retryable: false,
+          details: { stageId: definition.id, stageVersion: definition.version },
+        },
+      );
+    }
+
     // Refused at registration, before anything can run it (ADR-0036). The type already requires
     // `effectKey` on this arm, so this catches the definition that did not come through the type:
     // one built from configuration, or handed over by a JavaScript adopter. A stage that declares

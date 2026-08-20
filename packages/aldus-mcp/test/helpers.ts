@@ -68,6 +68,7 @@ export function freeStage(id = "stage-free"): StageDefinition<unknown, unknown> 
     inputSchema: undefined,
     outputSchema: undefined,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     execute: () => Promise.resolve({ kind: "completed", output: { done: true } }),
   } as unknown as StageDefinition<unknown, unknown>;
@@ -81,6 +82,7 @@ export function paidStage(id = "stage-paid"): StageDefinition<unknown, unknown> 
     inputSchema: undefined,
     outputSchema: undefined,
     requiredCapabilities: [],
+    artifacts: { produces: "none" },
     idempotency: { kind: "idempotent" },
     costPolicy: { supportsPreview: true, requiresAuthorization: true },
     execute: () => Promise.resolve({ kind: "completed", output: { done: true } }),
