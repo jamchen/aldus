@@ -263,6 +263,10 @@ Twelve authentications is therefore the floor for the current design, and it is 
 having no long-lived publishing credential anywhere. Do not re-investigate without new information
 from npm — the probe above is what to repeat.
 
+Recorded as [ADR-0042](adr/0042-promotion-stays-interactive.md), including the sunset date that
+schedules the next look: 2FA-bypass tokens are targeted to lose direct publishing capability in
+**January 2027**, which forces this question back open whatever is decided now.
+
 The script verifies every package against the registry afterwards and retries the read: `npm view`
 serves a cached path that lags a write by seconds, and checking immediately reports a healthy
 release as a partial failure — which is exactly what happened the first time `latest` moved.

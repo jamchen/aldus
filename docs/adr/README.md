@@ -58,3 +58,4 @@ Rules:
 | [0039](0039-delivery-is-a-third-fact-and-paidness-comes-from-charge-evidence.md)            | Delivery is a third fact, and paidness comes from charge evidence                          | Accepted | #136              |
 | [0040](0040-a-stage-declares-what-it-owes-the-registry.md)                                  | A stage declares what it owes the registry, resolved before it runs                        | Accepted | #138              |
 | [0041](0041-enumerated-findings-and-aggregate-reports-are-different-evidence.md)            | An enumerated finding and an aggregate report are different evidence                       | Accepted | #140              |
+| [0042](0042-promotion-stays-interactive.md)                                                 | Promotion to `latest` stays interactive, and no bypass token enters CI                     | Accepted | —                 |
