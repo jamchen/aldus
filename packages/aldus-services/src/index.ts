@@ -131,3 +131,11 @@ export {
   type CancelRunRequest,
   type StartRunRequest,
 } from "./services.js";
+
+export {
+  AgentExecutionService,
+  type AgentExecutionInput,
+  type AgentExecutionOptions,
+  type AgentExecutionResult,
+  type CostRecordStore,
+} from "./agent-execution.js";
