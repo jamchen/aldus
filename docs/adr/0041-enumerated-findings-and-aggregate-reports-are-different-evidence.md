@@ -25,11 +25,35 @@ They declared a third finding class at run granularity and wrote the limitation 
 Honest, and unreadable — prose in a field nothing parses. A consumer computing a defect rate counts
 one such finding as one defect, and it might stand for forty.
 
-They did not parse the vendored linters' stdout into per-finding shape, and their reason
-generalises past their case: §3.7 says wrap before rewriting, and those files are pinned
-byte-for-byte to a source commit so the evaluator versions in their corpus mean something. A parser
-over another program's human-facing output is a second implementation of that program's semantics,
-with nothing keeping the two in step and a silent failure mode the day a message changes.
+They did not parse the vendored linters' stdout into per-finding shape **in the stage**, and the
+reason matters, but not in the absolute form this ADR first recorded.
+
+The first draft said their reason "generalises past their case": a parser over another program's
+human-facing output is a second implementation of that program's semantics, with nothing keeping
+the two in step and a silent failure mode the day a message changes. They then corrected it against
+their own repository, which **has parsed all three vendored linters per finding since before this
+ADR**, deliberately, under a section headed _"Why this parses stdout instead of calling a
+function"_. Every number in their calibration record was produced that way.
+
+The defensible principle is narrower and turns on **where the parse sits relative to the production
+path**:
+
+- In an **evaluation harness**, parsing is the only honest option. `@aldus-runtime/regression`
+  does not run evaluators — outcomes are produced elsewhere — and measuring an evaluator against a
+  corpus _requires_ per-finding granularity. There is no other way to ask a vendored program that
+  prints and exits what it found. Their harness guards the direction that matters: it **refuses**
+  when a checker reports a count it cannot then locate, because a silent parse failure would record
+  "found nothing" for a checker that found something, which is the one error a calibration record
+  must never make.
+- In a **stage**, on the production path, the same parse decides what blocks a Run, and a wording
+  change upstream would silently change enforcement.
+
+So the rule is not "parsing is unsafe". It is that **a fragile parse is acceptable where its
+failure is loud and offline, and unacceptable where its failure is silent and gates work.**
+
+The absolute version is worth recording as a mistake rather than quietly narrowed: stated as
+written, an adopter would conclude their measurement harness must not parse either, which would
+leave them unable to calibrate anything they wrapped — the opposite of what §12.1 requires of them.
 
 **My proposed fix was wrong, and the ruling says why.** I proposed `granularity?: "site" | "run"`:
 
@@ -101,6 +125,19 @@ record: a record written under the old meaning was never claiming to be one.
 `scopeLimitations` stays. It records what an evaluator **cannot detect**, which is a different
 question from whether one observation is enumerated or aggregate. I had those blurred.
 
+### The measurability property is reachable from either end
+
+The adopter checked whether the regression defect this ADR fixes had reached their numbers. It had
+not: every flagged outcome across four recorded runs enumerates findings — 11 of 11, 14 of 14, 1 of
+1, 1 of 1 — so `categoryMismatch` was never computed over an empty category set and their
+calibration stands.
+
+The reason is worth recording, because it was not foresight about this defect. Their harness
+already refused to record a flag it could not localise, for its own reason: a silent parse failure
+must never look like a clean checker. That refusal and this ADR's `siteMetricsMeasurable` prevent
+the same state from opposite ends — one by declining to produce it, one by declining to score it —
+which suggests the property is real rather than an artefact of where either of us happened to look.
+
 ## Consequences
 
 - `StageOutcome`'s `evaluated` arm carries `observations` rather than `findings`, and
@@ -116,8 +153,11 @@ question from whether one observation is enumerated or aggregate. I had those bl
 
 - **`granularity?: "site" | "run"`.** Rejected in the ruling. Orthogonal to the property that
   matters, and optional, so absence would be one more unreadable silence.
-- **Parse vendored output into findings.** Rejected for the adopter's reason, recorded above. It
-  also relocates the problem: the parser's count would be presented as the evaluator's.
+- **Parse vendored output into findings, in the stage.** Rejected: on the production path a
+  wording change upstream would silently change what blocks a Run, and the parser's count would be
+  presented as the evaluator's. **Not** rejected in an evaluation harness, where the same parse is
+  the only way to obtain the per-finding granularity calibration needs and its failure is loud and
+  offline. See the narrowing above.
 - **Let a report carry a `count` the adopter estimates.** Rejected. An estimated count is a number
   that will be summed, and the whole finding here is that a number nobody can verify gets used as
   though it were one.
