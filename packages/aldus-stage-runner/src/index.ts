@@ -107,3 +107,10 @@ export {
   type RecordingWorker,
   type RecordingWorkerOptions,
 } from "./doubles.js";
+
+export type {
+  WorkerDispatchEvidence,
+  WorkerSpendController,
+  WorkerSpendReservation,
+  WorkerSpendReserveInput,
+} from "./worker-spend.js";

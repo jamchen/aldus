@@ -11,7 +11,7 @@
  * first (ADR-0035).
  */
 
-import type { CostObservation } from "@aldus-runtime/core";
+import type { CostObservation, Money } from "@aldus-runtime/core";
 
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
 
@@ -21,6 +21,32 @@ export interface WorkerCapabilities {
   offers: readonly string[];
   /** Ceiling on a single execution, if the Worker imposes one. */
   maxDurationMs?: number;
+  /**
+   * Whether this exact version reports what it was actually charged (§19.3; #107).
+   *
+   * Declared per version because a capability is a fact about the code that ran. A Worker that
+   * reports actual cost today says nothing about the request an earlier version made, and reading
+   * today's declaration back onto it would claim a protection that was not in force.
+   */
+  reportsActualCost?: boolean;
+  /** Whether this exact version reports an estimate before or alongside the charge (§19.3). */
+  reportsEstimatedCost?: boolean;
+  /**
+   * Whether this exact version **enforces** a spend ceiling it is handed (§13.2).
+   *
+   * A ceiling is passed only when this is true. Passing one to a Worker that ignores it would
+   * record a protection that does not exist (ADR-0030) — and the number itself always comes from
+   * the grant, never from the Worker, because a spender must not choose its own limit.
+   */
+  enforcesSpendCeiling?: boolean;
+  /**
+   * Whether this exact version can be asked, later, what a past request was charged (§19.3).
+   *
+   * Mirrors a billing capability rather than granting one: it tells an operator whether an unknown
+   * charge is answerable at the source, which is what a reconciliation needs to know before it
+   * starts.
+   */
+  supportsCostReconciliation?: boolean;
 }
 
 /**
@@ -87,6 +113,16 @@ export interface WorkerRequest<I = unknown> {
    * observe this rather than rely on {@link Worker.cancel}, which exists only for executions that
    * cannot see a signal at all.
    */
+  /**
+   * The ceiling this invocation may not exceed, when one applies (§13.2; #107).
+   *
+   * Present **only** when the grant supplied a per-request limit and this exact Worker version
+   * declared `enforcesSpendCeiling`. Absent otherwise — a Worker that ignores the field would
+   * otherwise be handed a number that reads, in the trace, like a protection that was applied.
+   *
+   * The value is the grant's, never the Worker's own claim: a spender must not choose its limit.
+   */
+  maxSpend?: Money;
   signal: AbortSignal;
 }
 

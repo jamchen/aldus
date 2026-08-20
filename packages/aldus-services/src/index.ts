@@ -148,3 +148,9 @@ export {
   type ReserveOutcome,
   type SpendServiceOptions,
 } from "./spend-service.js";
+
+export {
+  RuntimeWorkerSpendController,
+  type RuntimeWorkerSpendControllerOptions,
+  type WorkerSpendGrantProvider,
+} from "./worker-spend.js";

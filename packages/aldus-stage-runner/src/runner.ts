@@ -29,6 +29,7 @@ import {
   type ActorRef,
   type AldusEvent,
   type ArtifactRef,
+  type CostExpectation,
   type RunManifest,
   type StageAttempt,
   type StageStatus,
@@ -37,6 +38,7 @@ import {
 import type { EventStore, LockManager, RunStore } from "@aldus-runtime/file-store";
 
 import { assertCapabilities, type AgentBackend } from "./backend.js";
+import type { WorkerSpendController, WorkerSpendReservation } from "./worker-spend.js";
 import {
   isGateRequiredSignal,
   type ArtifactRecorder,
@@ -120,6 +122,16 @@ export interface StageRunnerOptions {
    * a recorder, and the same defect (#67) if it did not.
    */
   workers?: WorkerRegistry;
+  /**
+   * Reserves, settles and records what a paid Worker costs (§13.2, §19.3; #107, ADR-0046).
+   *
+   * A port rather than the service, so this package does not depend upward (§4.3). Optional
+   * because a composition whose Workers are all free needs none — but a Worker invocation
+   * declaring a paid expectation without one is **refused before dispatch**, not dispatched
+   * hopefully. Fail-closed is the point: a spend check that is skipped when its enforcer is
+   * unwired is a check whose presence depends on the configuration it exists to enforce.
+   */
+  workerSpend?: WorkerSpendController;
   /** Clock, injectable so tests produce reproducible timestamps. */
   now?: () => Date;
   /** Delay used between retries, injectable so tests do not wait. */
@@ -158,6 +170,7 @@ export class StageRunner {
     backend?: AgentBackend;
     artifacts?: ArtifactRecorder;
     workers?: WorkerRegistry;
+    workerSpend?: WorkerSpendController;
     now: () => Date;
     sleep: (ms: number) => Promise<void>;
     newAttemptId: () => string;
@@ -175,6 +188,7 @@ export class StageRunner {
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
       ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
       ...(options.workers !== undefined ? { workers: options.workers } : {}),
+      ...(options.workerSpend !== undefined ? { workerSpend: options.workerSpend } : {}),
       now: options.now ?? (() => new Date()),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       newAttemptId: options.newAttemptId ?? defaultNewAttemptId,
@@ -625,11 +639,91 @@ export class StageRunner {
         }
 
         const worker = registry.require(request.workerId, request.workerVersion);
-        assertWorkerCapabilities(await worker.capabilities(), request.requiredCapabilities ?? [], {
+        const workerCapabilities = await worker.capabilities();
+        assertWorkerCapabilities(workerCapabilities, request.requiredCapabilities ?? [], {
           stageId: definition.id,
           workerId: worker.id,
           workerVersion: worker.version,
         });
+
+        // Everything below happens **before** `worker.execute`. A refusal that arrives after the
+        // provider was called is not a refusal, and a Worker may be paid — §3.2's own examples are
+        // TTS invocation and rendering (#107).
+        //
+        // Checked for presence first, for the same reason `effect` is: the type requires it, so
+        // this catches the request built from configuration or written by a JavaScript adopter.
+        const declaration = (request as { spend?: { expectation?: { kind?: string } } }).spend;
+        const expectation = declaration?.expectation;
+        if (
+          expectation?.kind !== "free" &&
+          expectation?.kind !== "estimated" &&
+          expectation?.kind !== "unestimated"
+        ) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_SPEND_UNDECLARED,
+            `Stage "${definition.id}" invoked Worker "${request.workerId}" without declaring what ` +
+              'it is expected to cost. State `spend: { expectation: { kind: "free" } }`, or an ' +
+              "estimate with the operation and billing-effect identity that authorize it " +
+              "(§13.2, §19.3).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { stageId: definition.id, workerId: request.workerId },
+            },
+          );
+        }
+
+        const paid = expectation.kind !== "free";
+        const spendController = this.#options.workerSpend;
+        let reservation: WorkerSpendReservation | undefined;
+        if (paid) {
+          if (spendController === undefined) {
+            throw stageRunnerError(
+              StageRunnerErrorCodes.WORKER_SPEND_UNAVAILABLE,
+              `Stage "${definition.id}" invoked Worker "${request.workerId}" with a paid cost ` +
+                "expectation, and no spend controller is wired. Dispatching anyway would make " +
+                "the budget check depend on the configuration meant to enforce it (§13.2).",
+              {
+                category: "validation",
+                retryable: false,
+                details: { stageId: definition.id, workerId: request.workerId },
+              },
+            );
+          }
+          const paidDeclaration = declaration as unknown as {
+            operation: string;
+            billingEffectKey: string;
+          };
+          // Throws when no grant covers the operation, the scope excludes it, the budget is
+          // exhausted, or the grant's policy refuses an unestimated request. Committed, not
+          // checked: a check's answer is stale the moment another writer moves the stream.
+          reservation = await spendController.reserve({
+            operation: paidDeclaration.operation,
+            billingEffectKey: paidDeclaration.billingEffectKey,
+            expectation: expectation as Exclude<CostExpectation, { kind: "free" }>,
+            runId,
+            stageId: definition.id,
+            attemptId,
+            workerId: worker.id,
+            workerVersion: worker.version,
+          });
+        }
+
+        // A ceiling only where this exact Worker version says it enforces one, and the number is
+        // always the grant's. Passing one to a Worker that ignores it would record a protection
+        // that does not exist (ADR-0030); taking the number from the Worker would let the spender
+        // choose its own limit.
+        const enforcesCeiling = workerCapabilities.enforcesSpendCeiling === true;
+        const ceiling = reservation?.ceiling;
+        const appliedCeiling = enforcesCeiling && ceiling !== undefined ? ceiling : undefined;
+        if (reservation !== undefined && spendController !== undefined) {
+          reservation = await spendController.prepareDispatch(reservation, {
+            workerId: worker.id,
+            workerVersion: worker.version,
+            ceilingEnforced: appliedCeiling !== undefined,
+            ...(appliedCeiling === undefined ? {} : { appliedCeiling }),
+          });
+        }
 
         // §20: the trace names which implementation ran and what was checked of it, before it
         // runs. A Worker recorded only on success would leave a failed invocation unattributable.
@@ -640,28 +734,103 @@ export class StageRunner {
               : ""),
         );
 
-        const result = await worker.execute({
-          input: request.input,
-          runId,
-          episodeId: manifest.episode.episodeId,
-          stageId: definition.id,
-          attemptId,
-          configurationHash: input.configurationHash,
-          inputHashes: input.inputArtifacts.map((artifact) => artifact.sha256),
-          // Present only when this invocation declared a deduplicated effect and supplied its own
-          // key (#149). It used to be `effectKey ?? invocationKey`, which did the one thing
-          // ADR-0036 forbids in as many words: a fingerprint of declared work reaching an external
-          // system as a deduplication credential. For a stage with an empty input schema and no
-          // declared artifacts that fingerprint is a *constant*, so a platform deduplicating on it
-          // would treat every episode's first request as a repeat of the first episode's, forever.
-          //
-          // A stage-level key is not propagated here either. It has a different cardinality, and
-          // copying it onto every invocation is how N writes become one.
-          ...(request.effect.kind === "deduplicated"
-            ? { idempotencyKey: request.effect.idempotencyKey }
-            : {}),
-          signal: controller.signal,
-        });
+        const dispatched = async () =>
+          worker.execute({
+            input: request.input,
+            runId,
+            episodeId: manifest.episode.episodeId,
+            stageId: definition.id,
+            attemptId,
+            configurationHash: input.configurationHash,
+            inputHashes: input.inputArtifacts.map((artifact) => artifact.sha256),
+            // Present only when this invocation declared a deduplicated effect and supplied its own
+            // key (#149). It used to be `effectKey ?? invocationKey`, which did the one thing
+            // ADR-0036 forbids in as many words: a fingerprint of declared work reaching an external
+            // system as a deduplication credential. For a stage with an empty input schema and no
+            // declared artifacts that fingerprint is a *constant*, so a platform deduplicating on it
+            // would treat every episode's first request as a repeat of the first episode's, forever.
+            //
+            // A stage-level key is not propagated here either. It has a different cardinality, and
+            // copying it onto every invocation is how N writes become one.
+            ...(request.effect.kind === "deduplicated"
+              ? { idempotencyKey: request.effect.idempotencyKey }
+              : {}),
+            ...(appliedCeiling === undefined ? {} : { maxSpend: appliedCeiling }),
+            signal: controller.signal,
+          });
+
+        let result: WorkerResult<unknown>;
+        try {
+          result = await dispatched();
+        } catch (thrown) {
+          // After `prepareDispatch` a failure is not proof of no charge (ADR-0044). The
+          // reservation stays committed and the effect becomes non-retryable, because assuming a
+          // failed request cost nothing is how a budget is quietly exceeded (§19.3).
+          if (reservation !== undefined && spendController !== undefined) {
+            await spendController.markUnknown(
+              reservation,
+              `Worker "${worker.id}@${worker.version}" threw after dispatch, so whether it was ` +
+                "charged is unknown.",
+            );
+          }
+          throw thrown;
+        }
+
+        // Settlement, before the result reaches the stage. `WorkerResult.costs` used to be handed
+        // straight back and read by nothing — a Worker that knew what it spent had its answer
+        // discarded one line after the call (#107).
+        const observations = result.costs ?? [];
+        if (reservation !== undefined && spendController !== undefined) {
+          if (observations.length === 0) {
+            // Dispatched under a reservation and came back saying nothing about billing. The
+            // charge may have landed and nobody can measure it, so the reservation is retained
+            // and the effect becomes non-retryable rather than being released as free (§19.3).
+            await spendController.markUnknown(
+              reservation,
+              `Worker "${worker.id}@${worker.version}" was dispatched under a paid expectation ` +
+                "and returned no billing facts, so whether it was charged is unknown.",
+            );
+            throw stageRunnerError(
+              StageRunnerErrorCodes.WORKER_BILLING_UNKNOWN,
+              `Worker "${worker.id}@${worker.version}" was dispatched for stage ` +
+                `"${definition.id}" under a paid expectation and reported no cost. Retrying would ` +
+                "spend again on the assumption the first call was free (§19.3).",
+              {
+                category: "conflict",
+                retryable: false,
+                details: { stageId: definition.id, workerId: worker.id },
+              },
+            );
+          }
+          // Records are durable before authorization is released. The reverse would free the
+          // budget while the charge is absent from the record (ADR-0044).
+          await spendController.settle(reservation, observations);
+        } else if (observations.length > 0) {
+          // Declared free and charged anyway. Recorded so §20 can answer what the Run cost, and
+          // deliberately not attached to a grant: laundering it through one nobody consulted
+          // would invent an approval.
+          await spendController?.recordUnauthorized(
+            {
+              runId,
+              stageId: definition.id,
+              attemptId,
+              workerId: worker.id,
+              workerVersion: worker.version,
+            },
+            observations,
+          );
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_SPEND_UNAUTHORIZED,
+            `Stage "${definition.id}" declared Worker "${worker.id}" free and it reported a ` +
+              "charge. The charge is recorded, and no grant is credited with authorizing it — " +
+              "attaching one after the fact would invent an approval nobody gave (§13.2, §19.3).",
+            {
+              category: "policy",
+              retryable: false,
+              details: { stageId: definition.id, workerId: worker.id },
+            },
+          );
+        }
         return result as WorkerResult<WO>;
       },
       registerOutput: async (registration: StageOutputRegistration) => {

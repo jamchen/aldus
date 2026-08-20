@@ -38,6 +38,7 @@ const ADOPTER_SUPPLIED: Record<string, keyof AldusConfig> = {
   "workflow graph": "workflow",
   workers: "workers",
   "agent backend": "agentBackend",
+  "worker spend grants": "workerSpendGrants",
 };
 
 /**
