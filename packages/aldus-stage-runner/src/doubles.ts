@@ -17,7 +17,7 @@
 
 import { SCHEMA_VERSION, type CostObservation, type CostRecord } from "@aldus-runtime/core";
 
-import type { WorkerSpendController, WorkerSpendReserveInput } from "./worker-spend.js";
+import type { PaidDispatchController, PaidDispatchReserveInput } from "./paid-dispatch.js";
 
 import type { Worker, WorkerCapabilities, WorkerRequest, WorkerResult } from "./worker.js";
 
@@ -121,17 +121,17 @@ export function cancellableWorker(options: { id?: string; version?: string } = {
 }
 
 /** A spend controller that records rather than reserves, for tests and for free-only wirings. */
-export interface RecordingSpendController extends WorkerSpendController {
+export interface RecordingSpendController extends PaidDispatchController {
   /** Every cost record it was asked to persist, in order. */
   readonly written: CostRecord[];
   /** Reservations it committed. */
-  readonly reserved: WorkerSpendReserveInput[];
+  readonly reserved: PaidDispatchReserveInput[];
   /** Reasons it was asked to mark a reservation unresolved. */
   readonly unknown: string[];
 }
 
 /**
- * An in-memory {@link WorkerSpendController} that authorizes everything and records what happens.
+ * An in-memory {@link PaidDispatchController} that authorizes everything and records what happens.
  *
  * Exists because a Worker dispatch now requires a cost sink — a free declaration is a belief about
  * a provider, and without somewhere durable to put an unexpected charge the runtime cannot
@@ -143,7 +143,7 @@ export interface RecordingSpendController extends WorkerSpendController {
  */
 export function recordingSpendController(): RecordingSpendController {
   const written: CostRecord[] = [];
-  const reserved: WorkerSpendReserveInput[] = [];
+  const reserved: PaidDispatchReserveInput[] = [];
   const unknown: string[] = [];
   let next = 0;
 

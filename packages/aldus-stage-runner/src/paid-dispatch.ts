@@ -23,7 +23,7 @@
 import type { BillingStatus, CostObservation, CostRecord, Money } from "@aldus-runtime/core";
 
 /** A committed reservation, as the runner holds it. Opaque beyond what dispatch needs. */
-export interface WorkerSpendReservation {
+export interface PaidDispatchReservation {
   /** Identity, for attribution and for the trace (§20). */
   readonly reservationId: string;
   /**
@@ -37,7 +37,7 @@ export interface WorkerSpendReservation {
 }
 
 /** What the runner states before a potentially paid Worker invocation. */
-export interface WorkerSpendReserveInput {
+export interface PaidDispatchReserveInput {
   /** What the grant must authorize. An open string (§4.2). */
   operation: string;
   /** Identity of the independently billed effect, with per-charge cardinality (ADR-0043). */
@@ -47,14 +47,16 @@ export interface WorkerSpendReserveInput {
   runId: string;
   stageId: string;
   attemptId: string;
-  workerId: string;
-  workerVersion: string;
+  /** What performed the dispatch — a Worker id, a backend id. Dispatch evidence, not a grant key. */
+  dispatcherId: string;
+  /** Its exact version, never "latest" (§20). */
+  dispatcherVersion: string;
 }
 
 /** What was true of the dispatch, recorded before the provider call (ADR-0044). */
-export interface WorkerDispatchEvidence {
-  workerId: string;
-  workerVersion: string;
+export interface PaidDispatchEvidence {
+  dispatcherId: string;
+  dispatcherVersion: string;
   /** Whether a ceiling was applied *and* this exact Worker version enforces it. */
   ceilingEnforced: boolean;
   /** The ceiling actually passed, present only when it was. */
@@ -66,7 +68,7 @@ export interface WorkerDispatchEvidence {
  *
  * Every method takes attribution from the runner and none from the Worker.
  */
-export interface WorkerSpendController {
+export interface PaidDispatchController {
   /**
    * Commit authorization before anything is dispatched.
    *
@@ -75,13 +77,13 @@ export interface WorkerSpendController {
    * before `Worker.execute`, because a refusal that arrives after the provider was called is not a
    * refusal.
    */
-  reserve(input: WorkerSpendReserveInput): Promise<WorkerSpendReservation>;
+  reserve(input: PaidDispatchReserveInput): Promise<PaidDispatchReservation>;
 
   /** Record what the dispatch was, before it begins (ADR-0044). */
   prepareDispatch(
-    reservation: WorkerSpendReservation,
-    evidence: WorkerDispatchEvidence,
-  ): Promise<WorkerSpendReservation>;
+    reservation: PaidDispatchReservation,
+    evidence: PaidDispatchEvidence,
+  ): Promise<PaidDispatchReservation>;
 
   /**
    * Persist the Worker's billing facts as attributed records, then settle.
@@ -90,7 +92,7 @@ export interface WorkerSpendController {
    * absent from the record.
    */
   settle(
-    reservation: WorkerSpendReservation,
+    reservation: PaidDispatchReservation,
     observations: readonly CostObservation[],
   ): Promise<readonly CostRecord[]>;
 
@@ -102,7 +104,7 @@ export interface WorkerSpendController {
    * spend again on the assumption it did not.
    */
   markUnknown(
-    reservation: WorkerSpendReservation,
+    reservation: PaidDispatchReservation,
     reason: string,
     /**
      * Billing facts to persist before the reservation is marked unresolved.
@@ -120,7 +122,7 @@ export interface WorkerSpendController {
    *
    * Only before `prepareDispatch`. After it, a failure is not proof of no charge.
    */
-  releaseBeforeDispatch(reservation: WorkerSpendReservation, reason: string): Promise<void>;
+  releaseBeforeDispatch(reservation: PaidDispatchReservation, reason: string): Promise<void>;
 
   /**
    * Record a charge nothing authorized (§13.2, §19.3).

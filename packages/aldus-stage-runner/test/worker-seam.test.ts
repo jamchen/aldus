@@ -215,7 +215,7 @@ describe("a Worker invocation that expects to cost money (#107)", () => {
     const worker = recordingWorker();
     const workers = new WorkerRegistry();
     workers.register(worker);
-    const temp = await makeTempRun({ workers, workerSpend: false });
+    const temp = await makeTempRun({ workers, paidDispatch: false });
     temp.registry.register(paidStage());
 
     const result = await temp.runner.run(temp.manifest.runId, "stage-a", {});
@@ -272,7 +272,7 @@ describe("a Worker invocation that expects to cost money (#107)", () => {
     });
     const workers = new WorkerRegistry();
     workers.register(worker);
-    const temp = await makeTempRun({ workers, workerSpend: false });
+    const temp = await makeTempRun({ workers, paidDispatch: false });
     temp.registry.register(
       aStage({
         execute: async (context) => {

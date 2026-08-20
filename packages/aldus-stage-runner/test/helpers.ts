@@ -75,7 +75,7 @@ export interface TempRunOptions {
   /** Workers a stage may invoke (ADR-0035). Omitted so the unwired refusal stays testable. */
   workers?: WorkerRegistry;
   /** Pass `false` to omit the spend controller, exercising the unwired refusal. */
-  workerSpend?: false;
+  paidDispatch?: false;
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -109,8 +109,8 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
     // A Worker dispatch requires a cost sink, so a Worker that unexpectedly charges has somewhere
     // durable to go (#107). Supplied by default because these tests are about other things; the
     // refusal when one is absent has its own test.
-    ...(options.workers !== undefined && options.workerSpend !== false
-      ? { workerSpend: recordingSpendController() }
+    ...(options.workers !== undefined && options.paidDispatch !== false
+      ? { paidDispatch: recordingSpendController() }
       : {}),
     now: () => {
       clock += 1000;

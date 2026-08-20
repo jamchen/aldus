@@ -468,7 +468,7 @@ describe("an execution that cost nothing releases rather than settling", () => {
    * meaning for `released`, and this is it (ADR-0044).
    *
    * The fix lives in `SpendService`, so it applies to every paid path at once. These cover the
-   * shared implementation; `packages/aldus-e2e/test/worker-spend.test.ts` covers the Worker path
+   * shared implementation; `packages/aldus-e2e/test/paid-worker-dispatch.test.ts` covers the Worker path
    * through the composed stack, and `synthesis.test.ts` the synthesis one.
    */
   async function settleWith(billingStatus: "free" | "voided", effectKey: string) {

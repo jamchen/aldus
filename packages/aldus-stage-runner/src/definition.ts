@@ -309,7 +309,7 @@ export interface StageWorkerRequest<I = unknown> {
    * attribution, because a caller that names its own authorization can name one that did not
    * authorize it (§13.2).
    */
-  spend: WorkerSpendDeclaration;
+  spend: DispatchSpendDeclaration;
 }
 
 /**
@@ -320,7 +320,7 @@ export interface StageWorkerRequest<I = unknown> {
  * beside two optional fields — makes `{ kind: "unestimated" }` with no operation representable,
  * and that is a paid dispatch with nothing to check it against.
  */
-export type WorkerSpendDeclaration =
+export type DispatchSpendDeclaration =
   | {
       /**
        * Nothing will be charged for this invocation.

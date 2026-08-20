@@ -38,8 +38,8 @@ import {
 import type { EventStore, LockManager, RunStore } from "@aldus-runtime/file-store";
 
 import { assertCapabilities, type AgentBackend } from "./backend.js";
-import { isChargeBearing } from "./worker-spend.js";
-import type { WorkerSpendController, WorkerSpendReservation } from "./worker-spend.js";
+import { isChargeBearing } from "./paid-dispatch.js";
+import type { PaidDispatchController, PaidDispatchReservation } from "./paid-dispatch.js";
 import {
   isGateRequiredSignal,
   type ArtifactRecorder,
@@ -132,7 +132,7 @@ export interface StageRunnerOptions {
    * hopefully. Fail-closed is the point: a spend check that is skipped when its enforcer is
    * unwired is a check whose presence depends on the configuration it exists to enforce.
    */
-  workerSpend?: WorkerSpendController;
+  paidDispatch?: PaidDispatchController;
   /** Clock, injectable so tests produce reproducible timestamps. */
   now?: () => Date;
   /** Delay used between retries, injectable so tests do not wait. */
@@ -171,7 +171,7 @@ export class StageRunner {
     backend?: AgentBackend;
     artifacts?: ArtifactRecorder;
     workers?: WorkerRegistry;
-    workerSpend?: WorkerSpendController;
+    paidDispatch?: PaidDispatchController;
     now: () => Date;
     sleep: (ms: number) => Promise<void>;
     newAttemptId: () => string;
@@ -189,7 +189,7 @@ export class StageRunner {
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
       ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
       ...(options.workers !== undefined ? { workers: options.workers } : {}),
-      ...(options.workerSpend !== undefined ? { workerSpend: options.workerSpend } : {}),
+      ...(options.paidDispatch !== undefined ? { paidDispatch: options.paidDispatch } : {}),
       now: options.now ?? (() => new Date()),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       newAttemptId: options.newAttemptId ?? defaultNewAttemptId,
@@ -675,7 +675,7 @@ export class StageRunner {
         }
 
         const paid = expectation.kind !== "free";
-        const spendController = this.#options.workerSpend;
+        const spendController = this.#options.paidDispatch;
         // Required for **every** Worker dispatch, not only a paid one. A free declaration is a
         // belief about a provider, and the case that matters is when the belief is wrong: without
         // a sink the unexpected charge has nowhere durable to go, and the refusal below used to
@@ -695,7 +695,7 @@ export class StageRunner {
             },
           );
         }
-        let reservation: WorkerSpendReservation | undefined;
+        let reservation: PaidDispatchReservation | undefined;
         if (paid) {
           const paidDeclaration = declaration as unknown as {
             operation: string;
@@ -711,8 +711,8 @@ export class StageRunner {
             runId,
             stageId: definition.id,
             attemptId,
-            workerId: worker.id,
-            workerVersion: worker.version,
+            dispatcherId: worker.id,
+            dispatcherVersion: worker.version,
           });
         }
 
@@ -725,8 +725,8 @@ export class StageRunner {
         const appliedCeiling = enforcesCeiling && ceiling !== undefined ? ceiling : undefined;
         if (reservation !== undefined) {
           reservation = await spendController.prepareDispatch(reservation, {
-            workerId: worker.id,
-            workerVersion: worker.version,
+            dispatcherId: worker.id,
+            dispatcherVersion: worker.version,
             ceilingEnforced: appliedCeiling !== undefined,
             ...(appliedCeiling === undefined ? {} : { appliedCeiling }),
           });

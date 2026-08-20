@@ -28,7 +28,7 @@ import type {
   SpendGrantProvider,
   SubjectsProvider,
   SynthesisAdapter,
-  WorkerSpendGrantProvider,
+  DispatchSpendGrantProvider,
   WorkflowGraph,
   WorkflowStageNode,
 } from "@aldus-runtime/services";
@@ -149,7 +149,7 @@ export interface AldusConfig {
    * Keyed by `(runId, operation)`. Absent means no Worker operation may spend, and every paid
    * Worker invocation is refused before dispatch rather than dispatched unbudgeted.
    */
-  workerSpendGrants?: WorkerSpendGrantProvider;
+  dispatchSpendGrants?: DispatchSpendGrantProvider;
 }
 
 /**
@@ -168,7 +168,7 @@ const KNOWN_CONFIG_KEYS = [
   "stages",
   "subjects",
   "synthesisAdapter",
-  "workerSpendGrants",
+  "dispatchSpendGrants",
   "workers",
   "workflow",
 ] as const satisfies readonly (keyof AldusConfig)[];

@@ -104,7 +104,7 @@ async function run(options: {
   stack = await makeStack({
     workers: registry,
     stages: () => [invokingStage(options.spend) as never],
-    ...(options.grants === false ? {} : { workerSpendGrants: () => grant }),
+    ...(options.grants === false ? {} : { dispatchSpendGrants: () => grant }),
   });
   await stack.services.init({ episode: { showId: SHOW_ID, slug: "episode-a" }, actor: OPERATOR });
   await stack.services.startRun({

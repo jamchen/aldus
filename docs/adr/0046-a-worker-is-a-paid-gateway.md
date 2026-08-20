@@ -69,6 +69,17 @@ or when the grant's policy refuses an unestimated request.
 Fail-closed on the missing controller is the load-bearing one. Dispatching because no enforcer is
 present to object makes the protection depend on the configuration meant to enforce it.
 
+### The policy inputs are identity-neutral
+
+A grant answers one question — _may this operation spend, and how much_ — and it does not become a
+different question because a Worker asked it rather than an agent backend. So there is one
+`dispatchSpendGrants(runId, operation)` and one `PaidDispatchController`, not a Worker pair and an
+agent pair. Two providers answering one question is two places for the answer to differ.
+
+Which dispatcher performed the work is **dispatch evidence**, not a grant key: `dispatcherId` and
+`dispatcherVersion` are recorded on the reservation, and keying authorization on them would let
+swapping an implementation change what is authorized.
+
 ### `CostExpectation` moves to Core
 
 More than one dispatch path makes the declaration, and `stage-runner` must not depend on
@@ -141,7 +152,7 @@ cannot disagree.
 - Every existing Worker invocation must now declare `spend`. In-tree that is a one-line
   `{ expectation: { kind: "free" } }` on each, and it is the right friction: the author states what
   they believe, and a paid Worker declared free fails loudly the first time it charges.
-- `AldusConfig` gains `workerSpendGrants`, keyed by `(runId, operation)`. Keyed by operation rather
+- `AldusConfig` gains `dispatchSpendGrants`, keyed by `(runId, operation)`. Keyed by operation rather
   than by Worker deliberately — a grant authorizes what may be done and for how much, and keying on
   the implementation would let swapping a Worker change what is authorized.
 - Absent grant provider means no operation may spend, rather than every operation being

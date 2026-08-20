@@ -44,13 +44,13 @@ describe("the composition root wires spend into every paid path it builds", () =
       source.indexOf("createStageRunner(this.workspace, {"),
       source.indexOf("});", source.indexOf("createStageRunner(this.workspace, {")),
     );
-    expect(runnerConstruction).toContain("workerSpend");
+    expect(runnerConstruction).toContain("paidDispatch");
   });
 
   it("gives the Stage Runner a spend port it can refuse through", () => {
     // The port is what makes fail-closed possible without `stage-runner` depending upward. Its
     // absence is what let a paid Worker dispatch with nothing to check it (§4.3).
-    const controller = services.RuntimeWorkerSpendController.prototype as unknown as Record<
+    const controller = services.RuntimePaidDispatchController.prototype as unknown as Record<
       string,
       unknown
     >;

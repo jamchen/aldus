@@ -1,7 +1,7 @@
 /**
  * The composed Runtime's half of a paid Worker invocation (#107, ADR-0046).
  *
- * Implements `stage-runner`'s {@link WorkerSpendController} port over the same `SpendService` and
+ * Implements `stage-runner`'s {@link PaidDispatchController} port over the same `SpendService` and
  * cost store every other paid path uses. There is deliberately no second reservation protocol: a
  * parallel one would be a parallel place for the budget to be wrong.
  *
@@ -15,10 +15,10 @@
 import { SCHEMA_VERSION, newId, type CostObservation, type CostRecord } from "@aldus-runtime/core";
 import type { SpendGrant } from "@aldus-runtime/gate-engine";
 import type {
-  WorkerDispatchEvidence,
-  WorkerSpendController,
-  WorkerSpendReservation,
-  WorkerSpendReserveInput,
+  PaidDispatchEvidence,
+  PaidDispatchController,
+  PaidDispatchReservation,
+  PaidDispatchReserveInput,
 } from "@aldus-runtime/stage-runner";
 import type { SpendReservation } from "@aldus-runtime/core";
 
@@ -33,16 +33,16 @@ import type { SpendService } from "./spend-service.js";
  * and for how much; which implementation performs it is a substitution the operator did not
  * approve or refuse, and keying on it would let swapping a Worker change what is authorized.
  */
-export type WorkerSpendGrantProvider = (
+export type DispatchSpendGrantProvider = (
   runId: string,
   operation: string,
 ) => Promise<SpendGrant | undefined> | SpendGrant | undefined;
 
-/** Wiring for a {@link RuntimeWorkerSpendController}. */
-export interface RuntimeWorkerSpendControllerOptions {
+/** Wiring for a {@link RuntimePaidDispatchController}. */
+export interface RuntimePaidDispatchControllerOptions {
   spend: SpendService;
   costs: CostRecordStore;
-  grants: WorkerSpendGrantProvider;
+  grants: DispatchSpendGrantProvider;
   now?: () => Date;
   newCostId?: () => string;
 }
@@ -54,15 +54,15 @@ interface HeldReservation {
   readonly reservation: SpendReservation;
 }
 
-/** @see WorkerSpendController */
-export class RuntimeWorkerSpendController implements WorkerSpendController {
+/** @see PaidDispatchController */
+export class RuntimePaidDispatchController implements PaidDispatchController {
   readonly #spend: SpendService;
   readonly #costs: CostRecordStore;
-  readonly #grants: WorkerSpendGrantProvider;
+  readonly #grants: DispatchSpendGrantProvider;
   readonly #now: () => Date;
   readonly #newCostId: () => string;
 
-  constructor(options: RuntimeWorkerSpendControllerOptions) {
+  constructor(options: RuntimePaidDispatchControllerOptions) {
     this.#spend = options.spend;
     this.#costs = options.costs;
     this.#grants = options.grants;
@@ -70,7 +70,7 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
     this.#newCostId = options.newCostId ?? (() => newId("cost"));
   }
 
-  async reserve(input: WorkerSpendReserveInput): Promise<WorkerSpendReservation> {
+  async reserve(input: PaidDispatchReserveInput): Promise<PaidDispatchReservation> {
     const grant = await this.#grants(input.runId, input.operation);
     const outcome = await this.#spend.reserve({
       grant,
@@ -81,13 +81,13 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
       // Per billed charge, never the destination key and never the invocation fingerprint
       // (ADR-0036, ADR-0043). Qualified by the Worker so two Workers billed for one logical step
       // do not resolve to one reservation.
-      effectKey: `${input.workerId}@${input.workerVersion}:${input.billingEffectKey}`,
+      effectKey: `${input.dispatcherId}@${input.dispatcherVersion}:${input.billingEffectKey}`,
       expectation: input.expectation,
     });
     if (!outcome.reserved) {
       throw serviceError(
         ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
-        `Worker "${input.workerId}@${input.workerVersion}" was not authorized to spend on ` +
+        `Worker "${input.dispatcherId}@${input.dispatcherVersion}" was not authorized to spend on ` +
           `"${input.operation}": ${outcome.reason === "refused" ? outcome.explanation : outcome.reason}`,
         {
           category: "policy",
@@ -100,13 +100,13 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
   }
 
   async prepareDispatch(
-    reservation: WorkerSpendReservation,
-    evidence: WorkerDispatchEvidence,
-  ): Promise<WorkerSpendReservation> {
+    reservation: PaidDispatchReservation,
+    evidence: PaidDispatchEvidence,
+  ): Promise<PaidDispatchReservation> {
     const held = this.#require(reservation);
     const updated = await this.#spend.prepareDispatch(held.reservation, {
-      backendId: evidence.workerId,
-      backendVersion: evidence.workerVersion,
+      backendId: evidence.dispatcherId,
+      backendVersion: evidence.dispatcherVersion,
       ceilingEnforced: evidence.ceilingEnforced,
       ...(evidence.appliedCeiling === undefined ? {} : { appliedCeiling: evidence.appliedCeiling }),
     });
@@ -114,7 +114,7 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
   }
 
   async settle(
-    reservation: WorkerSpendReservation,
+    reservation: PaidDispatchReservation,
     observations: readonly CostObservation[],
   ): Promise<readonly CostRecord[]> {
     const held = this.#require(reservation);
@@ -127,7 +127,7 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
   }
 
   async markUnknown(
-    reservation: WorkerSpendReservation,
+    reservation: PaidDispatchReservation,
     reason: string,
     observations: readonly CostObservation[] = [],
   ): Promise<readonly CostRecord[]> {
@@ -148,7 +148,7 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
     return written;
   }
 
-  async releaseBeforeDispatch(reservation: WorkerSpendReservation, reason: string): Promise<void> {
+  async releaseBeforeDispatch(reservation: PaidDispatchReservation, reason: string): Promise<void> {
     const held = this.#require(reservation);
     await this.#spend.releaseBeforeDispatch(held.reservation, reason);
   }
@@ -205,7 +205,7 @@ export class RuntimeWorkerSpendController implements WorkerSpendController {
     };
   }
 
-  #require(reservation: WorkerSpendReservation): HeldReservation {
+  #require(reservation: PaidDispatchReservation): HeldReservation {
     const held = reservation as HeldReservation;
     if (held.reservation === undefined) {
       throw serviceError(

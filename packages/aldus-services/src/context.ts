@@ -24,7 +24,7 @@ import {
 import { FileSpendReservationStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import type { CostRecordStore } from "./cost-store.js";
 import { SpendService } from "./spend-service.js";
-import { RuntimeWorkerSpendController, type WorkerSpendGrantProvider } from "./worker-spend.js";
+import { RuntimePaidDispatchController, type DispatchSpendGrantProvider } from "./paid-dispatch.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   AdapterRegistry,
@@ -141,7 +141,7 @@ export interface AldusContextOptions {
    * before dispatch. That is the fail-closed direction: the alternative is a composition where
    * forgetting to wire a grant provider makes paid Workers run unbudgeted.
    */
-  workerSpendGrants?: WorkerSpendGrantProvider;
+  dispatchSpendGrants?: DispatchSpendGrantProvider;
   /** Where irreplaceable artifact bytes are kept. Defaults to a local archive (contract §8.1). */
   archive?: ArtifactArchive;
 }
@@ -171,7 +171,7 @@ export class AldusContext {
   readonly #costs: CostRecordStore;
   readonly #spend: SpendService;
   readonly #spendGrants: SpendGrantProvider | undefined;
-  readonly #workerSpend: RuntimeWorkerSpendController;
+  readonly #paidDispatch: RuntimePaidDispatchController;
   readonly #ledgerStores: ReturnType<typeof fileLedgerStores>;
 
   constructor(options: AldusContextOptions) {
@@ -223,12 +223,12 @@ export class AldusContext {
       now: () => this.now(),
     });
 
-    this.#workerSpend = new RuntimeWorkerSpendController({
+    this.#paidDispatch = new RuntimePaidDispatchController({
       spend: this.#spend,
       costs: this.#costs,
       // No provider wired means no operation is authorized, rather than every operation being
       // authorized by default.
-      grants: options.workerSpendGrants ?? (() => undefined),
+      grants: options.dispatchSpendGrants ?? (() => undefined),
       now: () => this.now(),
     });
 
@@ -310,7 +310,7 @@ export class AldusContext {
       // dispatching it unauthorized. Wired unconditionally: the grant provider answers `undefined`
       // when no grant is in force, and a reservation for an unauthorized operation is refused
       // there rather than by the absence of a controller.
-      workerSpend: this.#workerSpend,
+      paidDispatch: this.#paidDispatch,
       now: this.now,
     });
   }

@@ -150,7 +150,7 @@ export {
 } from "./spend-service.js";
 
 export {
-  RuntimeWorkerSpendController,
-  type RuntimeWorkerSpendControllerOptions,
-  type WorkerSpendGrantProvider,
-} from "./worker-spend.js";
+  RuntimePaidDispatchController,
+  type RuntimePaidDispatchControllerOptions,
+  type DispatchSpendGrantProvider,
+} from "./paid-dispatch.js";
