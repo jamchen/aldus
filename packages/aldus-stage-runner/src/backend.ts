@@ -31,6 +31,21 @@ export interface AgentCapabilities {
   interactive: boolean;
   /** Whether an execution can be resumed after a pause (contract §10, §19.1). */
   resumable: boolean;
+  /**
+   * Whether the backend reports what it was actually charged (§19.3; #107).
+   *
+   * A declaration about the backend, not a budget. An adopter's current spending limit is
+   * authorization and configuration; what belongs here is what the backend can *tell* you, so a
+   * composition can know whether an absent cost means "nothing was charged" or "this backend
+   * cannot say".
+   */
+  reportsActualCost?: boolean;
+  /** Whether the backend reports an estimate before or alongside execution (§19.3). */
+  reportsEstimatedCost?: boolean;
+  /** Whether a per-execution ceiling passed to the backend is actually enforced by it (§13.2). */
+  enforcesSpendCeiling?: boolean;
+  /** Whether a charge can later be reconciled or looked up by provider request id (§19.3). */
+  supportsCostReconciliation?: boolean;
   /** Ceiling on a single execution, if the backend imposes one (contract §10). */
   maxDurationMs?: number;
 }
@@ -67,6 +82,22 @@ export interface AgentResult {
   session?: AgentSessionRef;
   /** Failure detail, already redacted (contract §19.2). */
   error?: import("@aldus-runtime/core").StructuredError;
+  /**
+   * What this execution was charged (contract §19.3; #107).
+   *
+   * **Plural**, because one agent execution may incur several model, provider or tool charges,
+   * possibly in different units or currencies. A single `cost` would force a backend that knows
+   * three amounts to report one and discard the rest.
+   *
+   * **Reportable on a failed result as well as a successful one.** A provider may charge for a
+   * request that ultimately fails, and a cost channel that survived only success would lose
+   * exactly the spend an operator most needs to see.
+   *
+   * Billing facts only. The Runtime states which Run, Stage, attempt and authorization a charge
+   * belongs to — asking each backend to remember to copy an `authorizationId` is the silent
+   * budget-bypass class #107 reported.
+   */
+  costs?: readonly import("@aldus-runtime/core").CostObservation[];
 }
 
 /**

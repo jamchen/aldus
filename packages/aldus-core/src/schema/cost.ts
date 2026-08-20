@@ -50,57 +50,65 @@ export type CostQuantity = z.infer<typeof costQuantitySchema>;
  * The contract does not give a field list for this type; the shape below is decided in GitHub
  * issue #1, driven by the six capabilities contract §19.3 requires of cost-incurring stages.
  */
-export const costRecordSchema = z
-  .object({
-    /** Schema version of this record (ADR-0003). */
-    schemaVersion: schemaVersionString,
-    /** Identity of this cost record. */
-    costId: nonEmptyString,
-    /**
-     * Run this cost is attributable to.
-     *
-     * Added beyond the contract's prose: contract §6's class diagram makes CostRecord a child of
-     * ProductionRun, and per-run spend limits (§19.3) cannot be computed without this edge.
-     */
-    runId: nonEmptyString,
-    /** Stage that incurred the cost, if attributable to one. */
-    stageId: nonEmptyString.optional(),
-    /** Attempt that incurred the cost, if attributable to one. */
-    attemptId: nonEmptyString.optional(),
-    /**
-     * Which provider was billed.
-     *
-     * An OPEN string, never a Core-defined enum. Contract §4.2 states Core does not own a
-     * particular TTS voice or model, and contract §1.2 rules out prescribing any one provider.
-     * Do not narrow this to a union.
-     */
-    provider: nonEmptyString,
-    /**
-     * Which operation was billed, e.g. a synthesis request or a render.
-     *
-     * An OPEN string, for the same reason as `provider`. Do not narrow this to a union.
-     */
-    operation: nonEmptyString,
-    /** What was consumed, where the provider exposes a billable quantity. */
-    quantity: costQuantitySchema.optional(),
-    /** Projected cost before execution (contract §19.3 "dry-run or cost preview where possible"). */
-    estimated: moneySchema.optional(),
-    /** Cost actually incurred (contract §19.3 "actual cost recording"). */
-    actual: moneySchema.optional(),
-    /** Billing state. @see BILLING_STATUSES */
-    billingStatus: z.enum(BILLING_STATUSES),
-    /**
-     * The `GateDecision` that authorised this spend (contract §13.2).
-     *
-     * Contract §13.2 forbids paid synthesis before an operator approves a maximum authorised
-     * cost; this field is how an incurred cost is traced back to that authorization.
-     */
-    authorizationId: nonEmptyString.optional(),
-    /** Provider-side request identifier, for reconciliation (contract §15). */
-    providerRequestId: nonEmptyString.optional(),
-    /** When this record was written. */
-    recordedAt: iso8601,
-  })
+/**
+ * The billing fields, before the record's own refinements.
+ *
+ * Named so {@link costObservationSchema} can be **derived** from the same source rather than
+ * transcribed beside it. A transcribed copy is a second definition that nothing keeps in step —
+ * ADR-0031's case, in a place where the two halves describe money.
+ */
+const costFields = z.object({
+  /** Schema version of this record (ADR-0003). */
+  schemaVersion: schemaVersionString,
+  /** Identity of this cost record. */
+  costId: nonEmptyString,
+  /**
+   * Run this cost is attributable to.
+   *
+   * Added beyond the contract's prose: contract §6's class diagram makes CostRecord a child of
+   * ProductionRun, and per-run spend limits (§19.3) cannot be computed without this edge.
+   */
+  runId: nonEmptyString,
+  /** Stage that incurred the cost, if attributable to one. */
+  stageId: nonEmptyString.optional(),
+  /** Attempt that incurred the cost, if attributable to one. */
+  attemptId: nonEmptyString.optional(),
+  /**
+   * Which provider was billed.
+   *
+   * An OPEN string, never a Core-defined enum. Contract §4.2 states Core does not own a
+   * particular TTS voice or model, and contract §1.2 rules out prescribing any one provider.
+   * Do not narrow this to a union.
+   */
+  provider: nonEmptyString,
+  /**
+   * Which operation was billed, e.g. a synthesis request or a render.
+   *
+   * An OPEN string, for the same reason as `provider`. Do not narrow this to a union.
+   */
+  operation: nonEmptyString,
+  /** What was consumed, where the provider exposes a billable quantity. */
+  quantity: costQuantitySchema.optional(),
+  /** Projected cost before execution (contract §19.3 "dry-run or cost preview where possible"). */
+  estimated: moneySchema.optional(),
+  /** Cost actually incurred (contract §19.3 "actual cost recording"). */
+  actual: moneySchema.optional(),
+  /** Billing state. @see BILLING_STATUSES */
+  billingStatus: z.enum(BILLING_STATUSES),
+  /**
+   * The `GateDecision` that authorised this spend (contract §13.2).
+   *
+   * Contract §13.2 forbids paid synthesis before an operator approves a maximum authorised
+   * cost; this field is how an incurred cost is traced back to that authorization.
+   */
+  authorizationId: nonEmptyString.optional(),
+  /** Provider-side request identifier, for reconciliation (contract §15). */
+  providerRequestId: nonEmptyString.optional(),
+  /** When this record was written. */
+  recordedAt: iso8601,
+});
+
+export const costRecordSchema = costFields
   .refine((record) => record.estimated !== undefined || record.actual !== undefined, {
     message:
       "at least one of `estimated` or `actual` must be present (architecture contract §19.3: a cost record must state either a preview or an incurred amount).",
@@ -121,3 +129,34 @@ export const costRecordSchema = z
 
 /** @see costRecordSchema */
 export type CostRecord = z.infer<typeof costRecordSchema>;
+
+/**
+ * What a backend or Worker knows it was charged (contract §19.3; #107).
+ *
+ * Derived from {@link costRecordSchema} by picking exactly the billing facts, so the two cannot
+ * drift into disagreeing about what a charge is. The complement — `costId`, `runId`, `stageId`,
+ * `attemptId`, `authorizationId`, `recordedAt` — is **runtime attribution** and is deliberately
+ * absent: the backend reports what was charged, and the Runtime states which Run, Stage, attempt
+ * and authorization the charge belongs to.
+ *
+ * That split is the fix rather than a tidiness. #107 reported an adopter with real agent spend
+ * that Aldus could not record; asking each backend to remember to copy an `authorizationId` is
+ * the silent budget-bypass class the same issue reported, so the Runtime supplies it from the
+ * decision that authorized dispatch.
+ *
+ * Reportable on a **failed** result as well as a successful one — a provider may charge for a
+ * request that ultimately fails, and a cost channel that only survives success would lose exactly
+ * the spend an operator most needs to see.
+ */
+export const costObservationSchema = costFields.pick({
+  provider: true,
+  operation: true,
+  quantity: true,
+  estimated: true,
+  actual: true,
+  billingStatus: true,
+  providerRequestId: true,
+});
+
+/** @see costObservationSchema */
+export type CostObservation = z.infer<typeof costObservationSchema>;
