@@ -73,13 +73,16 @@ export class StageRegistry {
     // one built from configuration, or handed over by a JavaScript adopter. A stage that declares
     // a deduplicable external effect and supplies no derivation would otherwise silently receive
     // the invocation fingerprint, which is stable across content it read but did not declare.
-    const idempotency = definition.idempotency as {
-      kind: string;
+    const retrySafety = definition.retrySafety as {
+      kind?: string;
+      keyScope?: string;
       effectKey?: unknown;
+      reason?: unknown;
     };
     if (
-      idempotency.kind === "idempotent_external_effect" &&
-      typeof idempotency.effectKey !== "function"
+      retrySafety.kind === "deduplicated_external_effects" &&
+      retrySafety.keyScope === "stage" &&
+      typeof retrySafety.effectKey !== "function"
     ) {
       throw stageRunnerError(
         StageRunnerErrorCodes.STAGE_EFFECT_KEY_REQUIRED,

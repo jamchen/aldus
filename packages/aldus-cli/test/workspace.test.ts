@@ -94,7 +94,7 @@ async function writeConfig(
       "  id: workspace.split('/').pop(),",
       '  version: "1",',
       "  artifacts: { produces: 'none' },",
-      "  idempotency: { kind: 'idempotent' },",
+      "  retrySafety: { kind: 'idempotent' },",
       "  requiredCapabilities: [],",
       "  inputSchema: { safeParse: (value) => ({ success: true, data: value }) },",
       "  outputSchema: { safeParse: (value) => ({ success: true, data: value }) },",

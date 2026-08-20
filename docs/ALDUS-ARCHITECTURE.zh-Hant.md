@@ -275,6 +275,20 @@ interface RunManifest {
 
 Stage Execution 表示邏輯階段；Attempt 表示其中一次呼叫。Attempt 必須保留為 append-only audit record，Runtime 可以另建 materialized manifest 顯示目前狀態。
 
+每個 Stage 必須宣告：它不註冊任何 artifact，或一份 artifact contract。該 contract 必須在執行前解析，且只能取自已驗證的 input、已記錄的 configuration，以及宣告的 input artifacts。**Stage 的回傳值與它實際註冊的 artifacts 不得決定它應該產出什麼**——由結果推導出的義務必然被自身滿足。Resolver 不得取得檔案系統或任意 I/O；無法從已驗證的 invocation 推導出的 mode 是 hidden input，必須先被顯式化。
+
+已解析的 contract 必須支援 cardinality：至少包含 kind 與最小數量，並可選最大數量。Artifact kind 仍為 adopter 自定義的 opaque string。已解析的 contract 必須記錄在 attempt 上，使 production trace 能說明 runner 當時期望什麼。
+
+Attempt 結算為 succeeded 前，必須將已註冊的 artifacts 與已解析的 contract 比對。缺少必要 artifact、超出 cardinality，或註冊了 contract 未宣告的 kind，都必須產生結構化且不可重試的失敗。已註冊的 artifacts 必須保留以供診斷。Cancelled、failed 與 waiting-for-gate 的 attempt 不需滿足此 contract。
+
+沒有宣告不得被讀成「沒有 artifact」。
+
+外部效果的 idempotency key 必須識別「該筆可獨立去重的效果」，而非包含它的 attempt。Stage 若執行多筆此類效果，每一筆都必須自帶 key；同一個 key 不得重複用於多個目的地物件。
+
+每一個 Stage 對 Worker 的請求都必須宣告該操作是否產生外部效果；有效果的請求必須攜帶其目的地用來去重的 key。**Invocation fingerprint 絕不得作為外部 idempotency key 提供**；沒有專屬於該效果的 key 時，正確值是「不存在」，而非 `runId`、attempt id、configuration digest 或空的 input-hash 集合。
+
+Stage 必須宣告重跑它會對 workspace 之外造成什麼。重試決策必須讀取並呈現該宣告與其理由；僅記錄下來供日後稽核並不足夠。
+
 ### 6.4 Event Log
 
 每個狀態變更必須寫入不可變事件，包括 event ID、schema version、時間、Episode／Run、actor、backend、action、輸入輸出、idempotency key 與安全的錯誤資訊。

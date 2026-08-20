@@ -169,7 +169,7 @@ describe("the eight acceptance cases of the #138 ruling", () => {
           produces: "declared",
           resolve: () => [{ kind: "SegmentAudio", minCount: 3 }],
         },
-        idempotency: { kind: "not_idempotent", reason: "writes files" },
+        retrySafety: { kind: "not_idempotent", reason: "writes files" },
         execute: async (context) => {
           context.recordOutput(anArtifact({ kind: "SegmentAudio" }));
           throw new Error("failed after producing one of three");

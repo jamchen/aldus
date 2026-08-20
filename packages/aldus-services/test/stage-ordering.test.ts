@@ -60,7 +60,7 @@ function countingStage(id: string, outcome: "succeed" | "fail" = "succeed") {
     outputSchema: z.unknown(),
     requiredCapabilities: [],
     artifacts: { produces: "none" },
-    idempotency: { kind: "not_idempotent", reason: "stands in for irreversible work" },
+    retrySafety: { kind: "not_idempotent", reason: "stands in for irreversible work" },
     execute: (): Promise<StageOutcome<unknown>> => {
       sideEffects[id] = (sideEffects[id] ?? 0) + 1;
       if (outcome === "fail") throw new Error("the stage could not read its input");

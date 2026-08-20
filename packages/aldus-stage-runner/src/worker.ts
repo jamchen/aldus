@@ -63,12 +63,23 @@ export interface WorkerRequest<I = unknown> {
    */
   inputHashes: readonly string[];
   /**
-   * The Stage's deduplication key for external side effects (§19.1).
+   * What the destination deduplicates this effect on (§19.1; #149).
    *
-   * Passed so a Worker addressing a platform with client-supplied idempotency keys can hand it
-   * through. It remains the *Stage's* key: a Worker neither derives nor owns one (ADR-0035).
+   * **Optional, and absent means no key exists** — never a substitute. It carried
+   * `effectKey ?? invocationKey`, which handed a fingerprint of declared work to an external
+   * system as a deduplication credential, the one thing ADR-0036 forbids in as many words. Worse
+   * than imprecise: for a Stage with an empty input schema and no declared input artifacts that
+   * fingerprint is a **constant**, so a platform deduplicating on it would treat every episode's
+   * first request as a repeat of the first episode's, forever.
+   *
+   * A Worker author checking whether this is populated used to get `true` in both the real case
+   * and the useless one, with no way to tell them apart. Absent is the honest answer, and it means
+   * this operation must not be deduplicated on anything supplied here.
+   *
+   * Never reconstruct one from `runId`, `attemptId`, `configurationHash` or an empty
+   * {@link WorkerRequest.inputHashes}: each is available and none of them identifies the effect.
    */
-  idempotencyKey: string;
+  idempotencyKey?: string;
   /**
    * Cancellation (§19.1).
    *

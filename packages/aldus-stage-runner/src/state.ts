@@ -130,6 +130,19 @@ export interface AttemptMetadata {
   idempotencyKey?: string | undefined;
   /** Whether the stage declared itself idempotent, and why not when it did not (contract §11). */
   idempotent: boolean;
+  /**
+   * Which retry-safety arm the stage declared (§19.1; #148).
+   *
+   * Recorded so the retry decision has something to read. The ruling on #148 requires the
+   * declaration and its reason to be *surfaced* at retry-decision time rather than filed for a
+   * later audit — an arm read only by an audit nobody performs has not improved on the false claim
+   * it replaced.
+   */
+  retrySafety?: string | undefined;
+  /** Key scope of a declared deduplicated effect, where one was declared (§19.1; #148). */
+  effectKeyScope?: string | undefined;
+  /** Why the declared arm is sound, in the stage author's words. Surfaced, not filed. */
+  retrySafetyReason?: string | undefined;
   /** Reason the stage is not idempotent, when it declared itself so. */
   nonIdempotentReason?: string | undefined;
   /** Gate this attempt stopped at, when it stopped at one (contract §13). */
@@ -175,6 +188,11 @@ const attemptMetadataSchema = z.object({
   effectKey: z.string().optional(),
   idempotencyKey: z.string().optional(),
   idempotent: z.boolean(),
+  // Optional so a cache written before #148 still parses. Absent means the attempt predates the
+  // declaration, which reads correctly as "nothing recorded which arm" rather than as an arm.
+  retrySafety: z.string().optional(),
+  effectKeyScope: z.string().optional(),
+  retrySafetyReason: z.string().optional(),
   nonIdempotentReason: z.string().optional(),
   gateId: z.string().optional(),
   subjectHashes: z.array(z.string()).optional(),
