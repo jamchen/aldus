@@ -836,21 +836,32 @@ export class SpendService {
     // different contents, conflicts rather than overwriting.
     const stream = await this.#store.readGrant(current.grantId);
     const pending = this.#pendingObservations(stream.transitions, current.reservationId);
-    // With observations still unrecorded, a second decision is a second charge rather than a
-    // rewrite of the first, so the "one decision per reservation" guard applies only once nothing
-    // is pending. Same-identity-different-contents is refused either way, by digest.
+    // **This decision**, by its own stable transition id, looked up first and unconditionally.
+    //
+    // Scoping the lookup to the pending case was wrong for the sequence it was meant to serve:
+    // once the last observation is resolved nothing is pending, so the fallback below took the
+    // *first* reconciliation on the reservation. With A resolved by `dec-a` and B terminally
+    // resolved by `dec-b`, retrying `dec-b` compared its digest against `dec-a`'s and was refused
+    // — the retry path failing precisely in the multi-observation case it exists for.
+    const priorById = stream.transitions.find(
+      (transition) =>
+        transition.reservationId === current.reservationId &&
+        transition.transitionId === `${current.reservationId}:reconciled:${input.decisionId}`,
+    );
+
+    // Only when nothing is pending does an *unrelated* decision conflict. While observations are
+    // unrecorded a second decision is a second charge rather than a rewrite of the first; once
+    // none are, a different decision would overwrite a human's recorded finding. Either way a
+    // reused id carrying changed contents is refused by digest before any effect.
     const priorDecision =
-      pending.length > 0
+      priorById ??
+      (pending.length === 0
         ? stream.transitions.find(
             (transition) =>
               transition.reservationId === current.reservationId &&
-              transition.transitionId === `${current.reservationId}:reconciled:${input.decisionId}`,
-          )
-        : stream.transitions.find(
-            (transition) =>
-              transition.reservationId === current.reservationId &&
               transition.kind === "reservation.reconciled",
-          );
+          )
+        : undefined);
 
     // Every field a decision consists of, canonicalised. Comparing only the id let a retry reuse
     // one decision's identity while carrying a different amount — or turn `settled_with_amount`

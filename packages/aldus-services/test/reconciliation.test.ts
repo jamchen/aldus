@@ -1286,6 +1286,86 @@ describe("a reservation whose observations end differently", () => {
     ]);
   });
 
+  it("is byte-stable retrying the terminal decision of an N-observation sequence", async () => {
+    // The sequence the previous retry test could not reach. With *two* observations pending, A is
+    // resolved by `dec-a` and B terminally by `dec-b`. Once B is resolved nothing is pending, and
+    // a lookup that fell back to "the first reconciliation on this reservation" found `dec-a` —
+    // so retrying `dec-b` compared its digest against a different decision's and was refused. The
+    // retry path failed exactly in the multi-observation case it exists for.
+    const prepared = await twoUnwritten("effect-retry-n");
+    const id = prepared.reservationId;
+    // Both writes fail, so both observations are pending before any decision is made.
+    await expect(flakyFrom(1).settle(prepared, twoObservations, {})).rejects.toThrow();
+
+    let tick = 0;
+    const advancing = new SpendService({
+      store,
+      costs,
+      now: () => new Date(Date.UTC(2026, 0, 2, 0, tick++)),
+    });
+    const operator = openOperatorConsole({ spend: advancing, actor: HUMAN });
+
+    await operator.reconcile((await store.get(id)) as SpendReservationLike, {
+      evidenceRef: "provider-a invoice line 1",
+      decisionId: "dec-a",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.5000", currency: "USD" },
+        observationId: `${id}:cost:0`,
+      },
+    });
+
+    const terminal = {
+      evidenceRef: "provider-b invoice line 2",
+      decisionId: "dec-b",
+      resolution: {
+        kind: "settled_with_amount" as const,
+        amount: { amount: "0.2500", currency: "USD" },
+        observationId: `${id}:cost:1`,
+      },
+    };
+    const first = await operator.reconcile((await store.get(id)) as SpendReservationLike, terminal);
+    expect(first.reservation.status).toBe("settled");
+
+    const beforeRetry = await store.readGrant(grant.grantId);
+    const again = await operator.reconcile((await store.get(id)) as SpendReservationLike, terminal);
+
+    // Byte-stable: same state, same ids, and nothing appended or written a second time.
+    expect(again.reservation.status).toBe("settled");
+    expect([...again.reservation.costIds].sort()).toEqual([`${id}:cost:0`, `${id}:cost:1`]);
+    expect(again.costs.map((record) => record.costId)).toEqual([`${id}:cost:1`]);
+    expect(costs.records.filter((record) => record.reservationId === id)).toHaveLength(2);
+    const afterRetry = await store.readGrant(grant.grantId);
+    expect(afterRetry.transitions).toHaveLength(beforeRetry.transitions.length);
+  });
+
+  it("still refuses an unrelated decision once the reservation is terminal", async () => {
+    // The other half of the same lookup. Resolving by transition id first must not make a *new*
+    // decision on a terminal reservation acceptable — that would overwrite a human's finding.
+    const prepared = await twoUnwritten("effect-terminal-new");
+    const id = prepared.reservationId;
+    await expect(flakyFrom(1).settle(prepared, twoObservations, {})).rejects.toThrow();
+
+    for (const [index, decisionId] of [
+      ["0", "dec-x"],
+      ["1", "dec-y"],
+    ] as const) {
+      await console_.reconcile((await store.get(id)) as SpendReservationLike, {
+        evidenceRef: `provider invoice ${index}`,
+        decisionId,
+        resolution: { kind: "released_as_uncharged", observationId: `${id}:cost:${index}` },
+      });
+    }
+
+    await expect(
+      console_.reconcile((await store.get(id)) as SpendReservationLike, {
+        evidenceRef: "a third opinion",
+        decisionId: "dec-z",
+        resolution: { kind: "released_as_uncharged" },
+      }),
+    ).rejects.toThrow(/already carries reconciliation decision|only an unresolved charge/);
+  });
+
   it("is byte-stable when a per-observation terminal decision is retried as the clock advances", async () => {
     const prepared = await twoUnwritten("effect-retry-terminal");
     const id = prepared.reservationId;
