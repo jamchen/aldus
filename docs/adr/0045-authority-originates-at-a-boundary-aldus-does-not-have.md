@@ -57,6 +57,10 @@ is what it hands over. Nothing else changes.
 
 ## Consequences
 
+- **#155 step 5 is not complete.** A protocol nothing can invoke is not a delivered capability:
+  the internal reservation lifecycle and read-only status ship, and reconciliation itself waits
+  for a boundary. Recording that here rather than in a release note, because the gap is
+  architectural and outlives whichever PR carries it.
 - An adopter cannot reconcile an unresolved charge through Aldus today. That is the honest state
   and it is visible: `spendStatus` reports the reservation, why it is unresolved, which charges are
   durable and which are pending, so the work can be done against the provider directly.
