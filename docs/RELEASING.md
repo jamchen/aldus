@@ -228,8 +228,40 @@ password for every publish-class operation and `dist-tag add` is one, so with no
 prompt and fails on the first package. The script detects that and refuses up front rather than
 letting you discover it halfway through.
 
-Expect npm to ask you to authenticate **once per package**. There is no supported way to collapse
-that which does not involve a token that bypasses 2FA.
+Expect npm to ask you to authenticate **once per package**.
+
+### Why it is once per package, and why that stands
+
+This was measured rather than assumed. The `Release` workflow publishes with no stored credential
+at all — OIDC trusted publishing, exchanged for short-lived rights — so the obvious question is
+whether promotion could run the same way and cost one environment approval instead of twelve
+authentications.
+
+It cannot. A workflow with `id-token: write`, npm at latest, and the same `setup-node` registry
+configuration fails `npm dist-tag add` with:
+
+```
+npm error code E401
+npm error Unable to authenticate, your authentication token seems to be invalid.
+```
+
+Not a permission refusal — **no credential at all**. npm's OIDC exchange happens inside
+`npm publish`; it is not a login that other commands inherit, and `dist-tag` is not covered.
+
+So the remaining ways to avoid twelve authentications all trade away something this project has
+decided to keep:
+
+- **An automation or granular token in Actions.** Ruled out: it is a long-lived credential in CI,
+  and npm is restricting tokens that bypass 2FA regardless.
+- **One OTP reused across all twelve commands via `--otp`.** Puts the code in shell history, a
+  script, or an environment variable. Ruled out.
+- **Publishing with `--tag latest` at release time.** Supported by OIDC, and it inverts the
+  governance: promotion would have to be decided _before_ the release rather than after adopter
+  smoke tests, which is the decision ADR-0023 exists to keep separate.
+
+Twelve authentications is therefore the floor for the current design, and it is the price of
+having no long-lived publishing credential anywhere. Do not re-investigate without new information
+from npm — the probe above is what to repeat.
 
 The script verifies every package against the registry afterwards and retries the read: `npm view`
 serves a cached path that lags a write by seconds, and checking immediately reports a healthy
