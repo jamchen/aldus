@@ -35,6 +35,7 @@
 
 import type { AldusEvent, CostRecord, GateDecision } from "@aldus-runtime/core";
 import type { EventStore, RunStore } from "@aldus-runtime/file-store";
+import type { CostRecordStore } from "./cost-store.js";
 import type { CostReader, GateDecisionStore, GateEventSink } from "@aldus-runtime/gate-engine";
 import type { LedgerEventSink } from "@aldus-runtime/tts-ledger";
 
@@ -70,6 +71,32 @@ export class RunStoreCostReader implements CostReader {
 
   list(runId: string): Promise<CostRecord[]> {
     return this.#runs.listRecords(runId, "costs");
+  }
+}
+
+/**
+ * Reads **and writes** the Run's cost collection (§19.3; #107, #160).
+ *
+ * The collection existed and nothing wrote to it, which is why an adopter's `aldus costs` reported
+ * zero while real money was being spent. Reading was wired; recording was not.
+ */
+export class RunStoreCostRecordStore implements CostRecordStore {
+  readonly #runs: RunStore;
+
+  constructor(runs: RunStore) {
+    this.#runs = runs;
+  }
+
+  list(runId: string): Promise<CostRecord[]> {
+    return this.#runs.listRecords(runId, "costs");
+  }
+
+  async append(runId: string, record: CostRecord): Promise<void> {
+    // Idempotent on cost id, so a settlement retry re-appends the same identity rather than
+    // counting the charge twice (ADR-0044).
+    const existing = await this.#runs.listRecords(runId, "costs");
+    if (existing.some((entry) => entry.costId === record.costId)) return;
+    await this.#runs.addRecord(runId, "costs", record);
   }
 }
 

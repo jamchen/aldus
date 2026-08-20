@@ -116,6 +116,17 @@ const costFields = z.object({
    * *unreserved and therefore unauthorized*.
    */
   reservationId: nonEmptyString.optional(),
+  /**
+   * The take this charge produced, where it produced one (§15, §19.3; #160).
+   *
+   * The other direction of `TakeRecord.costIds`, so lineage is navigable from either end. The
+   * Runtime **preallocates** the take identity before writing costs, so this is knowable at the
+   * moment the charge is recorded rather than only after the take exists.
+   *
+   * Runtime-supplied like {@link authorizationId} and {@link reservationId}: an adapter that could
+   * name its own take could name one that describes different audio.
+   */
+  takeId: nonEmptyString.optional(),
   /** When this record was written. */
   recordedAt: iso8601,
 });

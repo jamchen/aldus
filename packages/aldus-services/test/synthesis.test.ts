@@ -464,3 +464,126 @@ describe("what the adapter actually did, where it differs from the plan (#133, A
     expect(compareProducedToRequested(result.data.take)).toEqual({ status: "matches" });
   });
 });
+
+describe("synthesis billing reaches a Runtime-owned cost record (#160)", () => {
+  // The gap: `SynthesisGateway` copied an adapter-supplied `costRecordId` and nothing else, so an
+  // adapter that knew what it was charged had no way to say so — and an approved USD ceiling had
+  // nothing to consume.
+
+  const charged = {
+    provider: "provider-a",
+    operation: "synthesis",
+    billingStatus: "charged" as const,
+    actual: { amount: "0.2500", currency: "USD" },
+  };
+
+  /** Costs as the Run actually holds them, read through the same collection `aldus costs` reads. */
+  const recordedCosts = (harness: Harness) =>
+    harness.context.workspace.runs.listRecords(RUN_ID, "costs");
+
+  it("attributes the adapter's observation with runtime-owned identity", async () => {
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    const decisionId = await approveSynthesis(harness);
+    harness.synthesis.observation = { costs: [charged] };
+
+    const result = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+
+    const records = await recordedCosts(harness);
+    expect(records).toHaveLength(1);
+    // The adapter reported billing facts; the Runtime stated who authorized it and which take.
+    expect(records[0]?.provider).toBe("provider-a");
+    // The **decision that authorized dispatch**, not anything the adapter supplied. Asserted by
+    // value because a mutation sourcing this from the adapter's own request id passed a check that
+    // only asked whether the field was populated — which is the silent budget-bypass class #107
+    // reported, one field over.
+    expect(records[0]?.authorizationId).toBe(decisionId);
+    expect(records[0]?.takeId).toBe(result.data.take.takeId);
+  });
+
+  it("links the take and its costs in both directions", async () => {
+    // One synthesis may report several observations, so the canonical link cannot be singular.
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.observation = {
+      costs: [charged, { ...charged, operation: "synthesis.model" }],
+    };
+
+    const result = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+
+    const records = await recordedCosts(harness);
+    expect(records).toHaveLength(2);
+    expect(result.data.take.costIds).toEqual(records.map((record) => record.costId));
+    for (const record of records) expect(record.takeId).toBe(result.data.take.takeId);
+  });
+
+  it("makes the charge durable before the take exists", async () => {
+    // Ordering is the contract. A take recorded first would say the work settled while the charge
+    // that paid for it is absent, and under-reporting spend is the direction that matters. The
+    // cost ids are derived from the preallocated take, which is only possible if the take identity
+    // existed before the costs were written.
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.observation = { costs: [charged] };
+
+    const result = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+
+    const records = await recordedCosts(harness);
+    expect(records[0]?.costId).toBe(`${result.data.take.takeId}:cost:0`);
+  });
+
+  it("keeps credits as a quantity, and says the money amount is unknown", async () => {
+    // An adapter billed in credits reports them as a quantity: converting to an ISO currency would
+    // manufacture a number nobody can reconcile against a provider statement.
+    //
+    // Which makes it an **unknown-money** charge, not a `charged` one. #150's rule is that a
+    // charge states an amount or states that the amount is unknown, and 1200 credits is not an
+    // amount of money. `charged` with no `Money` is refused by the schema, correctly — this test
+    // asserted it and was wrong, not the code.
+    //
+    // The consequence is right too: the grant becomes indeterminate, because a USD ceiling cannot
+    // be drawn down by credits and pretending otherwise is the conversion this forbids.
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.observation = {
+      costs: [
+        {
+          provider: "provider-a",
+          operation: "synthesis",
+          billingStatus: "unknown",
+          quantity: { unit: "credits", amount: 1200 },
+        },
+      ],
+    };
+
+    const result = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+
+    const record = (await recordedCosts(harness))[0];
+    expect(record?.quantity).toEqual({ unit: "credits", amount: 1200 });
+    expect(record?.actual).toBeUndefined();
+    expect(record?.estimated).toBeUndefined();
+  });
+});

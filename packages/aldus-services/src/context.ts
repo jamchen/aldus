@@ -20,6 +20,7 @@ import {
   type ArtifactArchive,
 } from "@aldus-runtime/artifact-registry";
 import type { FileWorkspace } from "@aldus-runtime/file-store";
+import type { CostRecordStore } from "./cost-store.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   AdapterRegistry,
@@ -42,6 +43,7 @@ import {
   EventStoreGateEventSink,
   LedgerEventStoreSink,
   RunStoreCostReader,
+  RunStoreCostRecordStore,
   RunStoreGateDecisionStore,
 } from "./adapters.js";
 import { fileLedgerStores, type LedgerLayout } from "./ledger-store.js";
@@ -149,6 +151,7 @@ export class AldusContext {
   readonly workflow: WorkflowGraph | undefined;
 
   readonly #synthesisAdapter: SynthesisAdapter | undefined;
+  readonly #costs: CostRecordStore;
   readonly #spendGrants: SpendGrantProvider | undefined;
   readonly #ledgerStores: ReturnType<typeof fileLedgerStores>;
 
@@ -187,6 +190,7 @@ export class AldusContext {
     this.now = options.now ?? (() => new Date());
     this.#synthesisAdapter = options.synthesisAdapter;
     this.#spendGrants = options.spendGrants;
+    this.#costs = new RunStoreCostRecordStore(this.workspace.runs);
 
     this.gates = new GateEngine({
       registry: this.gateRegistry,
@@ -316,6 +320,10 @@ export class AldusContext {
     return new SynthesisGateway({
       adapter: this.#synthesisAdapter,
       ledger: this.ledgerFor(plan),
+      // Wired here rather than left to each caller: the gateway is the only path to a synthesis
+      // provider, so a composition that reached it without a cost store could report a charge
+      // with nowhere to record it (#160).
+      ...(this.#costs === undefined ? {} : { costs: this.#costs }),
     });
   }
 
@@ -328,6 +336,7 @@ export class AldusContext {
       subjects: this.subjectsFor,
       plan,
       operation: "synthesis",
+      costs: this.#costs,
     });
   }
 }

@@ -34,7 +34,14 @@
  * without a cast — and the `WeakSet` makes the cast useless.
  */
 
-import type { ActorRef, Money } from "@aldus-runtime/core";
+import {
+  newId,
+  SCHEMA_VERSION,
+  type ActorRef,
+  type CostObservation,
+  type CostRecord,
+  type Money,
+} from "@aldus-runtime/core";
 import { formatMoney, isPositiveMoney } from "@aldus-runtime/gate-engine";
 import type { GateEngine, SpendGrant } from "@aldus-runtime/gate-engine";
 import type {
@@ -51,6 +58,7 @@ import type {
 import { planSubjectDigests } from "@aldus-runtime/tts-ledger";
 
 import type { SubjectsProvider } from "./context.js";
+import type { CostRecordStore } from "./cost-store.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
 
 /**
@@ -152,6 +160,19 @@ export interface SynthesisOutcome {
   /** Why the adapter diverged, in its own words. Recorded verbatim, never parsed. */
   productionReason?: string;
   /**
+   * What the provider billed, as facts the adapter observed (§19.3; #160).
+   *
+   * The synthesis counterpart of `AgentResult.costs`. Before this, `SynthesisGateway` copied an
+   * adapter-supplied `costRecordId` and nothing else — so an adapter that knew what it was charged
+   * had no way to say so, and an approved ceiling had nothing to consume. Credits stay in
+   * {@link CostObservation.quantity}; they are never converted into an invented currency.
+   *
+   * The adapter reports billing facts. The Runtime supplies `costId`, Run, Stage, attempt,
+   * `authorizationId`, `takeId` and later `reservationId` — an adapter that could mint those could
+   * name an approval that did not authorize it.
+   */
+  costs?: readonly CostObservation[];
+  /**
    * How the bytes entered the Run, e.g. `"synthesis"`, `"replay"`, `"import"` (§15; #136).
    *
    * Distinct from what produced them. A replay adapter delivers audio another provider produced:
@@ -228,6 +249,18 @@ export type SynthesisResult =
 export interface SynthesisGatewayOptions {
   adapter: SynthesisAdapter;
   ledger: TtsLedger;
+  /**
+   * Where attributed cost records are written (§19.3; #160).
+   *
+   * The same port `AgentExecutionService` uses, injected here rather than duplicated: a second
+   * definition of where money is recorded is two answers to one question.
+   *
+   * Optional so an existing composition keeps working; when absent, a reported observation is
+   * refused rather than dropped, because silently discarding a charge is the defect this closes.
+   */
+  costs?: CostRecordStore;
+  now?: () => Date;
+  newTakeId?: () => string;
 }
 
 /**
@@ -240,15 +273,79 @@ export interface SynthesisGatewayOptions {
 export class SynthesisGateway {
   readonly #adapter: SynthesisAdapter;
   readonly #ledger: TtsLedger;
+  readonly #costs: CostRecordStore | undefined;
+  readonly #now: () => Date;
+  readonly #newTakeId: () => string;
 
   constructor(options: SynthesisGatewayOptions) {
     this.#adapter = options.adapter;
     this.#ledger = options.ledger;
+    this.#costs = options.costs;
+    this.#now = options.now ?? (() => new Date());
+    // Matches `TtsLedger`'s own minting so a preallocated id is indistinguishable from one the
+    // ledger would have produced. That the ledger uses the *artifact* prefix for a take is odd and
+    // is recorded separately rather than changed here — altering it would reshape existing ids.
+    this.#newTakeId = options.newTakeId ?? (() => newId("art"));
   }
 
   /** Opaque identity of the bound adapter, for trace. The adapter itself is never exposed. */
   get adapterId(): string {
     return this.#adapter.id;
+  }
+
+  /**
+   * Turn the adapter's billing facts into attributed cost records (§19.3; #160).
+   *
+   * Ordering is the contract: the records are durable **before** the take is recorded. A take
+   * recorded first would say the work settled while the charge that paid for it is absent, and the
+   * failure direction that matters is under-reporting spend.
+   *
+   * Ids are derived from the preallocated take, so a retry re-appends the same identities instead
+   * of minting new ones and counting the charge twice.
+   */
+  async #recordCosts(
+    input: { plan: TtsRequestPlan; segmentId: string },
+    takeId: string,
+    outcome: SynthesisOutcome,
+    permit: SynthesisPermit,
+  ): Promise<string[]> {
+    const observations = outcome.costs ?? [];
+    if (observations.length === 0) return [];
+
+    const costs = this.#costs;
+    if (costs === undefined) {
+      // Refused rather than dropped. An adapter that reported a charge into a composition with
+      // nowhere to record it is exactly the state #160 reported, and silence would reproduce it.
+      throw serviceError(
+        ServiceErrorCodes.INVALID_REQUEST,
+        `The synthesis adapter reported ${observations.length} billing observation(s) and this ` +
+          "composition wired no cost record store, so the charge would be discarded. Supply " +
+          "`costs` when constructing the gateway (§19.3).",
+        {
+          category: "validation",
+          retryable: false,
+          details: { runId: input.plan.runId, segmentId: input.segmentId },
+        },
+      );
+    }
+
+    const recordedAt = this.#now().toISOString();
+    const written: string[] = [];
+    for (const [index, observation] of observations.entries()) {
+      const costId = `${takeId}:cost:${index}`;
+      await costs.append(input.plan.runId, {
+        ...observation,
+        schemaVersion: SCHEMA_VERSION,
+        costId,
+        runId: input.plan.runId,
+        takeId,
+        // The runtime's, from the decision that authorized dispatch. Never the adapter's.
+        authorizationId: permit.decisionId,
+        recordedAt,
+      });
+      written.push(costId);
+    }
+    return written;
   }
 
   /** @see isIssuedSynthesisPermit */
@@ -369,6 +466,13 @@ export class SynthesisGateway {
       (outcome.producedFinalProviderText !== undefined &&
         outcome.producedFinalProviderText !== segment.text.finalProviderText);
 
+    // Preallocated **before** the costs are written, so `CostRecord.takeId` is knowable at the
+    // moment a charge is recorded rather than only after the take exists (#160). And the costs are
+    // durable before the take is recorded: a take recorded first would say the work settled while
+    // the charge that paid for it is absent.
+    const takeId = this.#newTakeId();
+    const costIds = await this.#recordCosts(input, takeId, outcome, permit);
+
     const recordInput = {
       runId: input.plan.runId,
       planId: input.plan.planId,
@@ -376,9 +480,11 @@ export class SynthesisGateway {
       episodeId: input.episodeId,
       actor: input.actor,
       take: {
+        takeId,
         segmentId: segment.segmentId,
         text: segment.text,
         parameters: input.plan.parameters,
+        ...(costIds.length > 0 ? { costIds } : {}),
         authorization: {
           gateId: permit.gateId,
           decisionId: permit.decisionId,
@@ -470,6 +576,13 @@ export function gateEngineSpendAuthorizer(options: {
   plan: TtsRequestPlan;
   /** Recorded as the spend's purpose in a refusal message. An open string (§4.2). */
   operation?: string;
+  /**
+   * Read when a query excludes cost records (#160).
+   *
+   * Only consulted for an exclusion: an ordinary pre-dispatch check lets the gate engine read the
+   * ledger itself, and re-reading it here would be a second answer to one question.
+   */
+  costs?: { list(runId: string): Promise<CostRecord[]> };
 }): SpendAuthorizer {
   return {
     async authorize(query): Promise<AuthorizationOutcome> {
@@ -485,6 +598,17 @@ export function gateEngineSpendAuthorizer(options: {
       }
 
       const subjects = await options.subjects(query.runId);
+      // A charge being *recorded* is excluded from the availability it is checked against (#160).
+      // Without this, an unknown-money charge blocks the recording of its own take: the charge is
+      // durable before the take is written, so including it makes the guard refuse the fact that
+      // triggered it, leaving the money recorded and nothing attributing it.
+      const excluded = new Set(query.excludeCostIds ?? []);
+      const costs =
+        excluded.size === 0
+          ? undefined
+          : (await options.costs?.list(query.runId))?.filter(
+              (record) => !excluded.has(record.costId),
+            );
       const result = await options.engine.authorizeSpend(
         query.runId,
         grant,
@@ -493,6 +617,7 @@ export function gateEngineSpendAuthorizer(options: {
           ...(options.operation === undefined ? {} : { operation: options.operation }),
         },
         subjects,
+        costs,
       );
 
       if (!result.authorized) return { authorized: false, explanation: result.explanation };

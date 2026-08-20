@@ -92,6 +92,15 @@ export interface AuthorizationQuery {
   runId: string;
   /** The plan about to be synthesised. */
   planId: string;
+  /**
+   * Cost records to leave out of the availability calculation (#160).
+   *
+   * Used when re-checking authorization while **recording** a charge that has already happened:
+   * the charge being attributed is durable before its take is written, and including it would let
+   * every unknown-money charge block the recording of its own take. Empty for a pre-dispatch
+   * check, which is what this query is normally for.
+   */
+  excludeCostIds?: readonly string[];
   /** Digest of the plan's scope, which §13.2 requires the approval to have bound. */
   planScopeSha256: string;
   /** Digests of everything §13.2 binds, from `planSubjectDigests`. */
