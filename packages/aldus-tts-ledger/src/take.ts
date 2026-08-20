@@ -286,6 +286,56 @@ export const producedFactsSchema = z
 export type ProducedFacts = z.infer<typeof producedFactsSchema>;
 
 /**
+ * How the bytes entered this Run — the third of §15's three facts (#136).
+ *
+ * Requested, produced, and **delivered** are three facts, not two. The case that forces the third:
+ * a replay adapter can deliver audio a hosted provider originally made. Its *produced* facts are
+ * honestly that provider's — the bytes really were made that way — while the *delivery* is a local
+ * file read that called nobody and cost nothing. A two-fact model must pick one truth to record,
+ * and either choice makes a class of question unanswerable.
+ *
+ * Written by the gateway, never by the adapter, for `adapterId`. The gateway holds the true value
+ * already, and a component that can state its own identity can state a false one — the same rule
+ * as `authorizationId` on a cost record and everything in a `WorkerRequest` (ADR-0035).
+ */
+export const takeDeliverySchema = z
+  .object({
+    /** Which adapter delivered the bytes. Supplied by the gateway (§20). */
+    adapterId: nonEmptyString,
+    /**
+     * By what means, e.g. `"synthesis"`, `"replay"`, `"import"`.
+     *
+     * An open string, not an enumeration. §15.1 names human-recorded replacement as a repair, so a
+     * closed set defined here would be wrong on arrival — and §4.2 forbids Core naming an
+     * adopter's vocabulary regardless. Absent means the adapter did not say.
+     */
+    mechanism: z.string().min(1).max(200).optional(),
+    /**
+     * Whether this delivery incurred a charge, as the adapter reports it.
+     *
+     * The positive evidence {@link takePaidness} needs. Absent is unknown, and unknown is not
+     * free: an adapter that never learned to report is indistinguishable from one that charged
+     * nothing.
+     */
+    incurredCharge: z.boolean().optional(),
+    /** The take whose bytes this delivery replays, where it replays one (§15 lineage). */
+    sourceTakeId: z.string().min(1).max(200).optional(),
+    /** The artifact these bytes were imported from, where they were imported (§8.1). */
+    sourceArtifactId: z.string().min(1).max(200).optional(),
+  })
+  .meta({
+    id: "TakeDelivery",
+    title: "TakeDelivery",
+    description:
+      "How audio bytes entered a Run — the adapter and mechanism that delivered them " +
+      "(architecture contract §15). Distinct from what produced them: a replay adapter delivers " +
+      "audio another provider produced.",
+  });
+
+/** @see takeDeliverySchema */
+export type TakeDelivery = z.infer<typeof takeDeliverySchema>;
+
+/**
  * One synthesis attempt at one segment (contract §15).
  *
  * The field list covers §15's requirement enumeration: segment ID; text at every stage; voice,
@@ -323,6 +373,8 @@ export const takeRecordSchema = z
     parameters: synthesisParametersSchema,
     /** The facts that produced the bytes, as reported by the adapter (§15; ADR-0038). */
     produced: producedFactsSchema.optional(),
+    /** How the bytes entered this Run (§15; #136). Written by the gateway. */
+    delivery: takeDeliverySchema.optional(),
     /** The provider's own request identifier, for reconciliation (contract §15). */
     providerRequestId: z.string().min(1).max(400).optional(),
     /**
@@ -488,12 +540,44 @@ export function isRejected(take: TakeRecord): boolean {
   return take.decision?.decision === "rejected";
 }
 
+/** Whether a take actually cost money, as far as anything recorded establishes (§13.2; #136). */
+export type TakePaidness =
+  /** Charge evidence exists: a cost record, an unauthorized charge, or the adapter saying so. */
+  | "paid"
+  /** The adapter reported that this delivery incurred no charge. */
+  | "free"
+  /** Nothing establishes either. **Not** free. */
+  | "unknown";
+
 /**
- * Whether a take cost money.
+ * Whether a take cost money, derived from charge evidence (contract §13.2, §19.3; #136).
  *
- * Used to decide whether §15.1's retention rule applies. A take with an authorization or a cost
- * record was paid for; a locally rendered or human-recorded replacement (§15.1) was not.
+ * **An authorization is not charge evidence.** It means spending was *permitted*, not that it
+ * *occurred* — the distinction the owner's ruling on #133 draws, and one this function got wrong
+ * until #136. An adopter's seven takes were authorised by an approved synthesis gate and then
+ * synthesised locally for nothing; the previous implementation called all seven paid.
+ *
+ * That was the third instance of one shape in the same records: a value asserting something
+ * stronger than what was established, invisible because every record is well-formed.
+ *
+ * Three-valued, because absence of a cost record does not establish that nothing was charged — the
+ * record may simply not be written yet. `free` requires an adapter to have said so.
+ */
+export function takePaidness(take: TakeRecord): TakePaidness {
+  if (take.costRecordId !== undefined || take.unauthorizedCharge !== undefined) return "paid";
+  if (take.delivery?.incurredCharge === true) return "paid";
+  if (take.delivery?.incurredCharge === false) return "free";
+  return "unknown";
+}
+
+/**
+ * Whether a take is known to have cost money (contract §13.2, §19.3).
+ *
+ * Narrower than it was, and deliberately conservative in the safe direction: only `paid` counts,
+ * so `unknown` reads as false here. Callers deciding anything that costs an operator money if
+ * wrong — §15.1 retention among them — should branch on {@link takePaidness} and handle `unknown`
+ * explicitly rather than letting this collapse it.
  */
 export function isPaid(take: TakeRecord): boolean {
-  return take.authorization !== undefined || take.costRecordId !== undefined;
+  return takePaidness(take) === "paid";
 }

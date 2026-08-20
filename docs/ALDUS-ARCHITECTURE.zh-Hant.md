@@ -520,6 +520,18 @@ Take 上的文字與參數記錄的是**計畫值**，因為它們在 adapter �
 
 §13.2 要求的「operator 核准內容」與「實際送出內容」比對，必須使用回報值。拿計畫值與核准比對，是拿計畫跟自己比。
 
+記錄還必須包含**bytes 如何進入這個 Run**——adapter 與交付方式。這與「是什麼產生了 bytes」不同：replay 可以交付由另一個 provider 產生的音訊。交付 adapter 的身分必須由 runtime 提供，不得取自 adapter 自述。
+
+Take 是否產生費用，必須由計費證據推導。Authorization 代表**允許**支出，不代表支出**已發生**，不得被當成已支出的證據。兩者皆無法確立時，答案是 unknown，不得回報為 free。
+
+**付費**執行若其文字或參數與 authorization 所綁定者不同，必須在呼叫 provider 前拒絕，或必須要求重新授權的 plan。若此類執行在計費後才被發現，該記錄不得聲稱 authorization 涵蓋了它。**免費**的本地算圖或 replay 可以有差異，但其記錄必須揭露該差異。
+
+記錄還必須包含**bytes 如何進入這個 Run**——adapter 與交付方式。這與「是什麼產生了 bytes」不同：replay 可以交付由另一個 provider 產生的音訊。交付 adapter 的身分必須由 runtime 提供，不得取自 adapter 自述。
+
+Take 是否產生費用，必須由計費證據推導。Authorization 代表**允許**支出，不代表支出**已發生**，不得被當成已支出的證據。兩者皆無法確立時，答案是 unknown，不得回報為 free。
+
+**付費**執行若其文字或參數與 authorization 所綁定者不同，必須在呼叫 provider 前拒絕，或必須要求重新授權的 plan。若此類執行在計費後才被發現，該記錄不得聲稱 authorization 涵蓋了它。**免費**的本地算圖或 replay 可以有差異，但其記錄必須揭露該差異。
+
 修復可以包含 scoped pronunciation substitution、pause mapping、重新分段、provider setting、alternate take、使 Content Freeze 失效的 narration rewrite，或人工錄音。
 
 未被接受的付費 take 應保留唯一 identity，直到 retention policy 允許清除。未經 policy 與 cost authorization，不得靜默重試付費 request。
