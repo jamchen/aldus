@@ -12,6 +12,14 @@ import { AldusError, type ErrorCategory } from "@aldus-runtime/core";
 /** Error codes raised by the application services. */
 export const ServiceErrorCodes = {
   /**
+   * A paid execution was refused before it ran (contract §13.2, §19.3).
+   *
+   * Raised before dispatch, deliberately: a refusal that arrives once the provider has been
+   * billed is not a refusal. Covers an estimate with no grant to check it against, a grant
+   * already exhausted, and one already overspent.
+   */
+  SPEND_NOT_AUTHORIZED: "ALDUS_SPEND_NOT_AUTHORIZED",
+  /**
    * A mutating operation was attempted without a recorded actor.
    *
    * Contract §19.2: "Mutating actions MUST record actor identity." An anonymous mutation is

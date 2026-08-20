@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import * as artifactRegistry from "@aldus-runtime/artifact-registry";
 import * as core from "@aldus-runtime/core";
 import * as gateEngine from "@aldus-runtime/gate-engine";
+import * as services from "@aldus-runtime/services";
 import * as stageRunner from "@aldus-runtime/stage-runner";
 
 /**
@@ -60,6 +61,10 @@ const PUBLIC_SURFACE: Record<string, { module: object; names: readonly string[] 
   "@aldus-runtime/gate-engine": {
     module: gateEngine,
     names: ["GATE_LEVELS", "GATE_ENFORCEMENTS", "GateEngine", "GateRegistry"],
+  },
+  "@aldus-runtime/services": {
+    module: services,
+    names: ["AldusContext", "AldusServices", "AgentExecutionService"],
   },
   "@aldus-runtime/artifact-registry": {
     module: artifactRegistry,

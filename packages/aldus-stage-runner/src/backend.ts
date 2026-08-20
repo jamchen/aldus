@@ -60,6 +60,14 @@ export interface AgentSessionRef {
 
 /** A unit of work handed to a backend (contract §10). */
 export interface AgentRequest {
+  /**
+   * A ceiling this execution must not exceed, where the backend enforces one (§13.2, §19.3).
+   *
+   * Passed only to a backend declaring `enforcesSpendCeiling`. Sending a limit to a backend that
+   * ignores it would record a protection that does not exist, which is worse than no limit
+   * because a reader counts it (ADR-0030).
+   */
+  maxSpend?: import("@aldus-runtime/core").Money;
   /** Identity correlating this execution with the attempt that issued it. */
   executionId: string;
   /** What the backend is being asked to do. */
