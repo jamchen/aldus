@@ -59,6 +59,7 @@ import { planSubjectDigests } from "@aldus-runtime/tts-ledger";
 
 import type { SubjectsProvider } from "./context.js";
 import type { CostRecordStore } from "./cost-store.js";
+import type { SpendService } from "./spend-service.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
 
 /**
@@ -203,6 +204,14 @@ export interface SynthesisAdapter {
   /** Opaque identity of this adapter, for trace (contract §20). */
   readonly id: string;
   /**
+   * Version of this adapter, resolved exactly (§20; ADR-0044).
+   *
+   * Optional for compatibility, and recorded as `"unknown"` when absent — which reads correctly as
+   * *nobody said*, not as a version. A reservation records what was true of the execution it
+   * covers, and an unnamed version is weaker evidence than a named one rather than equivalent.
+   */
+  readonly version?: string;
+  /**
    * What this adapter may do, declared before it is called (#136).
    *
    * Optional, and an adapter that omits it is treated as declaring nothing — which is the safe
@@ -250,6 +259,22 @@ export interface SynthesisGatewayOptions {
   adapter: SynthesisAdapter;
   ledger: TtsLedger;
   /**
+   * Reserves authorization before dispatch and settles it after (ADR-0044; #155 step 4).
+   *
+   * Optional so an existing composition keeps working, and the gateway says which protection is in
+   * force rather than implying the stronger one: without it, spend is enforced only *between*
+   * durably recorded executions, which is not concurrency-safe.
+   */
+  spend?: SpendService;
+  /**
+   * Supplies the grant a reservation draws on (§13.2; #155 step 4).
+   *
+   * The permit names the *decision*; a reservation consumes a *pool*, and #158 established those
+   * are different identities. So the gateway resolves the grant itself rather than reconstructing
+   * one from the permit, which would make one decision mean one budget pool by accident.
+   */
+  grants?: SpendGrantProvider;
+  /**
    * Where attributed cost records are written (§19.3; #160).
    *
    * The same port `AgentExecutionService` uses, injected here rather than duplicated: a second
@@ -274,6 +299,8 @@ export class SynthesisGateway {
   readonly #adapter: SynthesisAdapter;
   readonly #ledger: TtsLedger;
   readonly #costs: CostRecordStore | undefined;
+  readonly #spend: SpendService | undefined;
+  readonly #grants: SpendGrantProvider | undefined;
   readonly #now: () => Date;
   readonly #newTakeId: () => string;
 
@@ -281,6 +308,8 @@ export class SynthesisGateway {
     this.#adapter = options.adapter;
     this.#ledger = options.ledger;
     this.#costs = options.costs;
+    this.#spend = options.spend;
+    this.#grants = options.grants;
     this.#now = options.now ?? (() => new Date());
     // Matches `TtsLedger`'s own minting so a preallocated id is indistinguishable from one the
     // ledger would have produced. That the ledger uses the *artifact* prefix for a take is odd and
@@ -433,6 +462,52 @@ export class SynthesisGateway {
       };
     }
 
+    // Reserved before the effect (ADR-0044; #155 step 4). The permit established that an operator
+    // approved this plan; the reservation commits the headroom, which is what stops two
+    // concurrent segments from both spending the same remaining authorization.
+    //
+    // The effect key is the segment's own identity: retrying one segment resolves to one
+    // reservation rather than committing authorization twice (ADR-0043).
+    const grant = await this.#grants?.(input.plan.runId, input.plan.planId);
+    const reserveOutcome = await this.#spend?.reserve({
+      grant,
+      operation: "tts.synthesize",
+      runId: input.plan.runId,
+      stageId: input.plan.planId,
+      attemptId: segment.segmentId,
+      // Plan, segment **and attempt**. A retry of one dispatch must resolve to one reservation;
+      // a *regeneration* of a rejected take is a different paid effect that charges again, and a
+      // key without the attempt would make the second one resolve to the first's settled
+      // reservation and refuse (ADR-0043).
+      effectKey: `${input.plan.planId}:${segment.segmentId}:${
+        (await this.#ledger.listTakes(input.plan.runId)).filter(
+          (take) => take.segmentId === segment.segmentId,
+        ).length + 1
+      }`,
+      expectation:
+        segment.estimatedCost === undefined
+          ? { kind: "unestimated" }
+          : { kind: "estimated", amount: segment.estimatedCost },
+    });
+    if (reserveOutcome?.reserved === false && reserveOutcome.reason === "refused") {
+      return { permitted: false, explanation: reserveOutcome.explanation };
+    }
+    let reservation =
+      reserveOutcome !== undefined && reserveOutcome.reserved
+        ? reserveOutcome.reservation
+        : undefined;
+
+    if (reservation !== undefined && this.#spend !== undefined) {
+      // Before the provider call, so the window in which dispatch may have begun is visible.
+      reservation = await this.#spend.prepareDispatch(reservation, {
+        backendId: this.#adapter.id,
+        backendVersion: this.#adapter.version ?? "unknown",
+        // A synthesis adapter has no declared ceiling-enforcement capability, so the honest answer
+        // is that the Runtime could only enforce *between* executions (#107, ADR-0030).
+        ceilingEnforced: false,
+      });
+    }
+
     const outcome = await this.#adapter.synthesise(
       {
         runId: input.plan.runId,
@@ -471,7 +546,35 @@ export class SynthesisGateway {
     // durable before the take is recorded: a take recorded first would say the work settled while
     // the charge that paid for it is absent.
     const takeId = this.#newTakeId();
-    const costIds = await this.#recordCosts(input, takeId, outcome, permit);
+
+    // **One writer for the charge.** Where a reservation exists, settlement writes the cost
+    // records and the gateway does not: two writers produced two records for one charge, under
+    // different id schemes, which is double-counted spend wearing a lineage improvement.
+    //
+    // Settlement's ids are derived from the reservation, which is the stronger property — they are
+    // stable across a settlement retry, so a storage conflict cannot duplicate the charge.
+    let costIds: string[];
+    if (reservation !== undefined && this.#spend !== undefined) {
+      if (outcome.providerRequestId !== undefined) {
+        reservation = await this.#spend.identifyDispatch(reservation, outcome.providerRequestId);
+      }
+      const observations = outcome.costs ?? [];
+      if (observations.length > 0) {
+        // Costs durable first, then the reservation stops consuming authorization (ADR-0044).
+        const settled = await this.#spend.settle(reservation, observations, {
+          authorizationId: permit.decisionId,
+          takeId,
+        });
+        costIds = settled.costs.map((record) => record.costId);
+      } else {
+        // Dispatched and reported nothing about billing. That is uncertainty, not zero: the
+        // reservation stays committed and the effect non-retryable until it is reconciled.
+        await this.#spend.markUnknown(reservation);
+        costIds = [];
+      }
+    } else {
+      costIds = await this.#recordCosts(input, takeId, outcome, permit);
+    }
 
     const recordInput = {
       runId: input.plan.runId,

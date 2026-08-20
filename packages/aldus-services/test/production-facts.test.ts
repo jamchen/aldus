@@ -20,6 +20,8 @@ import {
 } from "@aldus-runtime/tts-ledger";
 import { SCHEMA_VERSION } from "@aldus-runtime/core";
 
+import type { SpendGrant } from "@aldus-runtime/gate-engine";
+
 import {
   aGrant,
   aPlan,
@@ -44,10 +46,14 @@ afterEach(async () => {
 });
 
 /** Arm the stack against exactly the plan the test will synthesise (§13.2 binds the plan). */
-async function armedFor(plan: TtsRequestPlan): Promise<Harness> {
+async function armedFor(
+  plan: TtsRequestPlan,
+  options: { grant?: Partial<SpendGrant> } = {},
+): Promise<Harness> {
+  const grant = aGrant({ ...options.grant });
   const harness = makeComposedServices(workspace.workspace, {
     gates: [synthesisGate(plan)],
-    subjects: subjectsForPlan(plan),
+    subjects: subjectsForPlan(plan, SYNTHESIS_GATE, grant),
   });
   await seedRun(harness.services);
   await harness.services.recordPerformanceScript({ script: aScript(), actor: OPERATOR });
@@ -58,7 +64,7 @@ async function armedFor(plan: TtsRequestPlan): Promise<Harness> {
     actor: OPERATOR,
   });
   if (approval.outcome !== "ok") throw new Error("the gate should have been approvable");
-  harness.grant.current = aGrant({ decisionId: approval.data.decisionId });
+  harness.grant.current = { ...grant, decisionId: approval.data.decisionId };
   return harness;
 }
 
@@ -84,7 +90,7 @@ describe("the seven acceptance cases of the #133 ruling", () => {
     harness.synthesis.costRecordId = undefined;
 
     const result = await synthesise(harness, plan);
-    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted");
+    if (result.outcome !== "ok") throw new Error("synthesis should have been permitted: ");
     const take = result.data.take;
 
     // The requested fact survives untouched — it is still true that this was planned.
@@ -103,6 +109,7 @@ describe("the seven acceptance cases of the #133 ruling", () => {
         {
           segmentId: "seg-1",
           text: { raw: "The first line.", finalProviderText: "[tag] The first line." },
+          estimatedCost: { amount: "0.0100", currency: "USD" },
         },
       ],
     } as never);
@@ -227,8 +234,21 @@ describe("the seven acceptance cases of the #133 ruling", () => {
     //
     // Written because a mutation removing the paidness condition from the pre-call refusal passed
     // every other test in this file.
-    const plan = aPlan();
-    const harness = await armedFor(plan);
+    // No per-segment estimate, which is what makes this execution free rather than paid — the
+    // pre-call refusal turns on paidness, and adding an estimate to the shared fixture would have
+    // quietly converted this case into the one it is contrasted with.
+    const plan = aPlan({
+      segments: [{ segmentId: "seg-1", text: { raw: "The first line." } }],
+    } as never);
+    const harness = await armedFor(plan, {
+      // Unestimated dispatch has to be permitted for a reservation to exist at all, and the
+      // permission is only satisfiable with a per-request ceiling to reserve — a grant that
+      // permits it and states no ceiling promises an amount it does not have (ADR-0044).
+      grant: {
+        unestimatedExecution: "reserve_max_per_request",
+        maxPerRequest: { amount: "1.0000", currency: "USD" },
+      },
+    });
     harness.synthesis.declares = { maySubstitute: true, mechanism: "synthesis" };
     harness.synthesis.costRecordId = undefined;
     harness.synthesis.observation = {
