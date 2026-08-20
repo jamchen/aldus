@@ -47,6 +47,15 @@ export const StageRunnerErrorCodes = {
    * runtime-derived invocation fingerprint, which is stable across content the stage read but did
    * not declare — and the consumer is an external system nobody here can ask.
    */
+  /**
+   * A stage's evaluator declaration is internally inconsistent (contract §12, §12.1; #115).
+   *
+   * Refused at registration rather than warned about. §12.1 makes blocking a promotion with
+   * evidence behind it, and a claim that contradicts itself — an advisory signal declared
+   * blocking, a model-assisted channel blocking with no evidence, two claims about one finding
+   * class — is not a stricter policy but an unanswerable one.
+   */
+  STAGE_EVALUATION_INVALID: "ALDUS_STAGE_EVALUATION_INVALID",
   STAGE_EFFECT_KEY_REQUIRED: "ALDUS_STAGE_EFFECT_KEY_REQUIRED",
   WORKER_NOT_REGISTERED: "ALDUS_WORKER_NOT_REGISTERED",
   /**

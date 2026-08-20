@@ -133,6 +133,15 @@ export {
   type RedactableHeaders,
   type RedactionOptions,
 } from "./redaction.js";
+export {
+  QUALITY_LEVELS,
+  QUALITY_ENFORCEMENTS,
+  validateQualityClaim,
+  type QualityLevel,
+  type QualityEnforcement,
+  type PromotionEvidence,
+  type QualityClaimProblem,
+} from "./quality.js";
 
 // --- Knowledge Packs (§9) ---------------------------------------------------------------------
 export {

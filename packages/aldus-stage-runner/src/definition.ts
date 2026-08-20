@@ -15,7 +15,14 @@
  * stopping at gates — are the runner's to enforce, and are covered in `runner.ts`.
  */
 
-import type { ArtifactRef, Reconstructability, StructuredError } from "@aldus-runtime/core";
+import type {
+  ArtifactRef,
+  PromotionEvidence,
+  QualityEnforcement,
+  QualityLevel,
+  Reconstructability,
+  StructuredError,
+} from "@aldus-runtime/core";
 
 import { digestJson } from "./state.js";
 import type { WorkerResult } from "./worker.js";
@@ -34,6 +41,64 @@ export interface StageSchema<T> {
 
 /** Outcome of a {@link StageSchema} check. */
 export type StageSchemaResult<T> = { success: true; data: T } | { success: false; error?: unknown };
+
+/**
+ * One quality claim a Stage makes about a class of its findings (contract §12; #115).
+ *
+ * Per-channel rather than per-Stage, because a real evaluator is not one thing. The first adopter's
+ * script checker emits errors that block and warnings that do not, from one deterministic
+ * implementation — a single `level` and `enforcement` for the whole Stage would force them to
+ * either promote the warnings or demote the errors, and both would be a lie about the check.
+ */
+export interface StageEvaluationChannel {
+  /**
+   * Which class of finding this claim covers, e.g. `"error"`, `"warning"`.
+   *
+   * An open string. Core names no severity scale — §4.2, and the same reason
+   * `@aldus-runtime/regression` leaves `severityLevel` to the adopter: assuming `"critical"`
+   * outranks `"major"` would be guessing at their vocabulary.
+   */
+  findingClass: string;
+  /**
+   * How this class of finding is judged (§12).
+   *
+   * `human_oracle` is deliberately unavailable to a Stage. A human-owned judgement is a Gate
+   * Decision, not an automatic Stage execution — a Stage that appears to perform one is evidence
+   * the judgement should be represented as a gate.
+   */
+  level: Exclude<QualityLevel, "human_oracle">;
+  /** Whether findings of this class stop work or merely report (§12). */
+  enforcement: QualityEnforcement;
+  /** Calibration evidence, required when a model-assisted channel blocks (§12.1). */
+  promotionEvidence?: PromotionEvidence;
+}
+
+/**
+ * A Stage's declaration that it executes an evaluator (contract §12; #115).
+ *
+ * Optional, and an ordinary Stage stays ordinary. What this prevents is an evaluator Stage
+ * becoming blocking through an unreviewed boolean or a convention: §12's model lived only in
+ * `gate-engine`, so a Stage running a linter could declare nothing at all, and §12.1 was
+ * enforceable at one of the two places it applies.
+ *
+ * Declaring this does **not** hand Aldus the adopter's editorial policy. Aldus defines the
+ * available claims and the evidence each requires, and refuses internally inconsistent ones. Which
+ * declared violations stop a pipeline remains the adopter's, and a deterministic rule is not
+ * reclassified as model-assisted merely because its subject is prose.
+ */
+export interface StageEvaluationDeclaration {
+  /** One claim per class of finding the Stage emits. At least one. */
+  channels: readonly StageEvaluationChannel[];
+  /**
+   * Defect classes this evaluator structurally cannot see (§12.1, §9.3).
+   *
+   * A hard gate may reliably block what it detects without claiming to detect everything, and the
+   * limit is recorded rather than implied — an adopter measured recall of 0.5 on a checker whose
+   * miss was a section its parser cuts before checking. Reported so a green result is never read
+   * as semantic correctness (§12).
+   */
+  scopeLimitations?: readonly string[];
+}
 
 /**
  * What a stage asks of {@link StageContext.runWorker} (ADR-0035).
@@ -444,6 +509,13 @@ export interface StageDefinition<I = unknown, O = unknown> {
    * Core from enumerating backends. Checked before execution.
    */
   requiredCapabilities: readonly string[];
+  /**
+   * This stage's quality claims, when it executes an evaluator (§12; #115).
+   *
+   * Absent for an ordinary stage, which is most of them. Present means the stage emits findings
+   * whose enforcement Aldus refuses to accept if the claim is internally inconsistent.
+   */
+  evaluation?: StageEvaluationDeclaration;
   /** Idempotency declaration. Required — §11 permits no silent answer. */
   idempotency: StageIdempotency;
   /**

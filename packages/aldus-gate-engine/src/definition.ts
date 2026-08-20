@@ -15,6 +15,14 @@
  */
 
 import type { ActorKind } from "@aldus-runtime/core";
+import {
+  QUALITY_ENFORCEMENTS,
+  QUALITY_LEVELS,
+  validateQualityClaim,
+  type PromotionEvidence,
+  type QualityEnforcement,
+  type QualityLevel,
+} from "@aldus-runtime/core";
 
 import { GateEngineErrorCodes, gateEngineError } from "./errors.js";
 
@@ -26,32 +34,29 @@ import { GateEngineErrorCodes, gateEngineError } from "./errors.js";
  * does not, and a model-assisted review may do either depending on whether it has been
  * calibrated (§12.1).
  */
-export const GATE_LEVELS = [
-  /** Blocks on an objectively testable failure (§12 level 1). */
-  "hard_gate",
-  /** Reports a possible issue without blocking (§12 level 2). */
-  "advisory_signal",
-  /** Evaluates meaning, stance, style, or claims under uncertainty (§12 level 3). */
-  "model_assisted",
-  /** A human owns the judgement, because it is subjective or asymmetric-risk (§12 level 4). */
-  "human_oracle",
-] as const;
+/**
+ * @deprecated in name only — the concept moved to Core (#115) and this is the gate-shaped alias.
+ *
+ * §12's levels are a property of any quality mechanism, not of gates. They lived here alone until
+ * an adopter's blocking evaluator turned out to be a Stage, which could declare none of this. The
+ * canonical definition is `QUALITY_LEVELS`; this name is kept because published code consumes it.
+ */
+export const GATE_LEVELS = QUALITY_LEVELS;
 
 /** @see GATE_LEVELS */
-export type GateLevel = (typeof GATE_LEVELS)[number];
+export type GateLevel = QualityLevel;
 
 /**
- * Whether a gate stops work or merely reports.
+ * Whether a gate stops work or merely reports. The gate-shaped alias of `QUALITY_ENFORCEMENTS`.
  *
- * Deliberately a two-state enumeration rather than a boolean. Contract §12.1 permits an
- * evaluator to *become* blocking only after calibration, which makes this a promotion with
- * evidence behind it — and a field named `blocking: boolean` invites someone to flip it in a
- * config file without producing any.
+ * Still a two-state enumeration rather than a boolean, for the reason Core records: §12.1 makes
+ * blocking a promotion with evidence behind it, and `blocking: boolean` invites someone to flip it
+ * in a config file without producing any.
  */
-export const GATE_ENFORCEMENTS = ["blocking", "advisory"] as const;
+export const GATE_ENFORCEMENTS = QUALITY_ENFORCEMENTS;
 
 /** @see GATE_ENFORCEMENTS */
-export type GateEnforcement = (typeof GATE_ENFORCEMENTS)[number];
+export type GateEnforcement = QualityEnforcement;
 
 /**
  * Evidence that a model-assisted evaluator was calibrated before it was allowed to block.
@@ -65,14 +70,7 @@ export type GateEnforcement = (typeof GATE_ENFORCEMENTS)[number];
  * scope among what promotion must consider, because an evaluator calibrated on one host says
  * nothing about another. Dimensions are caller-supplied (§4.2), consistent with WP-09's packs.
  */
-export interface PromotionEvidence {
-  /** Identifier of the calibration report that justified promotion (WP-10). */
-  reportRef: string;
-  /** Scope the calibration covers, e.g. `{ host: "example-host", voice: "voice-a" }`. */
-  scope: Record<string, string>;
-  /** Known blind spots recorded at promotion time (§12.1, §9.3). */
-  knownBlindSpots?: string[];
-}
+export type { PromotionEvidence };
 
 /**
  * One configured gate.
@@ -196,15 +194,15 @@ export function validateGateDefinition(definition: GateDefinition): ResolvedGate
     fail("A gate cannot depend on itself.");
   }
 
-  if (definition.level === "model_assisted" && definition.enforcement === "blocking") {
-    if (definition.promotionEvidence === undefined) {
-      fail(
-        "A model-assisted gate may only block once it has been calibrated against human-labeled " +
-          "examples (contract §12.1). Set `promotionEvidence`, or leave the gate advisory. " +
-          "Contract §12 forbids presenting a machine pass as semantic correctness.",
-        { level: definition.level, enforcement: definition.enforcement },
-      );
-    }
+  // The shared rule, not a second copy of it (#115). A gate and an evaluator Stage making the same
+  // claim are refused for the same reasons in the same words; two implementations of one clause
+  // is how §12 came to be enforced in one place and not the other.
+  for (const problem of validateQualityClaim({
+    level: definition.level,
+    enforcement: definition.enforcement,
+    promotionEvidence: definition.promotionEvidence,
+  })) {
+    fail(problem.message, { level: definition.level, enforcement: definition.enforcement });
   }
 
   const permittedActorKinds =
