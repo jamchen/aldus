@@ -220,21 +220,25 @@ badge.
 **Only after** the clean-consumer gate and a real adopter smoke test pass, and the owner approves.
 
 ```bash
-for pkg in artifact-registry cli core file-store gate-engine mcp regression release services stage-runner testkit tts-ledger; do
-  npm dist-tag add "@aldus-runtime/${pkg}@${VERSION}" latest
-done
+node scripts/promote-latest.mjs "${VERSION}"
 ```
 
-Then confirm every package moved:
+**Run it from a real terminal, not from an editor or an agent session.** npm requires a one-time
+password for every publish-class operation and `dist-tag add` is one, so with no TTY it cannot
+prompt and fails on the first package. The script detects that and refuses up front rather than
+letting you discover it halfway through.
 
-```bash
-for pkg in artifact-registry cli core file-store gate-engine mcp regression release services stage-runner testkit tts-ledger; do
-  echo "${pkg}: $(npm view "@aldus-runtime/${pkg}" dist-tags.latest)"
-done
-```
+Expect npm to ask you to authenticate **once per package**. There is no supported way to collapse
+that which does not involve a token that bypasses 2FA.
 
-A partial promotion is worse than none — a consumer installing `latest` would get a mixed
-composition, which is exactly what lockstep exists to prevent.
+The script verifies every package against the registry afterwards and retries the read: `npm view`
+serves a cached path that lags a write by seconds, and checking immediately reports a healthy
+release as a partial failure — which is exactly what happened the first time `latest` moved.
+
+A partial promotion is worse than none. Internal dependencies are exact pins, so a `latest` where
+`cli` is one version and `core` another is not a degraded install but a broken one. If the script
+reports a split, **finish rather than stop** — it prints the remaining commands, and re-running is
+idempotent.
 
 ---
 
