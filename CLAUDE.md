@@ -255,6 +255,26 @@ distrust. Here §13.4 names _"the final render, captions, metadata, destination,
 policy"_ — things, not artifacts — and `GateSubject` documents itself accurately, so the framing came
 from the reader and there was nothing to fix.
 
+**This entry has a mechanism, and it is a weaker kind than the other four.** An earlier version of
+this section said it could not have one, on the grounds that there is no grep for "this premise
+arrived in prose". That aimed at the wrong target: the failure is not that the premise is prose, it
+is that **the omission is invisible** — nothing distinguishes "I opened the file" from "the report
+said so". The move for invisibility is a required field, not a detector.
+
+So `evidence.mjs` requires **`verified at:`** on every claim. Three honest answers and no fourth: a
+`file:line`, which requires opening the code, and opening the code _is_ the remedy; `report: <who
+said it>`, which makes the inheritance visible — all three instances above would have been caught by
+seeing that line written under a claim the work rested on; or a visible hole.
+
+And the sharper half: **a claim whose verification reduces to a command does not belong in `claims:`
+at all** — it belongs in `checks:`, where the emitter runs it and prints the exit. What is left in
+`claims:` after that move is the genuinely judgement-based residue, and none of the three above was
+in it. Two `ls` commands and a two-line docstring are not judgement.
+
+The difference from the other four is real and worth keeping: they **refuse**, and this one only
+makes the gap visible. A weak mechanism labelled as weak is worth more here than conceding the
+category to habit.
+
 **A case is a claim too.** Two mutant cases were written on premises that were never checked — a
 forty-zero base ref assumed to make a check decline, and an appended export assumed visible to an
 importer. Both read as failures of the thing under test. `invalidated by:` applies to cases, not
