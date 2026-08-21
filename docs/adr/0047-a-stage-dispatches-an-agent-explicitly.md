@@ -120,6 +120,18 @@ the same fact sooner and more specifically, which is not a competing answer.
 records alone it answered correctly when a record existed and could not answer at all when none
 did — which is exactly the silent case.
 
+**What retaining the reservation costs today, plainly.** A `billing_unknown` reservation keeps
+consuming its authorization until a human resolves it — and on this branch nothing can.
+`SpendService` here has no `reconcile` at all: the reconciliation protocol is #155 step 5's, it
+lives on a separate branch, and it is dormant there by design because no boundary can mint the
+authority it requires (ADR-0045). So a backend that goes silent permanently consumes a slice of the
+grant's availability, bounded only by how often backends go silent.
+
+That is the correct direction and strictly better than the alternative — a false release restores
+budget for money that may be gone, and the error compounds silently — but it is a real cost and it
+is not visible from this branch. **The resolution path is #155 step 5 reaching a genuine authority
+boundary.** Until then, an operator's recourse is a new grant rather than a reconciliation.
+
 ### A ceiling never travels from the caller
 
 `maxSpend` is stripped from the caller's request **unconditionally** and re-added only where the
@@ -144,6 +156,11 @@ and treating cancellation as proof of no charge is the assumption §19.3 exists 
 
 ## Consequences
 
+- **An existing composition changes behaviour, not only a new one.** `SynthesisGateway` reaches the
+  same `SpendService.settle`, so a paid synthesis whose gateway reports no billing observations now
+  retains its reservation where it previously released. Adopters running synthesis need to know
+  that before they meet it; cross-referenced on the synthesis cost-path issue rather than left in
+  this file, because an ADR is where a decision is recorded and not where an operator looks.
 - `AgentExecutionService` remains the standalone surface for callers outside a Stage, and stops
   being the _only_ path. Both go through one implementation.
 - A composition without a backend refuses `runAgent` rather than doing nothing, and a composition
