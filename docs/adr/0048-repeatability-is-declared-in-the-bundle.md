@@ -77,7 +77,17 @@ fail-closed, so nothing unsafe, but with no code, no bundle or operation id and 
 what was wrong, arriving from exactly the source the check's own comment named.
 
 Every malformed shape is now one table in the tests, so a fifth is a row rather than a
-rediscovery. Higher stakes
+rediscovery.
+
+**A validation table needs one row that gets through.** Six rows of _"this shape is rejected"_ are
+all satisfied by a check that rejects everything, so a table of refusals is exactly as strong as a
+check that refuses unconditionally — which is to say, not a test of the check at all. The control
+asserting that a minted declaration still executes is what makes the six rows mean something, and
+the mutant that proves it is `typeof reason !== "number"`: it passes every refusal row and fails
+the control.
+
+That generalises past this ADR. Any table of invalid inputs is incomplete without a valid one
+beside it, and the valid row is the one carrying the weight. Higher stakes
 than the usual version: the declaration licenses an external effect happening twice, and §13.4
 binds approval to the bundle, so a blank reason is an approval of nothing.
 
