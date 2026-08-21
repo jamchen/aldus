@@ -64,3 +64,4 @@ Rules:
 | [0045](0045-authority-originates-at-a-boundary-aldus-does-not-have.md)                      | Reconciliation authority must originate at a boundary Aldus does not yet have              | Accepted | #155              |
 | [0046](0046-a-worker-is-a-paid-gateway.md)                                                  | A Worker is a paid gateway and reserves like one                                           | Accepted | #107              |
 | [0047](0047-a-stage-dispatches-an-agent-explicitly.md)                                      | A Stage dispatches an agent execution explicitly, and only single-shot                     | Accepted | #107              |
+| [0048](0048-repeatability-is-declared-in-the-bundle.md)                                     | Repeatability is a property of the operation, declared in the bundle                       | Accepted | #169              |

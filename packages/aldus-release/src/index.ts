@@ -56,7 +56,9 @@ export {
 
 export {
   bestEffortOperation,
+  repeatable,
   requiredOperation,
+  type RepeatableDeclaration,
   type BestEffortOperation,
   type OperationCriticality,
   type ReleaseOperation,

@@ -78,6 +78,33 @@ export interface BundleStatus {
 }
 
 /** What reconciliation did about one operation. */
+/**
+ * Which reconciliation findings an operator is warned about (§20; #169).
+ *
+ * An **allow-list**, keyed on the action. It was a deny-list — any finding carrying an explanation
+ * except `confirmed_absent` — so every action added later was opted in by default, with nobody
+ * deciding. `not_reconciled_repeatable` was opted in exactly that way, and appeared in the
+ * warnings of every ordinary release of a bundle holding a repeatable operation, reporting that
+ * the expected thing had happened.
+ *
+ * Membership answers the question a warning asks: **did something go differently than intended?**
+ *
+ * - `repaired` — yes. The local record was wrong and had to be corrected.
+ * - `unavailable` — yes. Reconciliation could not run, so an operator is being told that a
+ *   protection they may assume is absent.
+ * - `confirmed_absent` — no. The ordinary path; most operations in a fresh bundle are absent, and
+ *   one line each would bury the two above.
+ * - `not_reconciled_repeatable` — no. The declared, approved state of the bundle. The reason is in
+ *   the reconciliation report for anyone reading it.
+ *
+ * Adding an action now requires either adding it here or leaving it out, and both are decisions.
+ * Neither happens by default.
+ */
+const OPERATOR_FACING_FINDINGS: ReadonlySet<ReconciliationFinding["action"]> = new Set([
+  "repaired",
+  "unavailable",
+]);
+
 export interface ReconciliationFinding {
   operationId: string;
   idempotencyKey: string;
@@ -89,7 +116,14 @@ export interface ReconciliationFinding {
     /** The destination does not hold it, so the operation genuinely still needs to run. */
     | "confirmed_absent"
     /** The adapter cannot query the destination (contract §17 "where the platform allows it"). */
-    | "unavailable";
+    | "unavailable"
+    /**
+     * The operation declares its effect safe to repeat, so it was not queried (#169).
+     *
+     * Deliberately its own action rather than folded into `confirmed_absent`. Nothing was
+     * searched for, and saying it was absent would be the false statement this exists to stop.
+     */
+    | "not_reconciled_repeatable";
   explanation?: string;
 }
 
@@ -229,6 +263,23 @@ export class ReleaseExecutor {
         continue;
       }
 
+      // Asked of nothing, because the answer would change nothing. A repeatable operation may be
+      // performed again whatever the destination holds, so querying it buys no decision — and
+      // where reconciliation runs before execution, as it does inside `execute`, a "not there"
+      // reading can mean "the operation before it has not run yet" rather than "it did not
+      // happen". An adapter forced to answer that question has to invent one (#169).
+      if (operation.repeatable !== undefined) {
+        findings.push({
+          operationId: operation.operationId,
+          idempotencyKey,
+          action: "not_reconciled_repeatable",
+          explanation:
+            `"${operation.operationId}" declares its effect safe to repeat, so the destination ` +
+            `was not queried: ${operation.repeatable.reason}`,
+        });
+        continue;
+      }
+
       const adapter = this.#adapters.require(operation.destination);
       if (adapter.lookup === undefined) {
         findings.push({
@@ -249,6 +300,9 @@ export class ReleaseExecutor {
       };
       const remote = await adapter.lookup(request);
       if (!remote.exists) {
+        // Reserved to a `lookup` that actually returned `exists: false`. Every other reason an
+        // operation might not have been found now has its own action, so this one means what it
+        // says: a completed search established that the destination does not hold it (#169).
         findings.push({
           operationId: operation.operationId,
           idempotencyKey,
@@ -296,7 +350,7 @@ export class ReleaseExecutor {
       const report = await this.reconcile(bundle, { actor: options.actor });
       written.push(...report.repaired);
       for (const finding of report.findings) {
-        if (finding.explanation !== undefined && finding.action !== "confirmed_absent") {
+        if (finding.explanation !== undefined && OPERATOR_FACING_FINDINGS.has(finding.action)) {
           warnings.push(finding.explanation);
         }
       }
@@ -324,7 +378,18 @@ export class ReleaseExecutor {
       // An operation whose outcome was never confirmed must not be retried (contract §17). If
       // reconciliation could have resolved it, it already ran above and this receipt would be
       // terminal; reaching here means the destination cannot be queried.
-      if (existing?.status === "pending") {
+      //
+      // Unless the operation says repeating it is safe, which is exactly the fact this refusal
+      // needs and previously had no way to hear. Without it a best-effort tidy-up whose outcome
+      // was once unconfirmed refused **every later release of that bundle** — the same operation
+      // whose failure `execute` treats as a warning, blocking the release forever because one
+      // past attempt went unanswered (#169).
+      if (existing?.status === "pending" && operation.repeatable !== undefined) {
+        warnings.push(
+          `"${operation.operationId}" has an unconfirmed earlier outcome and declares its effect ` +
+            `safe to repeat, so it is being performed again: ${operation.repeatable.reason}`,
+        );
+      } else if (existing?.status === "pending") {
         throw releaseError(
           ReleaseErrorCodes.RECONCILIATION_UNAVAILABLE,
           `"${operation.operationId}" was attempted and its outcome was never confirmed, and ` +
