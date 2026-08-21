@@ -27,6 +27,13 @@ export const ReleaseErrorCodes = {
   /** A bundle was constructed with no operations at all. */
   EMPTY_BUNDLE: "ALDUS_RELEASE_EMPTY_BUNDLE",
   /**
+   * An operation declaration is not usable as written (#169).
+   *
+   * Today: a repeatable declaration with no reason. It licenses performing an external effect more
+   * than once, and an approver cannot accept that from a bare flag (§13.4, §17).
+   */
+  OPERATION_INVALID: "ALDUS_RELEASE_OPERATION_INVALID",
+  /**
    * A required operation failed, so the release did not complete.
    *
    * Distinct from a best-effort failure, which is recorded and does not fail the release

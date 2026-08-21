@@ -20,7 +20,54 @@
  * constructor below. A caller cannot hand-write an object literal that satisfies
  * {@link RequiredOperation}.
  */
+import { ReleaseErrorCodes, releaseError } from "./errors.js";
+
 declare const CRITICALITY: unique symbol;
+
+/** @see RepeatableDeclaration */
+declare const REPEATABILITY: unique symbol;
+
+/**
+ * A statement that an operation's effect may be performed more than once (§17, §19.1; #169).
+ *
+ * Minted by {@link repeatable} and not writable as an object literal, for the same reason
+ * `RequiredOperation` is not: this licenses re-performing a real external effect, and a shape a
+ * caller can assemble is a shape that gets assembled from configuration by someone who has not
+ * thought about it.
+ *
+ * The reason is **required**. An operation that may be repeated is one an approver is being asked
+ * to accept the repetition of, and "safe to repeat" with no account of why is not something anyone
+ * can approve or audit.
+ */
+export interface RepeatableDeclaration {
+  readonly [REPEATABILITY]: "repeatable";
+  /**
+   * Why repeating this effect is safe, for the approver and for the operator.
+   *
+   * Shown in the reconciliation finding that records the operation was not queried, so a reader
+   * sees the justification rather than only the outcome.
+   */
+  readonly reason: string;
+}
+
+/**
+ * Declare that repeating this operation's effect is safe (§17, §19.1; #169).
+ *
+ * @throws {AldusError} when the reason is empty. A declaration that licenses repetition and says
+ * nothing about why is the thing this exists to prevent.
+ */
+export function repeatable(reason: string): RepeatableDeclaration {
+  if (reason.trim().length === 0) {
+    throw releaseError(
+      ReleaseErrorCodes.OPERATION_INVALID,
+      "A repeatable declaration must say why repeating the effect is safe. It licenses performing " +
+        "an external effect more than once, and an approver cannot accept that from a bare flag " +
+        "(contract §13.4, §17).",
+      { category: "validation", retryable: false, details: {} },
+    );
+  }
+  return { reason } as RepeatableDeclaration;
+}
 
 /** Fields shared by both categories. */
 export interface ReleaseOperationBase {
@@ -65,6 +112,23 @@ export interface ReleaseOperationBase {
    * The gate engine decides whether the authority is held; this package never re-decides it.
    */
   requiresAuthority?: string;
+  /**
+   * Declares that repeating this operation's effect is safe (§17, §19.1; #169).
+   *
+   * **Absent means one-shot**, which is the conservative reading and the behaviour every existing
+   * bundle already has. Repetition is licensed only by saying so.
+   *
+   * In the **bundle**, not on the adapter and not in `RemoteState`. §13.4 binds a release approval
+   * to the bundle, so a fact that licenses re-performing an effect has to be visible in the
+   * artifact an approver approved — an adapter-side flag would let an adapter license repeating an
+   * operation the approver believed happened once.
+   *
+   * Not inferable from {@link ReleaseOperationBase} either. `deriveIdempotencyKey` documents its
+   * result as the key that makes re-running safe, and that holds only where the destination
+   * honours the key; plenty do not. A key's presence is a request, not a guarantee, so
+   * repeatability has to be stated.
+   */
+  repeatable?: RepeatableDeclaration;
   /** Opaque parameters passed through to the adapter. Never inspected here. */
   parameters?: Readonly<Record<string, unknown>>;
 }
