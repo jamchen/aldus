@@ -1409,6 +1409,91 @@ describe("a reservation whose observations end differently", () => {
     expect(resumed.reservation.status).toBe("settled");
   });
 
+  it("resumes when the cost record is durable and the terminal transition is lost", async () => {
+    // The last failure point between a decision and its terminal state, and the one the suite did
+    // not reach. Everything else fails *before* the cost write; here the record is genuinely
+    // durable and the transition that would settle the reservation is what is lost.
+    //
+    // The defect it guards against is a second cost record under a different id on the retry —
+    // which is why the assertion is on the record *count* for the reservation. What makes the
+    // resume safe is that the re-derived `covered` produces the same `costId` and the cost store
+    // is idempotent on it, so a second append is absorbed rather than duplicated.
+    const prepared = await twoUnwritten("effect-terminal-lost");
+    const id = prepared.reservationId;
+    await expect(flakyFrom(1).settle(prepared, twoObservations, {})).rejects.toThrow();
+
+    // The real store underneath, so the reservation stream is genuine; only the terminal append is
+    // intercepted. A double that failed the whole store would prove less — the point is that the
+    // cost record is durable at the moment the transition is lost.
+    const real = new FileSpendReservationStore({ root });
+    let terminalRefused = false;
+    const losesTerminal: typeof real = {
+      readGrant: (grantId) => real.readGrant(grantId),
+      get: (reservationId) => real.get(reservationId),
+      listByRun: (runId) => real.listByRun(runId),
+      compareAndAppend: (input) => {
+        const terminal = input.transitions.some(
+          (transition) =>
+            transition.kind === "reservation.settled" || transition.kind === "reservation.released",
+        );
+        if (terminal && !terminalRefused) {
+          terminalRefused = true;
+          return Promise.reject(new Error("terminal transition lost"));
+        }
+        return real.compareAndAppend(input);
+      },
+    } as typeof real;
+
+    const decision = {
+      evidenceRef: "provider-a invoice line 1",
+      decisionId: "dec-terminal-lost",
+      resolution: {
+        kind: "settled_with_amount" as const,
+        amount: { amount: "0.5000", currency: "USD" },
+        observationId: `${id}:cost:0`,
+      },
+    };
+
+    // Both observations pending, so this decision is not itself terminal — resolve the second
+    // first, leaving this one to carry the reservation to a terminal state.
+    await console_.reconcile((await store.get(id)) as SpendReservationLike, {
+      evidenceRef: "provider-b invoice line 2",
+      decisionId: "dec-terminal-first",
+      resolution: {
+        kind: "settled_with_amount",
+        amount: { amount: "0.2500", currency: "USD" },
+        observationId: `${id}:cost:1`,
+      },
+    });
+
+    const losing = openOperatorConsole({
+      spend: new SpendService({
+        store: losesTerminal,
+        costs,
+        now: () => new Date("2026-01-02T00:00:00.000Z"),
+      }),
+      actor: HUMAN,
+    });
+    await expect(
+      losing.reconcile((await store.get(id)) as SpendReservationLike, decision),
+    ).rejects.toThrow(/terminal transition lost/);
+
+    // The record survived the lost transition — that is the state under test.
+    expect(costs.records.filter((record) => record.reservationId === id)).toHaveLength(2);
+    expect((await store.get(id))?.status).toBe("billing_unknown");
+
+    const resumed = await console_.reconcile(
+      (await store.get(id)) as SpendReservationLike,
+      decision,
+    );
+
+    expect(resumed.reservation.status).toBe("settled");
+    expect([...resumed.reservation.costIds].sort()).toEqual([`${id}:cost:0`, `${id}:cost:1`]);
+    // The count, not the contents. A second record under a different id is what this exists to
+    // catch, and asserting on `costs[0]` alone would not see it.
+    expect(costs.records.filter((record) => record.reservationId === id)).toHaveLength(2);
+  });
+
   it("appends nothing extra when either resume runs on an advancing clock", async () => {
     const prepared = await twoUnwritten("effect-resume-clock");
     const id = prepared.reservationId;
