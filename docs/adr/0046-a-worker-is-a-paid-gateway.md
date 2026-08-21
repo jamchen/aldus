@@ -139,6 +139,11 @@ cannot disagree.
   is recorded"_ while an optional `recordUnauthorized` call had silently done nothing. Refusing
   before dispatch is the only way that sentence can be true. `recordingSpendController` ships from
   `stage-runner` so a composition running only free Workers is not forced to write one.
+- **Silence moved into the shared boundary.** The Worker path's `observations.length === 0` guard
+  in `StageRunner` was the only thing answering it, and the agent path reached the same
+  `SpendService.settle` and released. `settle` now retains the reservation on an empty observation
+  array for every caller (ADR-0047); the Worker path keeps its own earlier guard, message and
+  non-retryable classification, which answers the same fact sooner rather than differently.
 - **A second pre-existing defect, in the shared lifecycle.** `SpendService.settle` recognised
   all-`voided` as released and not all-`free`, so an execution that cost nothing reached
   `reservation.settled` — saying money was spent and accounted for when none was. Fixed in the

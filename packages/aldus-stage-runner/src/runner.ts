@@ -39,6 +39,7 @@ import type { EventStore, LockManager, RunStore } from "@aldus-runtime/file-stor
 
 import { assertCapabilities, type AgentBackend } from "./backend.js";
 import { isChargeBearing } from "./paid-dispatch.js";
+import type { StageAgentDispatcher, StageAgentDispatchResult } from "./agent-dispatch.js";
 import type { PaidDispatchController, PaidDispatchReservation } from "./paid-dispatch.js";
 import {
   isGateRequiredSignal,
@@ -53,6 +54,7 @@ import {
   checkArtifactContract,
   type ArtifactObligation,
   type StageWorkerRequest,
+  type StageAgentRequest,
   type EvaluationObservation,
   countEvaluationEvidence,
 } from "./definition.js";
@@ -122,6 +124,18 @@ export interface StageRunnerOptions {
    * refused rather than silently doing nothing — the same reason `registerOutput` refuses without
    * a recorder, and the same defect (#67) if it did not.
    */
+  /**
+   * Dispatches an agent execution for {@link StageContext.runAgent} (§10; #107, ADR-0047).
+   *
+   * A port rather than the service, so this package does not depend upward (§4.3). Optional
+   * because a composition whose stages never call `runAgent` needs none — and a stage that calls
+   * it without one is refused rather than silently doing nothing.
+   *
+   * Deliberately separate from {@link StageRunnerOptions.backend}. That field is a capability
+   * source the runner checks a stage's declarations against; wiring it must never mean "dispatch
+   * this", which is the reading that would turn configuration into an instruction.
+   */
+  agentDispatch?: StageAgentDispatcher;
   workers?: WorkerRegistry;
   /**
    * Reserves, settles and records what a paid Worker costs (§13.2, §19.3; #107, ADR-0046).
@@ -171,6 +185,7 @@ export class StageRunner {
     backend?: AgentBackend;
     artifacts?: ArtifactRecorder;
     workers?: WorkerRegistry;
+    agentDispatch?: StageAgentDispatcher;
     paidDispatch?: PaidDispatchController;
     now: () => Date;
     sleep: (ms: number) => Promise<void>;
@@ -189,6 +204,7 @@ export class StageRunner {
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
       ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
       ...(options.workers !== undefined ? { workers: options.workers } : {}),
+      ...(options.agentDispatch !== undefined ? { agentDispatch: options.agentDispatch } : {}),
       ...(options.paidDispatch !== undefined ? { paidDispatch: options.paidDispatch } : {}),
       now: options.now ?? (() => new Date()),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
@@ -881,6 +897,126 @@ export class StageRunner {
           );
         }
         return result as WorkerResult<WO>;
+      },
+      runAgent: async (request: StageAgentRequest) => {
+        // Everything below runs before the backend is reached. A refusal after the provider call
+        // is not a refusal, and an agent execution is paid by default rather than by exception.
+        const dispatcher = this.#options.agentDispatch;
+        if (dispatcher === undefined) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.AGENT_DISPATCH_UNAVAILABLE,
+            `Stage "${definition.id}" called runAgent and no agent dispatcher is wired. A ` +
+              "configured backend is a capability source, not a dispatcher: something has to own " +
+              "grant resolution, reservation and attribution, and refusing beats dispatching " +
+              "with none of them (§10, §13.2).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { runId, stageId: definition.id },
+            },
+          );
+        }
+
+        const declaration = (request as { spend?: { expectation?: { kind?: string } } }).spend;
+        const expectation = declaration?.expectation;
+        if (
+          expectation?.kind !== "free" &&
+          expectation?.kind !== "estimated" &&
+          expectation?.kind !== "unestimated"
+        ) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_SPEND_UNDECLARED,
+            `Stage "${definition.id}" called runAgent without declaring what the execution is ` +
+              'expected to cost. State `spend: { expectation: { kind: "free" } }`, or an estimate ' +
+              "with the operation and billing-effect identity that authorize it (§13.2, §19.3).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { runId, stageId: definition.id },
+            },
+          );
+        }
+        const paidDeclaration = declaration as unknown as {
+          operation?: string;
+          billingEffectKey?: string;
+        };
+
+        // Runtime-owned, all three. A Stage that could set these would choose its own ceiling or
+        // correlate its execution with another attempt.
+        const executionId = this.#options.newEventId();
+        const onAgentAbort = () => {
+          // Fire and forget: the attempt is already unwinding, and a backend that cannot observe
+          // the signal still needs telling. Cancelling never releases the reservation — a
+          // cancelled request may already have been billed (§19.3).
+          void dispatcher.cancel?.(executionId);
+        };
+        controller.signal.addEventListener("abort", onAgentAbort, { once: true });
+
+        let dispatched: StageAgentDispatchResult;
+        try {
+          dispatched = await dispatcher.execute({
+            request: request.request,
+            executionId,
+            signal: controller.signal,
+            runId,
+            episodeId: manifest.episode.episodeId,
+            stageId: definition.id,
+            attemptId,
+            actor: this.#options.actor,
+            ...(paidDeclaration.operation === undefined
+              ? {}
+              : { operation: paidDeclaration.operation }),
+            ...(paidDeclaration.billingEffectKey === undefined
+              ? {}
+              : { billingEffectKey: paidDeclaration.billingEffectKey }),
+            expectation: expectation as CostExpectation,
+          });
+        } finally {
+          controller.signal.removeEventListener("abort", onAgentAbort);
+        }
+
+        const result = dispatched.result;
+        const paused = result.session !== undefined;
+        notes.push(
+          `agent execution ${executionId} dispatched` +
+            (dispatched.billingUnconfirmed ? " (billing unresolved)" : "") +
+            (paused ? " (paused)" : ""),
+        );
+
+        // Unresolved billing is checked **first**, and carries the pause with it rather than
+        // yielding to it. It is the fact that governs what a caller may do next — the effect is
+        // non-retryable — and splitting the two into separate arms would let one disappear
+        // whenever both are true.
+        if (dispatched.billingUnconfirmed) {
+          return {
+            kind: "billing_unresolved" as const,
+            paused,
+            explanation:
+              `Execution ${executionId} recorded a charge whose amount or billing status could ` +
+              "not be confirmed, so its reservation stays unresolved and the effect is not " +
+              "retryable: an unconfirmed charge may have landed, and re-running would spend " +
+              "again on the assumption it did not (§19.3)." +
+              (paused ? " The backend also paused and offered a session Aldus cannot resume." : ""),
+            result,
+          };
+        }
+
+        // A pause is its own outcome, read from the backend's own session offer but **surfaced as
+        // a distinct arm** rather than left as a nullable field on a result whose `ok` a caller
+        // would otherwise read as completion. V1 cannot resume, so saying so is the honest answer.
+        if (paused) {
+          return {
+            kind: "paused_unsupported" as const,
+            explanation:
+              `The backend paused execution ${executionId} and offered a session to resume from. ` +
+              "Aldus does not resume agent sessions: a paused session spans attempts, and a " +
+              "reservation outliving the attempt that created it is a lifecycle state the spend " +
+              "protocol does not have (ADR-0047). Whatever was billed before the pause is " +
+              "already recorded.",
+            result,
+          };
+        }
+        return { kind: "completed" as const, result };
       },
       registerOutput: async (registration: StageOutputRegistration) => {
         const recorder = this.#options.artifacts;

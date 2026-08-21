@@ -313,18 +313,36 @@ export class SpendService {
       written.push(record);
     }
 
-    // `released` means no charge occurred, and `free` is evidence of exactly that — the same
-    // evidence `voided` is. Recognising only `voided` settled an all-free execution, which says
-    // money was spent and accounted for when none was (ADR-0044).
+    // Three answers, and the first two were previously one.
+    //
+    // **Silence is not evidence.** A dispatch that came back reporting nothing has not told us it
+    // cost nothing; it has told us nothing, and releasing on an empty array restored authorization
+    // on the strength of a provider that said nothing. The Worker path already refused this in
+    // `StageRunner` and the agent path reached the same `settle` and released — one question with
+    // two answers, one method apart. The rule lives here so every caller gets it, rather than in
+    // whichever caller happened to think of it (§19.3).
+    //
+    // **`free` and `voided` are evidence**, of exactly the opposite: a provider stating that
+    // nothing is owed. Those still release.
     const unknown = written.some((record) => record.billingStatus === "unknown");
-    const kind: SpendTransitionKind = unknown
-      ? "reservation.billing_unknown"
-      : written.length === 0 || written.every((record) => isUncharged(record.billingStatus))
-        ? "reservation.released"
-        : "reservation.settled";
+    const kind: SpendTransitionKind =
+      unknown || written.length === 0
+        ? "reservation.billing_unknown"
+        : written.every((record) => isUncharged(record.billingStatus))
+          ? "reservation.released"
+          : "reservation.settled";
 
     const updated = await this.#appendOne(reservation, kind, {
       costIds: written.map((record) => record.costId),
+      // Only for the silent case, so an operator reading `budget status` is told why this is
+      // unresolved rather than left to infer it from an empty cost list.
+      ...(written.length === 0
+        ? {
+            reason:
+              "the dispatch returned no billing observations, so whether it was charged is " +
+              "unknown; silence is not evidence that nothing was owed (§19.3)",
+          }
+        : {}),
     });
     return { reservation: updated, costs: written };
   }

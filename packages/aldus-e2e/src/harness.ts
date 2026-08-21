@@ -31,6 +31,7 @@ import {
 } from "@aldus-runtime/services";
 import {
   StageRegistry,
+  type AgentBackend,
   type StageDefinition,
   type WorkerRegistry,
 } from "@aldus-runtime/stage-runner";
@@ -113,6 +114,13 @@ export interface StackOptions {
   /** Scripted release outcomes per `operationId`; anything unlisted succeeds. */
   releaseOutcomes?: RecordingAdapterOptions["outcomes"];
   /**
+   * The agent backend stage executions dispatch through (§10, ADR-0047).
+   *
+   * Omitted by default, so the composition without one stays exercisable: a stage calling
+   * `runAgent` where nothing is wired must refuse rather than do nothing.
+   */
+  agentBackend?: AgentBackend;
+  /**
    * Spend grants in force for a Worker operation (§13.2, §19.3; #107).
    *
    * Omitted by default so the unauthorized refusal stays exercisable: a harness that always
@@ -190,6 +198,7 @@ export async function makeStack(options: StackOptions = {}): Promise<Stack> {
       ...(options.dispatchSpendGrants === undefined
         ? {}
         : { dispatchSpendGrants: options.dispatchSpendGrants }),
+      ...(options.agentBackend === undefined ? {} : { backend: options.agentBackend }),
     });
 
     // Registered *after* the context exists, so the stages can be handed the registry the context
