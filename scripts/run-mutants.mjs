@@ -67,6 +67,18 @@ if (missing.length > 0) {
   process.exit(2);
 }
 
+// --- Preflight: the rebuild predicate's own assumption -------------------------------------------
+// `touchesBuiltSource` matches a package's `src` directory, and that is exact only because `src` to
+// `dist` is the sole build-mediated path here. If a package ever serves a generated file from `dist`
+// that does not live under `src`, the predicate silently stops matching the property and a mutation
+// stops reaching the code under test — reported as SURVIVED. Refusing here is cheaper than that.
+const topology = spawnSync("node", ["scripts/check-build-topology.mjs"], { encoding: "utf8" });
+if (topology.status !== 0) {
+  console.error("run-mutants: the rebuild predicate's assumption no longer holds.\n");
+  console.error(`${topology.stdout ?? ""}${topology.stderr ?? ""}`.trim());
+  process.exit(2);
+}
+
 if (cases.length === 0) {
   console.error("run-mutants: no cases; refusing to pass vacuously.");
   process.exit(2);

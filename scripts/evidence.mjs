@@ -79,6 +79,7 @@ function check(label, command, { declinedOn = [2], kind = "gate" } = {}) {
 
 const checks = [
   check("generic-boundary", ["node", "scripts/check-generic-boundary.mjs"]),
+  check("build-topology", ["node", "scripts/check-build-topology.mjs"]),
   check(
     "claim: no-shipped-change",
     ["node", "scripts/check-claim-scope.mjs", base, "no-shipped-change"],

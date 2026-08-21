@@ -236,6 +236,8 @@ checkable by anyone, because the file is not there.
 | `check-version-bump.mjs`       | a PR changing `files`-scoped contents bumps the version                                       |
 | `check-resolution-surface.mjs` | a merge's diff is a subset of the union of its parents' diffs                                 |
 | `check-claim-scope.mjs`        | `docs-only` / `no-shipped-change` is true rather than asserted                                |
+| `check-build-topology.mjs`     | every package compiles `src` to `dist`, which the rebuild predicate assumes                   |
+| `evidence.mjs`                 | emits the review block, measured; `run-mutants.mjs` runs the cases                            |
 
 `check-resolution-surface.mjs` does **not** establish that a resolution chose correctly — keeping
 one caller's shape and dropping the other's argument is a correct-surface, wrong-content failure,

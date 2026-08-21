@@ -151,6 +151,25 @@ export const cases = [
     wantOutput: "claim: docs-only",
   },
   {
+    // The rebuild predicate's assumption, checked. Adding a second compile input to any package
+    // means a mutation there would not trigger a rebuild and so would not reach the code under
+    // test — the failure the rebuild guard exists to catch, arriving through the predicate rather
+    // than through a missing rebuild.
+    name: "build-topology: a package compiling outside src must be refused",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/tsconfig.json",
+          '"src/**/*.ts"',
+          '"src/**/*.ts", "schema/**/*.ts"',
+        ],
+      },
+    ],
+    command: ["node", "scripts/check-build-topology.mjs"],
+    wantExit: 1,
+    wantOutput: "not only src/",
+  },
+  {
     name: "generic-boundary: an adopter name in docs/ must fire (the breach that got through)",
     setup: [{ append: ["docs/adr/README.md", "megaphone" + "-aldus"] }],
     command: ["node", "scripts/check-generic-boundary.mjs"],
