@@ -129,6 +129,56 @@ export const cases = [
     wantOutput: "is not a merge commit",
   },
   {
+    name: "evidence --check: a complete block passes and surfaces its report-backed claims",
+    setup: [],
+    command: ["node", "scripts/evidence.mjs", "--check", "scripts/fixtures/evidence/complete.md"],
+    wantExit: 0,
+    wantOutput: "rest on a report rather than on code",
+  },
+  {
+    name: "evidence --check: a residual placeholder is refused",
+    setup: [],
+    command: [
+      "node",
+      "scripts/evidence.mjs",
+      "--check",
+      "scripts/fixtures/evidence/residual-fill.md",
+    ],
+    wantExit: 1,
+    wantOutput: "placeholder(s) still present",
+  },
+  {
+    name: "evidence --check: a claim with no locus is refused",
+    setup: [],
+    command: [
+      "node",
+      "scripts/evidence.mjs",
+      "--check",
+      "scripts/fixtures/evidence/missing-verified-at.md",
+    ],
+    wantExit: 1,
+    wantOutput: "has no `verified at:`",
+  },
+  {
+    name: "evidence --check: a claim with no invalidator is refused",
+    setup: [],
+    command: [
+      "node",
+      "scripts/evidence.mjs",
+      "--check",
+      "scripts/fixtures/evidence/missing-invalidated-by.md",
+    ],
+    wantExit: 1,
+    wantOutput: "has no `invalidated by:`",
+  },
+  {
+    name: "evidence --check: a block with no claims establishes nothing and is refused",
+    setup: [],
+    command: ["node", "scripts/evidence.mjs", "--check", "scripts/fixtures/evidence/no-claims.md"],
+    wantExit: 1,
+    wantOutput: "no `claims:` section",
+  },
+  {
     // The emitter must never let a non-answer read as an answer — the failure mode that cost the
     // most across this series. `--base HEAD` is an empty diff, which is exactly #176's condition:
     // the claim checks refuse as vacuous, and the block must exit non-zero rather than print a
