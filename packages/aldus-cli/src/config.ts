@@ -28,6 +28,7 @@ import type {
   SpendGrantProvider,
   SubjectsProvider,
   SynthesisAdapter,
+  DispatchSpendGrantProvider,
   WorkflowGraph,
   WorkflowStageNode,
 } from "@aldus-runtime/services";
@@ -142,6 +143,13 @@ export interface AldusConfig {
    * config, so the option existed and no adopter could use it. Same gap as `workers`, older.
    */
   agentBackend?: AgentBackend;
+  /**
+   * Spend grants in force for a Worker operation (§13.2, §19.3; #107).
+   *
+   * Keyed by `(runId, operation)`. Absent means no Worker operation may spend, and every paid
+   * Worker invocation is refused before dispatch rather than dispatched unbudgeted.
+   */
+  dispatchSpendGrants?: DispatchSpendGrantProvider;
 }
 
 /**
@@ -160,6 +168,7 @@ const KNOWN_CONFIG_KEYS = [
   "stages",
   "subjects",
   "synthesisAdapter",
+  "dispatchSpendGrants",
   "workers",
   "workflow",
 ] as const satisfies readonly (keyof AldusConfig)[];

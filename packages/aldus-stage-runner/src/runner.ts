@@ -29,6 +29,7 @@ import {
   type ActorRef,
   type AldusEvent,
   type ArtifactRef,
+  type CostExpectation,
   type RunManifest,
   type StageAttempt,
   type StageStatus,
@@ -37,6 +38,9 @@ import {
 import type { EventStore, LockManager, RunStore } from "@aldus-runtime/file-store";
 
 import { assertCapabilities, type AgentBackend } from "./backend.js";
+import { isChargeBearing } from "./paid-dispatch.js";
+import type { StageAgentDispatcher, StageAgentDispatchResult } from "./agent-dispatch.js";
+import type { PaidDispatchController, PaidDispatchReservation } from "./paid-dispatch.js";
 import {
   isGateRequiredSignal,
   type ArtifactRecorder,
@@ -50,6 +54,7 @@ import {
   checkArtifactContract,
   type ArtifactObligation,
   type StageWorkerRequest,
+  type StageAgentRequest,
   type EvaluationObservation,
   countEvaluationEvidence,
 } from "./definition.js";
@@ -119,7 +124,29 @@ export interface StageRunnerOptions {
    * refused rather than silently doing nothing — the same reason `registerOutput` refuses without
    * a recorder, and the same defect (#67) if it did not.
    */
+  /**
+   * Dispatches an agent execution for {@link StageContext.runAgent} (§10; #107, ADR-0047).
+   *
+   * A port rather than the service, so this package does not depend upward (§4.3). Optional
+   * because a composition whose stages never call `runAgent` needs none — and a stage that calls
+   * it without one is refused rather than silently doing nothing.
+   *
+   * Deliberately separate from {@link StageRunnerOptions.backend}. That field is a capability
+   * source the runner checks a stage's declarations against; wiring it must never mean "dispatch
+   * this", which is the reading that would turn configuration into an instruction.
+   */
+  agentDispatch?: StageAgentDispatcher;
   workers?: WorkerRegistry;
+  /**
+   * Reserves, settles and records what a paid Worker costs (§13.2, §19.3; #107, ADR-0046).
+   *
+   * A port rather than the service, so this package does not depend upward (§4.3). Optional
+   * because a composition whose Workers are all free needs none — but a Worker invocation
+   * declaring a paid expectation without one is **refused before dispatch**, not dispatched
+   * hopefully. Fail-closed is the point: a spend check that is skipped when its enforcer is
+   * unwired is a check whose presence depends on the configuration it exists to enforce.
+   */
+  paidDispatch?: PaidDispatchController;
   /** Clock, injectable so tests produce reproducible timestamps. */
   now?: () => Date;
   /** Delay used between retries, injectable so tests do not wait. */
@@ -158,6 +185,8 @@ export class StageRunner {
     backend?: AgentBackend;
     artifacts?: ArtifactRecorder;
     workers?: WorkerRegistry;
+    agentDispatch?: StageAgentDispatcher;
+    paidDispatch?: PaidDispatchController;
     now: () => Date;
     sleep: (ms: number) => Promise<void>;
     newAttemptId: () => string;
@@ -175,6 +204,8 @@ export class StageRunner {
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
       ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
       ...(options.workers !== undefined ? { workers: options.workers } : {}),
+      ...(options.agentDispatch !== undefined ? { agentDispatch: options.agentDispatch } : {}),
+      ...(options.paidDispatch !== undefined ? { paidDispatch: options.paidDispatch } : {}),
       now: options.now ?? (() => new Date()),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       newAttemptId: options.newAttemptId ?? defaultNewAttemptId,
@@ -625,11 +656,97 @@ export class StageRunner {
         }
 
         const worker = registry.require(request.workerId, request.workerVersion);
-        assertWorkerCapabilities(await worker.capabilities(), request.requiredCapabilities ?? [], {
+        const workerCapabilities = await worker.capabilities();
+        assertWorkerCapabilities(workerCapabilities, request.requiredCapabilities ?? [], {
           stageId: definition.id,
           workerId: worker.id,
           workerVersion: worker.version,
         });
+
+        // Everything below happens **before** `worker.execute`. A refusal that arrives after the
+        // provider was called is not a refusal, and a Worker may be paid — §3.2's own examples are
+        // TTS invocation and rendering (#107).
+        //
+        // Checked for presence first, for the same reason `effect` is: the type requires it, so
+        // this catches the request built from configuration or written by a JavaScript adopter.
+        const declaration = (request as { spend?: { expectation?: { kind?: string } } }).spend;
+        const expectation = declaration?.expectation;
+        if (
+          expectation?.kind !== "free" &&
+          expectation?.kind !== "estimated" &&
+          expectation?.kind !== "unestimated"
+        ) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_SPEND_UNDECLARED,
+            `Stage "${definition.id}" invoked Worker "${request.workerId}" without declaring what ` +
+              'it is expected to cost. State `spend: { expectation: { kind: "free" } }`, or an ' +
+              "estimate with the operation and billing-effect identity that authorize it " +
+              "(§13.2, §19.3).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { stageId: definition.id, workerId: request.workerId },
+            },
+          );
+        }
+
+        const paid = expectation.kind !== "free";
+        const spendController = this.#options.paidDispatch;
+        // Required for **every** Worker dispatch, not only a paid one. A free declaration is a
+        // belief about a provider, and the case that matters is when the belief is wrong: without
+        // a sink the unexpected charge has nowhere durable to go, and the refusal below used to
+        // tell the operator "the charge is recorded" while `recordUnauthorized` had silently done
+        // nothing. Refusing beforehand is the only way that message can be true.
+        if (spendController === undefined) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_SPEND_UNAVAILABLE,
+            `Stage "${definition.id}" invoked Worker "${request.workerId}" and no spend ` +
+              "controller is wired. A paid invocation could not be reserved, and a free one could " +
+              "not durably record a charge it did not expect — so neither can be dispatched " +
+              "truthfully (§13.2, §19.3).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { stageId: definition.id, workerId: request.workerId },
+            },
+          );
+        }
+        let reservation: PaidDispatchReservation | undefined;
+        if (paid) {
+          const paidDeclaration = declaration as unknown as {
+            operation: string;
+            billingEffectKey: string;
+          };
+          // Throws when no grant covers the operation, the scope excludes it, the budget is
+          // exhausted, or the grant's policy refuses an unestimated request. Committed, not
+          // checked: a check's answer is stale the moment another writer moves the stream.
+          reservation = await spendController.reserve({
+            operation: paidDeclaration.operation,
+            billingEffectKey: paidDeclaration.billingEffectKey,
+            expectation: expectation as Exclude<CostExpectation, { kind: "free" }>,
+            runId,
+            stageId: definition.id,
+            attemptId,
+            dispatcherId: worker.id,
+            dispatcherVersion: worker.version,
+          });
+        }
+
+        // A ceiling only where this exact Worker version says it enforces one, and the number is
+        // always the grant's. Passing one to a Worker that ignores it would record a protection
+        // that does not exist (ADR-0030); taking the number from the Worker would let the spender
+        // choose its own limit.
+        const enforcesCeiling = workerCapabilities.enforcesSpendCeiling === true;
+        const ceiling = reservation?.ceiling;
+        const appliedCeiling = enforcesCeiling && ceiling !== undefined ? ceiling : undefined;
+        if (reservation !== undefined) {
+          reservation = await spendController.prepareDispatch(reservation, {
+            dispatcherId: worker.id,
+            dispatcherVersion: worker.version,
+            ceilingEnforced: appliedCeiling !== undefined,
+            ...(appliedCeiling === undefined ? {} : { appliedCeiling }),
+          });
+        }
 
         // §20: the trace names which implementation ran and what was checked of it, before it
         // runs. A Worker recorded only on success would leave a failed invocation unattributable.
@@ -640,29 +757,266 @@ export class StageRunner {
               : ""),
         );
 
-        const result = await worker.execute({
-          input: request.input,
-          runId,
-          episodeId: manifest.episode.episodeId,
-          stageId: definition.id,
-          attemptId,
-          configurationHash: input.configurationHash,
-          inputHashes: input.inputArtifacts.map((artifact) => artifact.sha256),
-          // Present only when this invocation declared a deduplicated effect and supplied its own
-          // key (#149). It used to be `effectKey ?? invocationKey`, which did the one thing
-          // ADR-0036 forbids in as many words: a fingerprint of declared work reaching an external
-          // system as a deduplication credential. For a stage with an empty input schema and no
-          // declared artifacts that fingerprint is a *constant*, so a platform deduplicating on it
-          // would treat every episode's first request as a repeat of the first episode's, forever.
+        const dispatched = async () =>
+          worker.execute({
+            input: request.input,
+            runId,
+            episodeId: manifest.episode.episodeId,
+            stageId: definition.id,
+            attemptId,
+            configurationHash: input.configurationHash,
+            inputHashes: input.inputArtifacts.map((artifact) => artifact.sha256),
+            // Present only when this invocation declared a deduplicated effect and supplied its own
+            // key (#149). It used to be `effectKey ?? invocationKey`, which did the one thing
+            // ADR-0036 forbids in as many words: a fingerprint of declared work reaching an external
+            // system as a deduplication credential. For a stage with an empty input schema and no
+            // declared artifacts that fingerprint is a *constant*, so a platform deduplicating on it
+            // would treat every episode's first request as a repeat of the first episode's, forever.
+            //
+            // A stage-level key is not propagated here either. It has a different cardinality, and
+            // copying it onto every invocation is how N writes become one.
+            ...(request.effect.kind === "deduplicated"
+              ? { idempotencyKey: request.effect.idempotencyKey }
+              : {}),
+            ...(appliedCeiling === undefined ? {} : { maxSpend: appliedCeiling }),
+            signal: controller.signal,
+          });
+
+        let result: WorkerResult<unknown>;
+        try {
+          result = await dispatched();
+        } catch (thrown) {
+          // After `prepareDispatch` a failure is not proof of no charge (ADR-0044). The
+          // reservation stays committed and the effect becomes non-retryable, because assuming a
+          // failed request cost nothing is how a budget is quietly exceeded (§19.3).
+          if (reservation !== undefined) {
+            await spendController.markUnknown(
+              reservation,
+              `Worker "${worker.id}@${worker.version}" threw after dispatch, so whether it was ` +
+                "charged is unknown.",
+            );
+          }
+          throw thrown;
+        }
+
+        // Settlement, before the result reaches the stage. `WorkerResult.costs` used to be handed
+        // straight back and read by nothing — a Worker that knew what it spent had its answer
+        // discarded one line after the call (#107).
+        const observations = result.costs ?? [];
+        // Billing semantics, not array length. `free` and `voided` are a provider stating that
+        // nothing is owed, which is evidence of no spend rather than a charge to account for — so
+        // a Worker that truthfully reports `billingStatus: "free"` is not diverging from a free
+        // declaration, and a paid one reporting only those has not gone silent about billing.
+        const charges = observations.filter((observation) =>
+          isChargeBearing(observation.billingStatus),
+        );
+        if (reservation !== undefined) {
+          // One `billingEffectKey` names one independently billed effect and commits one
+          // reservation for it. A result carrying several independent charges is a cardinality the
+          // declaration cannot describe, and settling them together would let one authorization
+          // cover N — exactly what per-charge identity exists to prevent (ADR-0043, ADR-0046).
           //
-          // A stage-level key is not propagated here either. It has a different cardinality, and
-          // copying it onto every invocation is how N writes become one.
-          ...(request.effect.kind === "deduplicated"
-            ? { idempotencyKey: request.effect.idempotencyKey }
-            : {}),
-          signal: controller.signal,
-        });
+          // The money is already spent, so the facts are persisted and attributed and the
+          // reservation is retained unresolved. What is withheld is the claim that it covered them.
+          if (charges.length > 1) {
+            await spendController.markUnknown(
+              reservation,
+              `Worker "${worker.id}@${worker.version}" reported ${charges.length} independently ` +
+                "billed charges against one declared billing effect. One reservation authorizes " +
+                "one charge; declare one invocation per billed effect.",
+              observations,
+            );
+            throw stageRunnerError(
+              StageRunnerErrorCodes.WORKER_SPEND_CARDINALITY,
+              `Stage "${definition.id}" declared one billing effect for Worker "${worker.id}" ` +
+                `and it reported ${charges.length} independent charges. They are recorded and the ` +
+                "reservation is left unresolved: settling them against one authorization would " +
+                "let a single approval cover several charges (§13.2, §19.3).",
+              {
+                category: "conflict",
+                retryable: false,
+                details: { stageId: definition.id, workerId: worker.id },
+              },
+            );
+          }
+          // Silence, not "no charges". A result carrying only `free`/`voided` observations is a
+          // provider stating nothing is owed, and settlement releases on it; a result carrying
+          // nothing at all is a Worker that said nothing about billing, which is the unknown case.
+          if (observations.length === 0) {
+            // Dispatched under a reservation and came back saying nothing about billing. The
+            // charge may have landed and nobody can measure it, so the reservation is retained
+            // and the effect becomes non-retryable rather than being released as free (§19.3).
+            //
+            // A result carrying only `free`/`voided` observations does **not** reach here: that is
+            // a provider stating nothing is owed, which `settle` releases on.
+            await spendController.markUnknown(
+              reservation,
+              `Worker "${worker.id}@${worker.version}" was dispatched under a paid expectation ` +
+                "and returned no billing facts, so whether it was charged is unknown.",
+              observations,
+            );
+            throw stageRunnerError(
+              StageRunnerErrorCodes.WORKER_BILLING_UNKNOWN,
+              `Worker "${worker.id}@${worker.version}" was dispatched for stage ` +
+                `"${definition.id}" under a paid expectation and reported no cost. Retrying would ` +
+                "spend again on the assumption the first call was free (§19.3).",
+              {
+                category: "conflict",
+                retryable: false,
+                details: { stageId: definition.id, workerId: worker.id },
+              },
+            );
+          }
+          // Records are durable before authorization is released. The reverse would free the
+          // budget while the charge is absent from the record (ADR-0044).
+          await spendController.settle(reservation, observations);
+        } else if (charges.length > 0) {
+          // Declared free and charged anyway. Recorded so §20 can answer what the Run cost, and
+          // deliberately not attached to a grant: laundering it through one nobody consulted
+          // would invent an approval.
+          await spendController.recordUnauthorized(
+            {
+              runId,
+              stageId: definition.id,
+              attemptId,
+              workerId: worker.id,
+              workerVersion: worker.version,
+            },
+            charges,
+          );
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_SPEND_UNAUTHORIZED,
+            `Stage "${definition.id}" declared Worker "${worker.id}" free and it reported a ` +
+              "charge. The charge is recorded, and no grant is credited with authorizing it — " +
+              "attaching one after the fact would invent an approval nobody gave (§13.2, §19.3).",
+            {
+              category: "policy",
+              retryable: false,
+              details: { stageId: definition.id, workerId: worker.id },
+            },
+          );
+        }
         return result as WorkerResult<WO>;
+      },
+      runAgent: async (request: StageAgentRequest) => {
+        // Everything below runs before the backend is reached. A refusal after the provider call
+        // is not a refusal, and an agent execution is paid by default rather than by exception.
+        const dispatcher = this.#options.agentDispatch;
+        if (dispatcher === undefined) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.AGENT_DISPATCH_UNAVAILABLE,
+            `Stage "${definition.id}" called runAgent and no agent dispatcher is wired. A ` +
+              "configured backend is a capability source, not a dispatcher: something has to own " +
+              "grant resolution, reservation and attribution, and refusing beats dispatching " +
+              "with none of them (§10, §13.2).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { runId, stageId: definition.id },
+            },
+          );
+        }
+
+        const declaration = (request as { spend?: { expectation?: { kind?: string } } }).spend;
+        const expectation = declaration?.expectation;
+        if (
+          expectation?.kind !== "free" &&
+          expectation?.kind !== "estimated" &&
+          expectation?.kind !== "unestimated"
+        ) {
+          throw stageRunnerError(
+            StageRunnerErrorCodes.WORKER_SPEND_UNDECLARED,
+            `Stage "${definition.id}" called runAgent without declaring what the execution is ` +
+              'expected to cost. State `spend: { expectation: { kind: "free" } }`, or an estimate ' +
+              "with the operation and billing-effect identity that authorize it (§13.2, §19.3).",
+            {
+              category: "validation",
+              retryable: false,
+              details: { runId, stageId: definition.id },
+            },
+          );
+        }
+        const paidDeclaration = declaration as unknown as {
+          operation?: string;
+          billingEffectKey?: string;
+        };
+
+        // Runtime-owned, all three. A Stage that could set these would choose its own ceiling or
+        // correlate its execution with another attempt.
+        const executionId = this.#options.newEventId();
+        const onAgentAbort = () => {
+          // Fire and forget: the attempt is already unwinding, and a backend that cannot observe
+          // the signal still needs telling. Cancelling never releases the reservation — a
+          // cancelled request may already have been billed (§19.3).
+          void dispatcher.cancel?.(executionId);
+        };
+        controller.signal.addEventListener("abort", onAgentAbort, { once: true });
+
+        let dispatched: StageAgentDispatchResult;
+        try {
+          dispatched = await dispatcher.execute({
+            request: request.request,
+            executionId,
+            signal: controller.signal,
+            runId,
+            episodeId: manifest.episode.episodeId,
+            stageId: definition.id,
+            attemptId,
+            actor: this.#options.actor,
+            ...(paidDeclaration.operation === undefined
+              ? {}
+              : { operation: paidDeclaration.operation }),
+            ...(paidDeclaration.billingEffectKey === undefined
+              ? {}
+              : { billingEffectKey: paidDeclaration.billingEffectKey }),
+            expectation: expectation as CostExpectation,
+          });
+        } finally {
+          controller.signal.removeEventListener("abort", onAgentAbort);
+        }
+
+        const result = dispatched.result;
+        const paused = result.session !== undefined;
+        notes.push(
+          `agent execution ${executionId} dispatched` +
+            (dispatched.billingUnconfirmed ? " (billing unresolved)" : "") +
+            (paused ? " (paused)" : ""),
+        );
+
+        // Unresolved billing is checked **first**, and carries the pause with it rather than
+        // yielding to it. It is the fact that governs what a caller may do next — the effect is
+        // non-retryable — and splitting the two into separate arms would let one disappear
+        // whenever both are true.
+        if (dispatched.billingUnconfirmed) {
+          return {
+            kind: "billing_unresolved" as const,
+            paused,
+            explanation:
+              `Execution ${executionId} recorded a charge whose amount or billing status could ` +
+              "not be confirmed, so its reservation stays unresolved and the effect is not " +
+              "retryable: an unconfirmed charge may have landed, and re-running would spend " +
+              "again on the assumption it did not (§19.3)." +
+              (paused ? " The backend also paused and offered a session Aldus cannot resume." : ""),
+            result,
+          };
+        }
+
+        // A pause is its own outcome, read from the backend's own session offer but **surfaced as
+        // a distinct arm** rather than left as a nullable field on a result whose `ok` a caller
+        // would otherwise read as completion. V1 cannot resume, so saying so is the honest answer.
+        if (paused) {
+          return {
+            kind: "paused_unsupported" as const,
+            explanation:
+              `The backend paused execution ${executionId} and offered a session to resume from. ` +
+              "Aldus does not resume agent sessions: a paused session spans attempts, and a " +
+              "reservation outliving the attempt that created it is a lifecycle state the spend " +
+              "protocol does not have (ADR-0047). Whatever was billed before the pause is " +
+              "already recorded.",
+            result,
+          };
+        }
+        return { kind: "completed" as const, result };
       },
       registerOutput: async (registration: StageOutputRegistration) => {
         const recorder = this.#options.artifacts;

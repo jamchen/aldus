@@ -17,6 +17,7 @@
 
 import type {
   ArtifactRef,
+  Money,
   PromotionEvidence,
   QualityEnforcement,
   QualityLevel,
@@ -26,6 +27,8 @@ import type {
 
 import { digestJson } from "./state.js";
 import type { WorkerResult } from "./worker.js";
+import type { AgentResult } from "./backend.js";
+import type { StageOwnedAgentRequest } from "./agent-dispatch.js";
 
 /**
  * The minimum a validator must offer for the runner to use it.
@@ -294,7 +297,135 @@ export interface StageWorkerRequest<I = unknown> {
    * effect. One key for N unrelated destination objects is the defect, not a shortcut.
    */
   effect: WorkerEffect;
+  /**
+   * What this invocation is expected to cost, and what authorizes it (§13.2, §19.3; #107).
+   *
+   * **Required, and there is no default.** §3.2's Workers include TTS invocation and rendering,
+   * which are paid. Until this field existed `runWorker` reached a provider with no expectation,
+   * no grant and no reservation, and returned `WorkerResult.costs` to the stage where nothing read
+   * them — a measured $2.00 charge left `services.costs(runId)` reporting zero records. Making the
+   * declaration optional would have restored exactly that: absence read as free.
+   *
+   * The stage states what it is asking for. It does **not** state `grantId`, `authorizationId`, or
+   * any Run/Stage/attempt attribution — the composed Runtime resolves the grant and supplies all
+   * attribution, because a caller that names its own authorization can name one that did not
+   * authorize it (§13.2).
+   */
+  spend: DispatchSpendDeclaration;
 }
+
+/** What a Stage asks of {@link StageContext.runAgent} (ADR-0047). */
+export interface StageAgentRequest {
+  /**
+   * The Stage's half of the backend request.
+   *
+   * Deliberately not a full `AgentRequest`: `executionId`, `signal` and `maxSpend` are Runtime
+   * authority and are omitted from the type, so a Stage cannot set its own ceiling or correlate
+   * its execution with another attempt.
+   */
+  request: StageOwnedAgentRequest;
+  /** Whether **this** execution performs an external effect, and what deduplicates it (§19.1). */
+  effect: WorkerEffect;
+  /** What it is expected to cost, and what authorizes it. Required and closed (ADR-0046). */
+  spend: DispatchSpendDeclaration;
+}
+
+/**
+ * What one agent execution came back as (ADR-0047).
+ *
+ * A discriminated union rather than an `AgentResult` with a nullable `session`, because a pause is
+ * a distinct outcome and the type is what stops it being read as completion. §19.3's cost of
+ * getting that wrong is a Stage recording success for work that stopped halfway and may have been
+ * billed for it.
+ */
+export type StageAgentOutcome =
+  | {
+      /** The backend finished. Billing is settled and attributed. */
+      kind: "completed";
+      result: AgentResult;
+    }
+  | {
+      /**
+       * The backend paused and offered a session to resume from, which V1 cannot use.
+       *
+       * Non-terminal and never `ok`. Whatever was billed up to the pause is already recorded and
+       * settled, or retained as unresolved where the backend said nothing — a pause is not
+       * evidence that nothing was charged.
+       */
+      kind: "paused_unsupported";
+      /** What happened, for the operator (§20). */
+      explanation: string;
+      /** The billing facts reported before the pause, already recorded. */
+      result: AgentResult;
+    }
+  | {
+      /**
+       * The execution finished or paused, and what it was charged could not be established.
+       *
+       * Distinct from `completed` because the reservation is still `billing_unknown` and the
+       * effect is **non-retryable**: an unconfirmed charge may have landed, and re-running would
+       * spend again on the assumption it did not (§19.3). The adapter used to return only the
+       * backend's `AgentResult`, so this fact — computed by the services layer from durable
+       * records, and the reason `AgentExecutionResult.billingUnconfirmed` exists — never reached
+       * the Stage, which then saw a completion.
+       *
+       * A Stage cannot re-derive it from `AgentResult.costs`: settlement is the services layer's,
+       * and whether the reservation resolved is a fact about the reservation, not the report.
+       */
+      kind: "billing_unresolved";
+      /** What happened, for the operator (§20). */
+      explanation: string;
+      /** The backend's answer. Its `ok` says nothing about whether the charge is known. */
+      result: AgentResult;
+      /**
+       * Whether the backend also paused.
+       *
+       * Carried here rather than split into a fourth arm so the two facts cannot separate: an
+       * execution that paused *and* has unresolved billing must not be readable as only one of
+       * them, and unresolved billing is the fact that governs what a caller may do next.
+       */
+      paused: boolean;
+    };
+
+/**
+ * What a Stage declares about one Worker invocation's cost (ADR-0044, ADR-0046; #107).
+ *
+ * Two arms rather than a `CostExpectation` plus optional companions, so a free invocation cannot
+ * carry a billing identity and a paid one cannot omit it. The alternative — one closed expectation
+ * beside two optional fields — makes `{ kind: "unestimated" }` with no operation representable,
+ * and that is a paid dispatch with nothing to check it against.
+ */
+export type DispatchSpendDeclaration =
+  | {
+      /**
+       * Nothing will be charged for this invocation.
+       *
+       * Dispatches without a reservation. A charge reported anyway is recorded as an unauthorized
+       * divergence and fails the stage — it is not attached to a grant after the fact, because
+       * attaching one would invent an approval nobody gave.
+       */
+      expectation: { kind: "free" };
+    }
+  | {
+      /** What this is expected to cost. `unestimated` still requires a grant that permits it. */
+      expectation: { kind: "estimated"; amount: Money } | { kind: "unestimated" };
+      /**
+       * What the grant must authorize, e.g. `"tts.synthesise"` (§4.2).
+       *
+       * An open string. Checked against the grant's declared scope before reserving, so a grant
+       * for one operation cannot authorize another.
+       */
+      operation: string;
+      /**
+       * Identity of the independently **billed** effect, with per-charge cardinality (ADR-0043).
+       *
+       * Deliberately not the destination idempotency key and not the invocation key. ADR-0036
+       * established that those answer different questions, and one Worker call may contain several
+       * independently billed effects — a key with the wrong cardinality makes a retry resolve to a
+       * reservation belonging to a different charge.
+       */
+      billingEffectKey: string;
+    };
 
 /**
  * What one Worker invocation does outside the workspace (§19.1; #148).
@@ -856,6 +987,19 @@ export interface StageContext {
    * `ALDUS_WORKER_CAPABILITY_UNAVAILABLE`
    */
   runWorker<I, O>(request: StageWorkerRequest<I>): Promise<WorkerResult<O>>;
+  /**
+   * Dispatch one agent execution through the configured backend (§10; #107, ADR-0047).
+   *
+   * **Explicit.** A configured backend is a capability source, not an execution instruction — the
+   * runner does not dispatch one because it is present. Until this existed, `AldusConfig`
+   * accepted a backend, `StageRunner` checked its capabilities, and nothing ever called `execute`.
+   *
+   * Single-shot. There is no resume operation and no session input: a paused backend session
+   * spans attempts, and a reservation outliving the attempt that created it is a lifecycle state
+   * ADR-0044 does not have. A pause arrives as an explicit {@link StageAgentOutcome} arm rather
+   * than as a nullable field a caller might not read.
+   */
+  runAgent(request: StageAgentRequest): Promise<StageAgentOutcome>;
   /** Emit an operator-facing progress note. Recorded on the attempt's events (contract §20). */
   note(message: string, details?: Record<string, unknown>): void;
 }

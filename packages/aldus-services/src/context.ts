@@ -23,7 +23,9 @@ import {
 } from "@aldus-runtime/artifact-registry";
 import { FileSpendReservationStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import type { CostRecordStore } from "./cost-store.js";
-import { SpendService } from "./spend-service.js";
+import { SpendService, type ReservationStatus } from "./spend-service.js";
+import { RuntimePaidDispatchController, type DispatchSpendGrantProvider } from "./paid-dispatch.js";
+import { RuntimeStageAgentDispatcher } from "./agent-dispatch.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   AdapterRegistry,
@@ -128,6 +130,19 @@ export interface AldusContextOptions {
   synthesisAdapter?: SynthesisAdapter;
   /** Spend grants in force, per plan (contract §13.2, §19.3). */
   spendGrants?: SpendGrantProvider;
+  /**
+   * Spend grants in force for a Worker operation (§13.2, §19.3; #107).
+   *
+   * Separate from {@link spendGrants} because the keys are different questions: a synthesis grant
+   * is looked up by plan, and a Worker grant by the operation the invocation declares. Keying a
+   * Worker grant by Worker would let swapping an implementation change what is authorized, which
+   * is a substitution no operator approved.
+   *
+   * Absent means no Worker operation is authorized to spend, and every paid invocation is refused
+   * before dispatch. That is the fail-closed direction: the alternative is a composition where
+   * forgetting to wire a grant provider makes paid Workers run unbudgeted.
+   */
+  dispatchSpendGrants?: DispatchSpendGrantProvider;
   /** Where irreplaceable artifact bytes are kept. Defaults to a local archive (contract §8.1). */
   archive?: ArtifactArchive;
 }
@@ -157,6 +172,8 @@ export class AldusContext {
   readonly #costs: CostRecordStore;
   readonly #spend: SpendService;
   readonly #spendGrants: SpendGrantProvider | undefined;
+  readonly #paidDispatch: RuntimePaidDispatchController;
+  readonly #agentDispatch: RuntimeStageAgentDispatcher | undefined;
   readonly #ledgerStores: ReturnType<typeof fileLedgerStores>;
 
   constructor(options: AldusContextOptions) {
@@ -207,6 +224,27 @@ export class AldusContext {
       costs: this.#costs,
       now: () => this.now(),
     });
+
+    this.#paidDispatch = new RuntimePaidDispatchController({
+      spend: this.#spend,
+      costs: this.#costs,
+      // No provider wired means no operation is authorized, rather than every operation being
+      // authorized by default.
+      grants: options.dispatchSpendGrants ?? (() => undefined),
+      now: () => this.now(),
+    });
+
+    this.#agentDispatch =
+      this.backend === undefined
+        ? undefined
+        : new RuntimeStageAgentDispatcher({
+            backend: this.backend,
+            spend: this.#spend,
+            costs: this.#costs,
+            events: { append: (runId, event) => this.workspace.events.append(runId, event) },
+            grants: options.dispatchSpendGrants ?? (() => undefined),
+            now: () => this.now(),
+          });
 
     this.gates = new GateEngine({
       registry: this.gateRegistry,
@@ -281,6 +319,16 @@ export class AldusContext {
       artifacts: stageArtifactRecorder(this.artifacts),
       ...(this.backend !== undefined ? { backend: this.backend } : {}),
       ...(this.workers !== undefined ? { workers: this.workers } : {}),
+      // The half #107 was missing. A Worker may be paid — §3.2's own examples are TTS invocation
+      // and rendering — and without this the runner refuses every paid invocation rather than
+      // dispatching it unauthorized. Wired unconditionally: the grant provider answers `undefined`
+      // when no grant is in force, and a reservation for an unauthorized operation is refused
+      // there rather than by the absence of a controller.
+      paidDispatch: this.#paidDispatch,
+      // Only where a backend is configured. Wiring a dispatcher *because* a backend exists is not
+      // the same as dispatching because it exists — the stage still has to ask (ADR-0047).
+      ...(this.#agentDispatch === undefined ? {} : { agentDispatch: this.#agentDispatch }),
+
       now: this.now,
     });
   }
@@ -331,6 +379,24 @@ export class AldusContext {
    * wiring error it is. The adapter itself is never exposed by this class: the gateway is the only
    * thing that holds it, and the gateway authorizes before it calls.
    */
+  /**
+   * Reservation status for a Run — read-only, and the whole of the supported spend surface.
+   *
+   * There is deliberately no `operatorConsole()` here. Reconciliation releases authorization for
+   * money, and the only identity this composition has is `AldusContextOptions.actor`, which the
+   * CLI fills from the `--actor` flag or `ALDUS_ACTOR`. That is an attribution convention: it says
+   * who a command claims to be, and nothing authenticates it. Handing it to a reconciliation would
+   * have made "a human decided this" a fact derived from a string the caller chose.
+   *
+   * So status ships and reconciliation does not. `SpendService.reconcile` exists and requires an
+   * authority no public surface can mint, which makes it unreachable rather than weakly guarded —
+   * until Aldus has a boundary that establishes operator identity or human presence, at which
+   * point that boundary becomes the mint.
+   */
+  spendStatus(runId: string): Promise<readonly ReservationStatus[]> {
+    return this.#spend.status(runId);
+  }
+
   synthesisFor(plan: TtsRequestPlan): SynthesisGateway | undefined {
     if (this.#synthesisAdapter === undefined) return undefined;
     return new SynthesisGateway({

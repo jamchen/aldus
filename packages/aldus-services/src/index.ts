@@ -147,4 +147,13 @@ export {
   type ReserveInput,
   type ReserveOutcome,
   type SpendServiceOptions,
+  type ReconcileInput,
+  type ReconciliationResolution,
+  type ReservationStatus,
 } from "./spend-service.js";
+
+export {
+  RuntimePaidDispatchController,
+  type RuntimePaidDispatchControllerOptions,
+  type DispatchSpendGrantProvider,
+} from "./paid-dispatch.js";
