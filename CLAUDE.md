@@ -121,10 +121,32 @@ claims:    <each claim, and what would invalidate it>
 does not:  <what this change does NOT establish>
 ```
 
-The last two are the load-bearing ones. **Mutants as commands** is the highest-leverage item: a
-reviewer re-ran mutants three times in one day and twice it changed the outcome, and reconstructing
-the setup was most of the cost. A one-liner per mutant turns verification of a verification into one
-command.
+The last two are the load-bearing ones.
+
+**Mutants assert their own results.** `scripts/mutants.mjs` holds the cases as data — reviewable in
+the diff — and `node scripts/run-mutants.mjs` runs them and compares. The `mutants:` line of an
+evidence block is that one command.
+
+Not shell one-liners for a reviewer to re-run, because two shells produced **four** invalid
+measurements in one day and none was carelessness about the checks:
+
+| what went wrong                                      | why it looked like a result                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------ |
+| probed with uncommitted edits                        | `git diff base...HEAD` reads the committed tree, so nothing fired  |
+| `git reset --hard` deleted an uncommitted instrument | later cases exited on `MODULE_NOT_FOUND`                           |
+| `node scripts/$cmd` in zsh                           | no word-splitting, so every case invoked one filename with a space |
+| piped to `head` and read `head`'s status             | the pipeline's exit, not the command's                             |
+
+So the runner has three properties, each the fix for one of those encoded rather than remembered:
+it **refuses a dirty worktree**, because every case commits and resets; it **preflights every
+script a case names**, because a missing file exits exactly like a real negative; and every case
+asserts an **output fragment**, not only a status, because a status cannot tell a finding from a
+typo. Both invalid runs failed through `MODULE_NOT_FOUND` read as meaningful — assert on output
+wherever a check can afford to.
+
+A guard is only tested when its result comes from the mechanism under test. Testing the preflight
+and the output assertion required **committing** the modified manifest first: with a dirty tree the
+worktree guard fires and both look verified for the wrong reason.
 
 **Checks that replace something a reviewer did by hand:**
 
