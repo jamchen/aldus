@@ -24,6 +24,7 @@ import {
 import { FileSpendReservationStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import type { CostRecordStore } from "./cost-store.js";
 import { SpendService } from "./spend-service.js";
+import { RuntimePaidDispatchController, type DispatchSpendGrantProvider } from "./paid-dispatch.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
 import {
   AdapterRegistry,
@@ -128,6 +129,19 @@ export interface AldusContextOptions {
   synthesisAdapter?: SynthesisAdapter;
   /** Spend grants in force, per plan (contract §13.2, §19.3). */
   spendGrants?: SpendGrantProvider;
+  /**
+   * Spend grants in force for a Worker operation (§13.2, §19.3; #107).
+   *
+   * Separate from {@link spendGrants} because the keys are different questions: a synthesis grant
+   * is looked up by plan, and a Worker grant by the operation the invocation declares. Keying a
+   * Worker grant by Worker would let swapping an implementation change what is authorized, which
+   * is a substitution no operator approved.
+   *
+   * Absent means no Worker operation is authorized to spend, and every paid invocation is refused
+   * before dispatch. That is the fail-closed direction: the alternative is a composition where
+   * forgetting to wire a grant provider makes paid Workers run unbudgeted.
+   */
+  dispatchSpendGrants?: DispatchSpendGrantProvider;
   /** Where irreplaceable artifact bytes are kept. Defaults to a local archive (contract §8.1). */
   archive?: ArtifactArchive;
 }
@@ -157,6 +171,7 @@ export class AldusContext {
   readonly #costs: CostRecordStore;
   readonly #spend: SpendService;
   readonly #spendGrants: SpendGrantProvider | undefined;
+  readonly #paidDispatch: RuntimePaidDispatchController;
   readonly #ledgerStores: ReturnType<typeof fileLedgerStores>;
 
   constructor(options: AldusContextOptions) {
@@ -205,6 +220,15 @@ export class AldusContext {
         locks: this.workspace.locks,
       }),
       costs: this.#costs,
+      now: () => this.now(),
+    });
+
+    this.#paidDispatch = new RuntimePaidDispatchController({
+      spend: this.#spend,
+      costs: this.#costs,
+      // No provider wired means no operation is authorized, rather than every operation being
+      // authorized by default.
+      grants: options.dispatchSpendGrants ?? (() => undefined),
       now: () => this.now(),
     });
 
@@ -281,6 +305,12 @@ export class AldusContext {
       artifacts: stageArtifactRecorder(this.artifacts),
       ...(this.backend !== undefined ? { backend: this.backend } : {}),
       ...(this.workers !== undefined ? { workers: this.workers } : {}),
+      // The half #107 was missing. A Worker may be paid — §3.2's own examples are TTS invocation
+      // and rendering — and without this the runner refuses every paid invocation rather than
+      // dispatching it unauthorized. Wired unconditionally: the grant provider answers `undefined`
+      // when no grant is in force, and a reservation for an unauthorized operation is refused
+      // there rather than by the absence of a controller.
+      paidDispatch: this.#paidDispatch,
       now: this.now,
     });
   }

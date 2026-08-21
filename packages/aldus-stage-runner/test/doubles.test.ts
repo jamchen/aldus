@@ -32,6 +32,7 @@ async function runWith(worker: Parameters<WorkerRegistry["register"]>[0], requir
           input: { probe: true },
           requiredCapabilities: required,
           effect: { kind: "none" },
+          spend: { expectation: { kind: "free" } },
         });
         return { kind: "completed", output: undefined };
       },
@@ -90,6 +91,7 @@ describe("cancellableWorker", () => {
             workerVersion: worker.version,
             input: {},
             effect: { kind: "none" },
+            spend: { expectation: { kind: "free" } },
           });
           return { kind: "completed", output: undefined };
         },

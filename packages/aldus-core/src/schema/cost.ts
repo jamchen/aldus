@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { iso8601, moneySchema, nonEmptyString, schemaVersionString } from "./common.js";
+import type { Money } from "./common.js";
 
 /**
  * Billing state of a cost record (contract §19.3).
@@ -17,6 +18,28 @@ export const BILLING_STATUSES = ["estimated", "charged", "free", "unknown", "voi
 
 /** @see BILLING_STATUSES */
 export type BillingStatus = (typeof BILLING_STATUSES)[number];
+
+/**
+ * What a caller states an effect will cost, **before** it is dispatched (contract §19.3; ADR-0044).
+ *
+ * Closed and required wherever it appears. It replaced `estimated?: Money`, where absence meant
+ * both *"nobody stated one"* and *"nothing will be charged"* — so an unestimated effect was
+ * dispatched with no spend check at all, and the two readings were indistinguishable from the
+ * outside. Declaring `free` is now a statement someone makes, not a field they omitted.
+ *
+ * Lives in Core rather than beside the service that enforces it, because more than one dispatch
+ * path makes the declaration — an agent execution, a Worker invocation — and the alternative was
+ * for the Stage Runner to depend on the services layer to name the shape of a promise it takes
+ * from its own callers (§4.3: the dependency direction is Adopter Integration → Aldus, and within
+ * Aldus it runs downward).
+ */
+export type CostExpectation =
+  /** Declared free. No grant required, no reservation created. */
+  | { kind: "free" }
+  /** Expected to cost this much. A grant is required and the estimate is reserved. */
+  | { kind: "estimated"; amount: Money }
+  /** Expected to cost, amount unknown. A grant is required and its policy must permit this. */
+  | { kind: "unestimated" };
 
 /**
  * A unit of consumption, e.g. characters synthesised or seconds rendered (contract §19.3).

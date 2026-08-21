@@ -12,6 +12,8 @@ import {
   reduceReservations,
   newSpendReservationId,
   SCHEMA_VERSION,
+  type BillingStatus,
+  type CostExpectation,
   type CostObservation,
   type CostRecord,
   type Money,
@@ -24,6 +26,7 @@ import {
   checkSpendScope,
   unestimatedPolicyIsSatisfiable,
   compareMoney,
+  formatMoney,
   type SpendGrant,
 } from "@aldus-runtime/gate-engine";
 import type { SpendReservationStore } from "@aldus-runtime/file-store";
@@ -41,13 +44,31 @@ import { ServiceErrorCodes, serviceError } from "./errors.js";
  *
  * Runtime or adopter policy, never a billing fact a backend may use to authorize itself.
  */
-export type CostExpectation =
-  /** Declared free. No grant required, no reservation created. */
-  | { kind: "free" }
-  /** Expected to cost this much. A grant is required and the estimate is reserved. */
-  | { kind: "estimated"; amount: Money }
-  /** Expected to cost, amount unknown. A grant is required and its policy must permit this. */
-  | { kind: "unestimated" };
+/**
+ * @see CostExpectation
+ *
+ * Re-exported from Core, where it moved so the Stage Runner can name it without depending on this
+ * layer (#107). Nothing that imported it from here has to change.
+ */
+export type { CostExpectation };
+
+/**
+ * Whether a billing status is evidence that **no** charge occurred (§19.3).
+ *
+ * `free` and `voided` are the two, and they are evidence rather than an absence of it: a provider
+ * saying "this was free" and one saying "this was reversed" both establish that nothing is owed.
+ * Everything else — `charged`, `estimated`, `unknown` — leaves money either spent or unaccounted
+ * for.
+ *
+ * Shared so the settlement lifecycle and the unauthorized-divergence check answer the question the
+ * same way. They disagreed: settlement released only on `voided`, so an all-`free` execution
+ * settled — saying money was spent and accounted for when none was — and the free-declaration
+ * check treated any non-empty observation array as a violation, so a Worker declared free that
+ * truthfully reported `billingStatus: "free"` was recorded as an unauthorized charge.
+ */
+export function isUncharged(status: BillingStatus): boolean {
+  return status === "free" || status === "voided";
+}
 
 /** What the caller states before a paid effect. */
 export interface ReserveInput {
@@ -170,6 +191,22 @@ export class SpendService {
         return { reserved: true, reservation: existing };
       }
 
+      // The per-request ceiling, enforced here because this is the authoritative decision.
+      //
+      // ADR-0044 replaced `checkSpend` with `reserve` so nothing would act on a stale answer, and
+      // in the move one of `checkSpend`'s three limits was left behind: scope and remaining total
+      // were carried over and `maxPerRequest` was not. A grant capping a single request at 2.0000
+      // would authorize a 5.0000 one whenever the total had room — on every paid path, not only
+      // this one. Found by a composed Worker test asserting that an over-ceiling estimate reaches
+      // no provider (#107).
+      if (grant.maxPerRequest !== undefined && compareMoney(amount, grant.maxPerRequest) > 0) {
+        return this.#refuse(
+          ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+          `A single request of ${formatMoney(amount)} exceeds the per-request limit of ` +
+            `${formatMoney(grant.maxPerRequest)} on grant "${grant.grantId}" (§19.3).`,
+        );
+      }
+
       const costs = await this.#costs.list(input.runId);
       const availability = availableAuthorization(grant, costs, reservations);
       if (!availability.determinate) {
@@ -276,10 +313,13 @@ export class SpendService {
       written.push(record);
     }
 
+    // `released` means no charge occurred, and `free` is evidence of exactly that — the same
+    // evidence `voided` is. Recognising only `voided` settled an all-free execution, which says
+    // money was spent and accounted for when none was (ADR-0044).
     const unknown = written.some((record) => record.billingStatus === "unknown");
     const kind: SpendTransitionKind = unknown
       ? "reservation.billing_unknown"
-      : written.length === 0 || written.every((record) => record.billingStatus === "voided")
+      : written.length === 0 || written.every((record) => isUncharged(record.billingStatus))
         ? "reservation.released"
         : "reservation.settled";
 
@@ -319,8 +359,15 @@ export class SpendService {
   async markUnknown(
     reservation: SpendReservation,
     costIds: readonly string[] = [],
+    options: { reason?: string } = {},
   ): Promise<SpendReservation> {
-    return this.#appendOne(reservation, "reservation.billing_unknown", { costIds: [...costIds] });
+    return this.#appendOne(reservation, "reservation.billing_unknown", {
+      costIds: [...costIds],
+      // Why it is unresolved, in the operator's terms. "Non-retryable" with no reason gives a
+      // human nothing to act on, and a paid Worker that came back silent is a different problem
+      // from one that threw.
+      ...(options.reason === undefined ? {} : { reason: options.reason }),
+    });
   }
 
   #transition(

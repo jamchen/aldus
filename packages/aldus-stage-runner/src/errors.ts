@@ -103,6 +103,44 @@ export const StageRunnerErrorCodes = {
    * the defect #67 was, and a Worker seam nothing wired would repeat it one layer up.
    */
   WORKER_REGISTRY_UNAVAILABLE: "ALDUS_WORKER_REGISTRY_UNAVAILABLE",
+  /**
+   * A Worker invocation did not declare what it is expected to cost (§19.3; #107).
+   *
+   * Refused **before** dispatch, and required rather than defaulted. Reading an absent declaration
+   * as free is how a paid Worker came to be dispatched against no grant at all, with the charge it
+   * reported discarded one line after the call.
+   */
+  WORKER_SPEND_UNDECLARED: "ALDUS_WORKER_SPEND_UNDECLARED",
+  /**
+   * A potentially paid Worker invocation reached a composition that wired no spend controller.
+   *
+   * Fails closed. The alternative — dispatching anyway because no controller is present to object
+   * — makes the protection depend on the configuration it is meant to enforce.
+   */
+  WORKER_SPEND_UNAVAILABLE: "ALDUS_WORKER_SPEND_UNAVAILABLE",
+  /**
+   * A Worker declared free reported a charge (§13.2, §19.3).
+   *
+   * The charge is durably recorded first, with no `authorizationId` — §20 must be able to answer
+   * what the Run cost, and attaching a grant after the fact would invent an approval nobody gave.
+   * Then the stage fails, non-retryably: the money is already spent.
+   */
+  WORKER_SPEND_UNAUTHORIZED: "ALDUS_WORKER_SPEND_UNAUTHORIZED",
+  /**
+   * A paid Worker came back with no billing facts, or threw after dispatch (§19.3).
+   *
+   * The reservation is retained and the effect becomes non-retryable. A charge may have landed
+   * that nobody can measure, and re-running would spend again on the assumption it did not.
+   */
+  WORKER_BILLING_UNKNOWN: "ALDUS_WORKER_BILLING_UNKNOWN",
+  /**
+   * A Worker reported more independent charges than its declaration identified (§19.3, ADR-0043).
+   *
+   * One `billingEffectKey` names one billed effect and commits one reservation. Settling several
+   * independent charges against it would let one approval cover N. The charges are recorded and
+   * the reservation is left unresolved, because the money is already spent.
+   */
+  WORKER_SPEND_CARDINALITY: "ALDUS_WORKER_SPEND_CARDINALITY",
   /** The stage's retry budget was exhausted without a success (contract §19.1). */
   STAGE_RETRIES_EXHAUSTED: "ALDUS_STAGE_RETRIES_EXHAUSTED",
   /** Execution was cancelled by an operator or a supervising runtime (contract §19.1). */

@@ -49,6 +49,7 @@ function invokingStage(worker: { id: string; version: string }, required: string
         input: { path: "take.wav" },
         requiredCapabilities: required,
         effect: { kind: "none" },
+        spend: { expectation: { kind: "free" } },
       });
       return { kind: "completed" as const, output: result.output };
     },

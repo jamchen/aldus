@@ -26,6 +26,7 @@ import {
   AldusContext,
   AldusServices,
   isIssuedSynthesisPermit,
+  type DispatchSpendGrantProvider,
   type WorkflowGraph,
 } from "@aldus-runtime/services";
 import {
@@ -111,6 +112,13 @@ export interface StackOptions {
   withGrants?: boolean;
   /** Scripted release outcomes per `operationId`; anything unlisted succeeds. */
   releaseOutcomes?: RecordingAdapterOptions["outcomes"];
+  /**
+   * Spend grants in force for a Worker operation (§13.2, §19.3; #107).
+   *
+   * Omitted by default so the unauthorized refusal stays exercisable: a harness that always
+   * supplied a grant could not test the composition an adopter gets before they wire one.
+   */
+  dispatchSpendGrants?: DispatchSpendGrantProvider;
 }
 
 /** A composed stack over one temporary workspace. */
@@ -179,6 +187,9 @@ export async function makeStack(options: StackOptions = {}): Promise<Stack> {
       ...(options.withReleaseAdapter === false ? {} : { releaseAdapters: [release] }),
       ...(options.withGrants === false ? {} : { spendGrants: () => state.grant }),
       ...(options.workers === undefined ? {} : { workers: options.workers }),
+      ...(options.dispatchSpendGrants === undefined
+        ? {}
+        : { dispatchSpendGrants: options.dispatchSpendGrants }),
     });
 
     // Registered *after* the context exists, so the stages can be handed the registry the context

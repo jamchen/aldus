@@ -17,6 +17,7 @@
 
 import type {
   ArtifactRef,
+  Money,
   PromotionEvidence,
   QualityEnforcement,
   QualityLevel,
@@ -294,7 +295,62 @@ export interface StageWorkerRequest<I = unknown> {
    * effect. One key for N unrelated destination objects is the defect, not a shortcut.
    */
   effect: WorkerEffect;
+  /**
+   * What this invocation is expected to cost, and what authorizes it (§13.2, §19.3; #107).
+   *
+   * **Required, and there is no default.** §3.2's Workers include TTS invocation and rendering,
+   * which are paid. Until this field existed `runWorker` reached a provider with no expectation,
+   * no grant and no reservation, and returned `WorkerResult.costs` to the stage where nothing read
+   * them — a measured $2.00 charge left `services.costs(runId)` reporting zero records. Making the
+   * declaration optional would have restored exactly that: absence read as free.
+   *
+   * The stage states what it is asking for. It does **not** state `grantId`, `authorizationId`, or
+   * any Run/Stage/attempt attribution — the composed Runtime resolves the grant and supplies all
+   * attribution, because a caller that names its own authorization can name one that did not
+   * authorize it (§13.2).
+   */
+  spend: DispatchSpendDeclaration;
 }
+
+/**
+ * What a Stage declares about one Worker invocation's cost (ADR-0044, ADR-0046; #107).
+ *
+ * Two arms rather than a `CostExpectation` plus optional companions, so a free invocation cannot
+ * carry a billing identity and a paid one cannot omit it. The alternative — one closed expectation
+ * beside two optional fields — makes `{ kind: "unestimated" }` with no operation representable,
+ * and that is a paid dispatch with nothing to check it against.
+ */
+export type DispatchSpendDeclaration =
+  | {
+      /**
+       * Nothing will be charged for this invocation.
+       *
+       * Dispatches without a reservation. A charge reported anyway is recorded as an unauthorized
+       * divergence and fails the stage — it is not attached to a grant after the fact, because
+       * attaching one would invent an approval nobody gave.
+       */
+      expectation: { kind: "free" };
+    }
+  | {
+      /** What this is expected to cost. `unestimated` still requires a grant that permits it. */
+      expectation: { kind: "estimated"; amount: Money } | { kind: "unestimated" };
+      /**
+       * What the grant must authorize, e.g. `"tts.synthesise"` (§4.2).
+       *
+       * An open string. Checked against the grant's declared scope before reserving, so a grant
+       * for one operation cannot authorize another.
+       */
+      operation: string;
+      /**
+       * Identity of the independently **billed** effect, with per-charge cardinality (ADR-0043).
+       *
+       * Deliberately not the destination idempotency key and not the invocation key. ADR-0036
+       * established that those answer different questions, and one Worker call may contain several
+       * independently billed effects — a key with the wrong cardinality makes a retry resolve to a
+       * reservation belonging to a different charge.
+       */
+      billingEffectKey: string;
+    };
 
 /**
  * What one Worker invocation does outside the workspace (§19.1; #148).

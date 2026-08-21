@@ -61,3 +61,4 @@ Rules:
 | [0042](0042-promotion-stays-interactive.md)                                                 | Promotion to `latest` stays interactive, and no bypass token enters CI                     | Accepted | —                 |
 | [0043](0043-an-effect-key-belongs-to-the-effect.md)                                         | An effect key belongs to the effect, not to the attempt containing it                      | Accepted | #148, #149        |
 | [0044](0044-spend-is-reserved-before-the-effect.md)                                         | Spend is reserved before the effect, and settled from what the provider reports            | Accepted | #155              |
+| [0046](0046-a-worker-is-a-paid-gateway.md)                                                  | A Worker is a paid gateway and reserves like one                                           | Accepted | #107              |

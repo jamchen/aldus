@@ -30,6 +30,7 @@ import {
   ServiceErrorCodes,
   type ServiceResult,
   type SpendGrantProvider,
+  type DispatchSpendGrantProvider,
   type SubjectsProvider,
   type SynthesisAdapter,
   type WorkflowGraph,
@@ -118,6 +119,8 @@ export interface CliEnvironment {
   workers?: WorkerRegistry;
   /** The agent backend stage executions run through (§10). */
   agentBackend?: AgentBackend;
+  /** Spend grants in force for a Worker operation (§13.2, §19.3; #107). */
+  dispatchSpendGrants?: DispatchSpendGrantProvider;
   /** Clock, injectable for deterministic tests. */
   now?: () => Date;
 }
@@ -317,6 +320,9 @@ async function withConfig(
     ...(environment.agentBackend === undefined && config.agentBackend !== undefined
       ? { agentBackend: config.agentBackend }
       : {}),
+    ...(environment.dispatchSpendGrants === undefined && config.dispatchSpendGrants !== undefined
+      ? { dispatchSpendGrants: config.dispatchSpendGrants }
+      : {}),
   };
 }
 
@@ -413,6 +419,9 @@ function servicesFor(options: CommonOptions, environment: CliEnvironment): Aldus
     ...(environment.workflow !== undefined ? { workflow: environment.workflow } : {}),
     ...(environment.workers !== undefined ? { workers: environment.workers } : {}),
     ...(environment.agentBackend !== undefined ? { backend: environment.agentBackend } : {}),
+    ...(environment.dispatchSpendGrants !== undefined
+      ? { dispatchSpendGrants: environment.dispatchSpendGrants }
+      : {}),
     ...(environment.now !== undefined ? { now: environment.now } : {}),
   });
   return new AldusServices(context);

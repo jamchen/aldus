@@ -43,11 +43,14 @@ afterEach(async () => {
   await temp.cleanup();
 });
 
+// Free, because none of these Workers reports a cost. The declaration is required rather than
+// defaulted (#107), and stating it here keeps these tests about effect keys.
 const call = (effect: unknown) => ({
   workerId: "probe",
   workerVersion: "1",
   input: {},
   effect,
+  spend: { expectation: { kind: "free" } },
 });
 
 describe("#149 — the fallback is gone", () => {

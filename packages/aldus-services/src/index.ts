@@ -148,3 +148,9 @@ export {
   type ReserveOutcome,
   type SpendServiceOptions,
 } from "./spend-service.js";
+
+export {
+  RuntimePaidDispatchController,
+  type RuntimePaidDispatchControllerOptions,
+  type DispatchSpendGrantProvider,
+} from "./paid-dispatch.js";
