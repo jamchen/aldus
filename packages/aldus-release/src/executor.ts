@@ -352,21 +352,22 @@ export class ReleaseExecutor {
           );
         }
 
-        // Best-effort: recorded as skipped and the release continues, matching what `execute`
-        // already does with a best-effort *failure*. Not performed, because an operation that may
-        // already have happened is not one to repeat on a guess.
-        repaired.push(
-          await this.#record(
-            bundle,
-            operation,
-            idempotencyKey,
-            {
-              status: "skipped",
-              message: `whether this already happened could not be established: ${remote.reason}`,
-            },
-            options.actor,
-          ),
-        );
+        // Best-effort: **no receipt**, and not performed this pass.
+        //
+        // Writing a `skipped` receipt was the obvious thing and it was wrong in the way this whole
+        // issue is about. `skipped` is terminal in both directions — `execute` skips it and
+        // `reconcile` treats it as already recorded — so one momentary query failure permanently
+        // retired the operation for that bundle. At the destination that produced #169 quota
+        // exhaustion is routine, so a rate limit while *asking about* a tidy-up would silently
+        // drop it forever, and the record would say `skipped`: a decision, when what happened was
+        // an unanswered question.
+        //
+        // A durable record of a transient failure is the same defect as a durable record of a
+        // search nobody performed. So the not-performing lives in this pass only — the finding and
+        // the warning say what happened now, and the next pass asks again.
+        //
+        // Not performed either, because executing on an unknown prior state is the other half of
+        // the trap: it might repeat an operation that already happened.
         findings.push({
           operationId: operation.operationId,
           idempotencyKey,
@@ -452,10 +453,16 @@ export class ReleaseExecutor {
     const warnings: string[] = [];
     const written: ReleaseReceipt[] = [];
 
+    // Operations this pass must not attempt, held in memory and never written down. A best-effort
+    // operation whose prior state could not be established is not performed now — executing on an
+    // unknown prior state might repeat something that already happened — and leaves no durable
+    // trace, so the next pass asks again rather than finding a terminal receipt (#169).
+    const unestablished = new Set<string>();
     if (options.reconcile !== false) {
       const report = await this.reconcile(bundle, { actor: options.actor });
       written.push(...report.repaired);
       for (const finding of report.findings) {
+        if (finding.action === "cannot_establish") unestablished.add(finding.operationId);
         if (finding.explanation !== undefined && OPERATOR_FACING_FINDINGS.has(finding.action)) {
           warnings.push(finding.explanation);
         }
@@ -477,6 +484,10 @@ export class ReleaseExecutor {
         );
         continue;
       }
+
+      // Skipped for this pass only. No receipt was written, so a later pass reaches the same
+      // operation with the same undecided state and asks the destination again.
+      if (unestablished.has(operation.operationId)) continue;
 
       const existing = latest.get(idempotencyKey);
       if (existing?.status === "succeeded" || existing?.status === "skipped") continue;

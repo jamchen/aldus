@@ -112,14 +112,31 @@ describe("a best-effort operation whose state cannot be established", () => {
     expect(outcome.warnings.some((warning) => warning.includes("does not retain"))).toBe(true);
   });
 
-  it("records why in the receipt, not only in a warning that scrolls away", async () => {
+  it("writes no receipt at all, because a transient failure is not a decision", async () => {
+    // The first version wrote a `skipped` receipt, which is terminal in both directions —
+    // `execute` skips it and `reconcile` treats it as already recorded. One momentary query
+    // failure then permanently retired the operation for that bundle, and the record said
+    // `skipped`: a decision, when what happened was an unanswered question.
+    //
+    // A durable record of a transient failure is the same defect as a durable record of a search
+    // nobody performed.
     const { executor, bundle, receipts } = harnessWithUnknownCleanup();
 
     await executor.execute(bundle, { actor: OPERATOR });
 
     const stored = await receipts.list(RUN_ID);
-    const skipped = stored.find((receipt) => receipt.status === "skipped");
-    expect(skipped).toBeDefined();
+    expect(stored.map((receipt) => receipt.status)).toEqual(["succeeded"]);
+    expect(stored.some((receipt) => receipt.status === "skipped")).toBe(false);
+  });
+
+  it("does not report a receipt it never wrote", async () => {
+    // `report.repaired` used to carry the `skipped` entry, so `execute` counted it as written.
+    const { executor, bundle } = harnessWithUnknownCleanup();
+
+    const report = await executor.reconcile(bundle, { actor: OPERATOR });
+
+    expect(report.findings.some((finding) => finding.action === "cannot_establish")).toBe(true);
+    expect(report.repaired).toEqual([]);
   });
 });
 
@@ -200,5 +217,81 @@ describe("a success that has something to say (#169 item 4)", () => {
 
     const stored = await receipts.list(RUN_ID);
     expect(stored.find((entry) => entry.status === "succeeded")?.note).toBeUndefined();
+  });
+});
+
+describe("a query failure retires nothing", () => {
+  /**
+   * Two passes, because one pass cannot see this.
+   *
+   * The suite was green with a `skipped` receipt being written, and the defect only appears on the
+   * pass after: `skipped` is terminal in both directions, so the operation was gone from that
+   * bundle forever. At the destination that produced #169 quota exhaustion is routine, so a rate
+   * limit while *asking about* a best-effort operation would silently drop it.
+   */
+  function bundleWithTransition() {
+    return aMinimalBundle({
+      bestEffort: [
+        bestEffortOperation({
+          operationId: "privacy-transition",
+          kind: "visibility.transition",
+          destination: DESTINATION_A,
+          inputHashes: [],
+        }),
+      ],
+    });
+  }
+
+  it("asks again on the next pass, and performs the operation then", async () => {
+    const bundle = bundleWithTransition();
+    const first = makeHarness({ a: { lookupThrowsFor: ["privacy-transition"] } });
+
+    const pass1 = await first.executor.execute(bundle, { actor: OPERATOR });
+    expect(pass1.state).toBe("succeeded");
+    expect(first.a.executionCount("privacy-transition")).toBe(0);
+    // Nothing durable was written about it, which is the whole fix.
+    expect(
+      (await first.receipts.list(RUN_ID)).some(
+        (receipt) => receipt.operation === "visibility.transition",
+      ),
+    ).toBe(false);
+
+    // Same bundle, same receipts, a destination that answers now.
+    const second = makeHarness({ receipts: first.receipts });
+    const pass2 = await second.executor.execute(bundle, { actor: OPERATOR });
+
+    expect(pass2.state).toBe("succeeded");
+    // Previously 0: the operation had been retired by a momentary failure.
+    expect(second.a.executionCount("privacy-transition")).toBe(1);
+  });
+
+  it("does not repeat the operation if it turns out to have happened already", async () => {
+    // The other half of the trap. Not performing during the unknown pass is what makes the retry
+    // safe: had it executed on an unknown prior state, it might have repeated one that succeeded.
+    const bundle = bundleWithTransition();
+    const key = deriveIdempotencyKey(bundle.bestEffort[0]!);
+    const first = makeHarness({ a: { lookupThrowsFor: ["privacy-transition"] } });
+
+    await first.executor.execute(bundle, { actor: OPERATOR });
+    expect(first.a.executionCount("privacy-transition")).toBe(0);
+
+    // It had in fact happened; the destination can say so now.
+    const second = makeHarness({
+      receipts: first.receipts,
+      a: { remote: { [key]: { exists: true, remoteId: "remote-x" } } },
+    });
+    const pass2 = await second.executor.execute(bundle, { actor: OPERATOR });
+
+    expect(pass2.state).toBe("succeeded");
+    expect(second.a.executionCount("privacy-transition")).toBe(0);
+    // `first.receipts`, because `makeHarness` returns its own store even when one is injected —
+    // the executor writes to the injected one.
+    const repaired = await first.receipts.list(RUN_ID);
+    expect(
+      repaired.some(
+        (receipt) =>
+          receipt.operation === "visibility.transition" && receipt.status === "succeeded",
+      ),
+    ).toBe(true);
   });
 });
