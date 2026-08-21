@@ -179,14 +179,18 @@ wherever a check can afford to.
 ### Four ways a check misleads, by remedy
 
 One day produced enough instances to catalogue rather than remember. The categories are
-distinguished by **what was wrong**, because the remedies differ:
+distinguished by **what was wrong**, because the remedies differ.
 
-| what was wrong                                                           | remedy                                      |
-| ------------------------------------------------------------------------ | ------------------------------------------- |
-| the description drifted from the mechanism                               | **read the mechanism**                      |
-| the measurement was taken where the code will never run                  | **run it where it runs**                    |
-| the instrument declined to answer and the non-answer was recorded as one | **make that impossible to record**          |
-| an answer was given and pointed adjacent to the cause                    | **treat a diagnostic's location as a hint** |
+Not a complete set — it is what one day produced, and the fifth arrived within an hour of the first
+four being written down, which is why the caveat is kept rather than softened:
+
+| what was wrong                                                           | remedy                                       |
+| ------------------------------------------------------------------------ | -------------------------------------------- |
+| the description drifted from the mechanism                               | **read the mechanism**                       |
+| the measurement was taken where the code will never run                  | **run it where it runs**                     |
+| the instrument declined to answer and the non-answer was recorded as one | **make that impossible to record**           |
+| an answer was given and pointed adjacent to the cause                    | **treat a diagnostic's location as a hint**  |
+| the premise came from a report and was never checked in the code         | **check the premise where the mechanism is** |
 
 **1. Description drifted from mechanism.** `absenceIsReadable` equivalent to `true`;
 "test-harness-only" said of a symbol exported from a package index; "all genuinely clean"
@@ -222,6 +226,34 @@ refusal**, so read what a tool emits rather than an extraction of it.
 a block comment, and the parse error named the line _after_ the offending one — so the first repair
 fixed the wrong line and the error persisted unchanged. The general form: a diagnostic's location is
 where the **detector** stood, not where the fault is.
+
+**5. A premise inherited from a report.** Distinct from the first, not an instance of it. There the
+description had drifted from a mechanism it once matched; here the premise was never a description of
+the code at all — it is someone's account of it, arriving in prose.
+
+Why it escapes checking is social rather than technical. **A premise arriving in a report gets
+checked less than one arriving in code, because reading a report does not feel like reading a claim
+— it feels like being told a fact by someone who did the work.** Three instances in one day, one per
+party:
+
+- _"`release.public` binds a `release/receipt` artifact"_, inherited from an adopter report, and
+  three routes derived from it — two existing only because of it, one nearly a MAJOR schema break.
+  `GateSubject`'s docstring settles it in two lines and was never opened;
+- _"the one real render predates the registration fix"_, inherited and carried into a ruling as a
+  negative worth keeping. Wrong run, wrong reason, two `ls` commands away;
+- _"a pin bump re-runs every measurement"_, inherited and carried to the **owner** as a decision they
+  needed to make. It was four measurements, computable from a classification already in the
+  reporter's own registry.
+
+The remedy is cheap: **when a report supplies a premise your work will rest on, check the premise in
+the code rather than in the report.** A report is evidence that someone believes it, which is worth
+having and is not the same thing.
+
+And when a report's framing turns out false, **check whether your own documentation planted it — and
+accept the answer if it did not.** "Our docs misled them" flatters everyone, so it is the finding to
+distrust. Here §13.4 names _"the final render, captions, metadata, destination, and visibility
+policy"_ — things, not artifacts — and `GateSubject` documents itself accurately, so the framing came
+from the reader and there was nothing to fix.
 
 **A case is a claim too.** Two mutant cases were written on premises that were never checked — a
 forty-zero base ref assumed to make a check decline, and an appended export assumed visible to an
