@@ -1,13 +1,26 @@
-# Nothing here runs `npm publish` until a human approves the `npm-publish` environment.
-# See docs/RELEASING.md for the procedure this workflow implements.
+# The `next` line publishes unattended on merge to `main` (ADR-0050). Every readiness check and the
+# clean-consumer gate still run before the publish, and the tarball is still uploaded for
+# inspection — what was removed is a human countersignature on a line that is unvalidated by
+# construction, not a check.
+#
+# This header previously said "Nothing here runs `npm publish` until a human approves the
+# `npm-publish` environment". That became false the moment the required reviewer was removed, and a
+# false safety claim in a release pipeline is relied on rather than merely read (#173).
+#
+# Nothing here assigns `latest`. Promotion is ADR-0042's interactive script with npm 2FA,
+# deliberately outside CI. See docs/RELEASING.md.
 name: Release
 
-# Tag-triggered only. Never on pull_request, never on a fork: a workflow that can publish must
-# not be reachable from a branch anyone can open (issue #29 item 5, ADR-0022).
+# Merge-triggered on `main`, never on pull_request, never on a fork: a workflow that can publish
+# must not be reachable from a branch anyone can open (issue #29 item 5, ADR-0022).
+#
+# The reviewed merge is the publish event (ADR-0050). Tag pushes no longer publish: with the
+# environment reviewer gone, a tag was an out-of-band publish button any account with write access
+# could press, which is every session authenticating as the owner.
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       dry_run:
@@ -38,6 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.readiness.outputs.version }}
+      publish: ${{ steps.intent.outputs.publish }}
     steps:
       - uses: actions/checkout@v5
 
@@ -61,6 +75,20 @@ jobs:
           version="$(node -p "require('./packages/aldus-core/package.json').version")"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Release version: ${version}"
+
+      # Did this merge intend to ship, and can it? (ADR-0050)
+      #
+      # Three states, and conflating any two breaks something: version unchanged publishes nothing
+      # and succeeds; bumped and absent from the registry publishes; bumped and *wholly* present
+      # refuses, because that is a republish. The whole-set qualifier is what preserves the
+      # per-package skip below, which exists so a twelve-package set that failed halfway resumes
+      # instead of dying on its own earlier success.
+      - name: Release intent
+        id: intent
+        run: |
+          set -euo pipefail
+          node scripts/release-intent.mjs "${{ github.event.before }}" | tee /tmp/intent.txt
+          grep '^publish=' /tmp/intent.txt >> "$GITHUB_OUTPUT"
 
       - name: Tag matches the manifests
         if: startsWith(github.ref, 'refs/tags/v')
@@ -98,7 +126,9 @@ jobs:
   publish:
     name: publish to npm (next)
     needs: verify
-    if: github.event_name == 'push' || inputs.dry_run == false
+    if: |
+      (github.event_name == 'push' && needs.verify.outputs.publish == 'true')
+      || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
     runs-on: ubuntu-latest
     environment:
       name: npm-publish
@@ -123,8 +153,10 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Re-checked on this job rather than trusted from `verify`: the environment approval may
-      # have been granted hours later, and this is the last point before an irreversible act.
+      # Re-checked on this job rather than trusted from `verify`, because this is the last point
+      # before an irreversible act and the two jobs check out independently. The reason used to be
+      # that an environment approval could arrive hours later; there is no approval now, and the
+      # re-check is right regardless of the delay (ADR-0050).
       - name: Release readiness
         run: node scripts/publish-set.mjs --strict
 
