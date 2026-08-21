@@ -89,6 +89,19 @@ export const releaseReceiptSchema = z
     completedAt: iso8601.optional(),
     /** Structured failure, already redacted by its producer (contract §19.1, §19.2). */
     error: structuredErrorSchema.optional(),
+    /**
+     * Something an operator needs to know about an operation that succeeded (§20; #169).
+     *
+     * `error` carries what a reader needs when something failed, and there was no equivalent for a
+     * success that has something to say — an operation that removed a marker from one item of
+     * several, or that found nothing to remove and therefore removed nothing, had to discard the
+     * only part an operator would have wanted.
+     *
+     * Adapter-supplied and already redacted (§19.2). Deliberately **not** a place to footnote a
+     * remote state the adapter could not establish: that is `cannotEstablish`, and using this
+     * instead would be a false record with better documentation.
+     */
+    note: nonEmptyString.max(2000).optional(),
   })
   .meta({
     id: "ReleaseReceipt",

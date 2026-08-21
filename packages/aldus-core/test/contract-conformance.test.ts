@@ -92,7 +92,13 @@ const SANCTIONED_ADDITIONS: Partial<Record<SchemaName, readonly string[]>> = {
   // destination but never which release produced it, and two releases of one Run were
   // indistinguishable afterwards. Optional, and deliberately absent from the idempotency key:
   // keying on it is what made a reconstructed bundle re-execute every operation (#40).
-  ReleaseReceipt: ["schemaVersion", "runId", "bundleId"],
+  //
+  // `note`: added at SCHEMA_VERSION 1.11 (ADR-0049). §17's receipt carries `error` for a failure
+  // and nothing for a success that has something to say. An adapter that removed a marker from one
+  // item of several, or found nothing to remove, had to discard the only part an operator would
+  // have wanted — and the alternative it reached for was footnoting a fabricated absence, which
+  // #169 is about preventing.
+  ReleaseReceipt: ["schemaVersion", "runId", "bundleId", "note"],
   // ADR-0026, both added at SCHEMA_VERSION 1.3.
   //
   // `goalStages`: §6.2 gives a Run a status but nothing that says what reaching the end would

@@ -14,7 +14,7 @@ import {
 describe("SCHEMA_VERSION", () => {
   it("is a well-formed MAJOR.MINOR string", () => {
     expect(isSchemaVersion(SCHEMA_VERSION)).toBe(true);
-    expect(parseSchemaVersion(SCHEMA_VERSION)).toEqual({ major: 1, minor: 10 });
+    expect(parseSchemaVersion(SCHEMA_VERSION)).toEqual({ major: 1, minor: 11 });
   });
 
   it("is readable by itself", () => {

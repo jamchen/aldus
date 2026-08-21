@@ -62,3 +62,4 @@ Rules:
 | [0043](0043-an-effect-key-belongs-to-the-effect.md)                                         | An effect key belongs to the effect, not to the attempt containing it                      | Accepted | #148, #149        |
 | [0044](0044-spend-is-reserved-before-the-effect.md)                                         | Spend is reserved before the effect, and settled from what the provider reports            | Accepted | #155              |
 | [0048](0048-repeatability-is-declared-in-the-bundle.md)                                     | Repeatability is a property of the operation, declared in the bundle                       | Accepted | #169              |
+| [0049](0049-an-unestablished-remote-state-is-its-own-answer.md)                             | An unestablished remote state is its own answer                                            | Accepted | #169              |

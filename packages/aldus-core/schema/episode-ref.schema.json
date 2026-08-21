@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.10:EpisodeRef",
+  "$id": "urn:aldus:schema:1.11:EpisodeRef",
   "type": "object",
   "properties": {
     "schemaVersion": {
