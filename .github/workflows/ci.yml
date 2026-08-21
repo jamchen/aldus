@@ -77,6 +77,27 @@ jobs:
       - name: Clean-consumer gate
         run: node scripts/clean-consumer.mjs
 
+  version-bump:
+    name: version bump
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # ADR-0050: the `next` line publishes on merge, so a merge that changes shipped contents
+      # without a bump ships nothing and says nothing. Checked on the pull request rather than the
+      # merge — before `main` can go red for it, and where fixing it is one line in a diff already
+      # open. `files`-scoped, so a test-only or docs-only change to a published package does not
+      # fire.
+      - name: Shipped changes carry a version bump
+        run: node scripts/check-version-bump.mjs "origin/${{ github.base_ref }}"
+
   boundary:
     name: core boundary
     runs-on: ubuntu-latest
