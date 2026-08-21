@@ -144,9 +144,34 @@ asserts an **output fragment**, not only a status, because a status cannot tell 
 typo. Both invalid runs failed through `MODULE_NOT_FOUND` read as meaningful — assert on output
 wherever a check can afford to.
 
-A guard is only tested when its result comes from the mechanism under test. Testing the preflight
-and the output assertion required **committing** the modified manifest first: with a dirty tree the
-worktree guard fires and both look verified for the wrong reason.
+### A guard is only tested when its result comes from the mechanism under test
+
+The general form of four rules that arrived separately in one day, which is why it is stated here
+rather than left as four anecdotes:
+
+- _establish the instrument is sound before believing what it says_ — an invalid measurement that
+  agrees with a plausible worry is the hardest to discard, because discarding it feels like refusing
+  evidence;
+- _commit the instrument before probing it_ — `git reset --hard` deleted an uncommitted check, and
+  the cases that followed exited on `MODULE_NOT_FOUND` and read as passes;
+- _assert on output, not status, wherever a check can afford to_ — a missing file, a misspelled
+  filename and a real negative share an exit code;
+- and the case that produced the sentence: testing this runner's preflight and output assertions
+  required **committing** the modified manifest first, because with a dirty tree the worktree guard
+  fires and both look verified for the wrong reason. Two guards confirmed by a third.
+
+### A claim about another repository is not checkable from here
+
+`check-generic-boundary.mjs` catches an adopter's identity entering our record. It cannot catch the
+opposite direction across the same line: a claim _about_ the adopter's repository asserted here
+without being read there. Both happened in one day — a `git grep` result recorded as ADR evidence
+that named the adopter, and a file attributed to this repository that exists in neither, whose
+supposed contents came from a chat message rather than any artifact.
+
+There is no grep for the second. What there is: **attribute a cross-repository claim to where it was
+read, or do not make it.** "A search across the first adopter's integration finds neither export" is
+checkable by whoever has that repository. "Your `mutate.mjs` header names this error" is not
+checkable by anyone, because the file is not there.
 
 **Checks that replace something a reviewer did by hand:**
 
