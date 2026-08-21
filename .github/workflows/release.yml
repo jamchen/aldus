@@ -53,7 +53,12 @@ jobs:
       version: ${{ steps.readiness.outputs.version }}
       publish: ${{ steps.intent.outputs.publish }}
     steps:
+      # Full history: `release-intent.mjs` reads the previous commit's version, and the default
+      # shallow clone does not contain it. That is why the first run after the trigger moved
+      # reported an attempted republish for a merge that changed nothing shippable.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
