@@ -40,6 +40,21 @@ export type AdapterOutcome =
       remoteId?: string;
       /** Address of the released item, where one is meaningful. */
       remoteUrl?: string;
+      /**
+       * Something an operator needs to know about a success (§20; #169 item 4).
+       *
+       * `failed` has `message` and `pending` has `message?`; `succeeded` had nowhere to put a
+       * sentence at all. An adapter that removed a marker from one video of several, or that found
+       * no marker and therefore removed nothing, succeeded — and had to discard the only part an
+       * operator would have wanted.
+       *
+       * **Not a channel for a qualified absence.** An adapter that cannot establish remote state
+       * returns {@link cannotEstablish} from `lookup`; using this to footnote a fabricated
+       * `exists: false` would be the same false record with better documentation (#169 item 3).
+       *
+       * Already redacted by the adapter (§19.2), like every other adapter-supplied string.
+       */
+      note?: string;
     }
   | {
       status: "failed";
@@ -61,13 +76,82 @@ export type AdapterOutcome =
       message?: string;
     };
 
-/** What reconciliation found at the destination. */
-export interface RemoteState {
-  /** Whether the destination holds the result of this operation. */
-  exists: boolean;
-  remoteId?: string;
-  remoteUrl?: string;
+/** @see CannotEstablish */
+declare const CANNOT_ESTABLISH: unique symbol;
+
+/**
+ * Authorities this process minted. A cast cannot manufacture membership.
+ *
+ * The same runtime proof `SynthesisPermit` uses, and for the same reason: the brand above is a
+ * phantom, absent at runtime, so a `RemoteState` narrowing that trusted it would trust a type
+ * assertion. #170 has the longer version of this argument — a check that assumes the type it is
+ * checking is not a check.
+ */
+const ISSUED_CANNOT_ESTABLISH = new WeakSet<object>();
+
+/**
+ * The destination could not be queried, so whether it holds the operation is unknown (#169).
+ *
+ * Distinct from `exists: false` in the way that matters: **`exists: false` is the answer only a
+ * completed search can give.** Before this, an adapter that could not establish the answer had two
+ * options — return `false` and assert a search nobody performed, or throw and abort the whole
+ * reconciliation pass before a single operation executed. Both were forced, and adopters took the
+ * first.
+ *
+ * Minted by {@link cannotEstablish} and not assemblable, because a state that suppresses a
+ * publish-safety check must not be reachable by writing an object literal.
+ */
+export interface CannotEstablish {
+  readonly [CANNOT_ESTABLISH]: "cannot_establish";
+  /**
+   * Why the answer could not be established, for the operator (§20).
+   *
+   * **Required.** An adapter that cannot establish something and cannot say why has produced a
+   * finding nobody can act on — a rate limit, a permission, and a destination that does not retain
+   * what would identify the operation are three different problems with three different responses.
+   */
+  readonly reason: string;
 }
+
+/**
+ * Declare that the destination could not be queried (§17, §19.1; #169).
+ *
+ * @throws {AldusError} when the reason is empty.
+ */
+export function cannotEstablish(reason: string): CannotEstablish {
+  if (typeof reason !== "string" || reason.trim().length === 0) {
+    throw releaseError(
+      ReleaseErrorCodes.OPERATION_INVALID,
+      "An unestablished remote state must say why. A rate limit, a permission problem and a " +
+        "destination that does not retain what identifies the operation call for three different " +
+        "responses, and an operator cannot tell them apart from the absence of an answer (§17).",
+      { category: "validation", retryable: false, details: {} },
+    );
+  }
+  const state = { reason } as CannotEstablish;
+  ISSUED_CANNOT_ESTABLISH.add(state);
+  return state;
+}
+
+/** Whether a remote state is an issued {@link CannotEstablish}. Membership, not shape. */
+export function isCannotEstablish(state: RemoteState): state is CannotEstablish {
+  return typeof state === "object" && state !== null && ISSUED_CANNOT_ESTABLISH.has(state);
+}
+
+/** What reconciliation found at the destination. */
+export type RemoteState =
+  | {
+      /**
+       * Whether the destination holds the result of this operation.
+       *
+       * `false` asserts a **completed search**. An adapter that did not or could not search
+       * returns {@link cannotEstablish} instead.
+       */
+      exists: boolean;
+      remoteId?: string;
+      remoteUrl?: string;
+    }
+  | CannotEstablish;
 
 /**
  * An adopter's implementation for one destination.
@@ -129,13 +213,52 @@ export class AdapterRegistry {
 }
 
 /** Scripted behaviour for {@link RecordingReleaseAdapter}. */
+/**
+ * Build the remote-state map from either accepted shape, and refuse anything else.
+ *
+ * Refusing rather than tolerating, because the failure this replaces was silence: a mis-seeded
+ * harness answered every lookup as a completed search finding nothing, and a test written against
+ * it would assert the wrong behaviour and pass. A double that lies quietly is worse than one that
+ * will not start.
+ */
+function seedRemote(remote: RecordingAdapterOptions["remote"]): Map<string, RemoteState> {
+  if (remote === undefined) return new Map();
+  if (remote instanceof Map) return new Map(remote);
+  if (typeof remote === "object" && remote !== null && !Array.isArray(remote)) {
+    return new Map(Object.entries(remote));
+  }
+  throw releaseError(
+    ReleaseErrorCodes.OPERATION_INVALID,
+    "A recording adapter's `remote` seed must be a plain object or a Map keyed by idempotency " +
+      "key. Anything else seeds nothing, and every lookup then answers as a completed search " +
+      "that found nothing — which is the defect this double is used to test for.",
+    { category: "validation", retryable: false, details: {} },
+  );
+}
+
 export interface RecordingAdapterOptions {
   /** Outcome per `operationId`. Anything unlisted succeeds. */
   outcomes?: Readonly<Record<string, AdapterOutcome>>;
-  /** Remote state per idempotency key, as reconciliation would find it. */
-  remote?: Readonly<Record<string, RemoteState>>;
+  /**
+   * Remote state per idempotency key, as reconciliation would find it.
+   *
+   * A plain object or a `Map`, because the field it becomes is a `Map` and seeding it with one is
+   * the natural mistake. `Object.entries(aMap)` is `[]`, so a `Map` used to seed **nothing**, with
+   * no error — and every lookup then fell through to `{ exists: false }`, which reads as a
+   * completed search finding nothing. The same trap as an adapter returning `{ present: false }`:
+   * an input accepted quietly and answered as though nothing was there.
+   */
+  remote?: Readonly<Record<string, RemoteState>> | ReadonlyMap<string, RemoteState>;
   /** Omit `lookup` entirely, modelling a destination that cannot be queried. */
   withoutLookup?: boolean;
+  /**
+   * Make `lookup` throw for these `operationId`s, modelling an unanticipated query failure.
+   *
+   * Distinct from returning {@link cannotEstablish}: an adapter that knows it cannot answer says
+   * so, and this is the adapter that does not know — a quota error, a dropped connection. The
+   * executor has to survive both (#169).
+   */
+  lookupThrowsFor?: readonly string[];
 }
 
 /**
@@ -169,10 +292,13 @@ export class RecordingReleaseAdapter implements ReleaseAdapter {
   constructor(destination: string, options: RecordingAdapterOptions = {}) {
     this.destination = destination;
     this.#options = options;
-    this.remote = new Map(Object.entries(options.remote ?? {}));
+    this.remote = seedRemote(options.remote);
     if (options.withoutLookup !== true) {
       this.lookup = (request: ReleaseRequest): Promise<RemoteState> => {
         this.lookedUp.push(request);
+        if (options.lookupThrowsFor?.includes(request.operation.operationId) === true) {
+          return Promise.reject(new Error("destination query failed"));
+        }
         return Promise.resolve(this.remote.get(request.idempotencyKey) ?? { exists: false });
       };
     }

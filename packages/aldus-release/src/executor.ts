@@ -26,7 +26,8 @@
 import type { ActorRef, AldusEvent, ReleaseReceipt } from "@aldus-runtime/core";
 import { SCHEMA_VERSION, newEventId, newReleaseId } from "@aldus-runtime/core";
 
-import type { AdapterRegistry, AdapterOutcome, ReleaseRequest } from "./adapter.js";
+import { cannotEstablish, isCannotEstablish } from "./adapter.js";
+import type { AdapterRegistry, AdapterOutcome, ReleaseRequest, RemoteState } from "./adapter.js";
 import { assertBundleValid, deriveIdempotencyKey, type ReleaseBundle } from "./bundle.js";
 import { ReleaseErrorCodes, releaseError } from "./errors.js";
 import type { OperationCriticality, ReleaseOperation } from "./operation.js";
@@ -103,6 +104,10 @@ export interface BundleStatus {
 const OPERATOR_FACING_FINDINGS: ReadonlySet<ReconciliationFinding["action"]> = new Set([
   "repaired",
   "unavailable",
+  // Yes. The operation may or may not have happened and nobody can tell — the state an operator
+  // most needs to see, and the one the deny-list would have surfaced by accident rather than by
+  // decision (#169).
+  "cannot_establish",
 ]);
 
 export interface ReconciliationFinding {
@@ -123,7 +128,14 @@ export interface ReconciliationFinding {
      * Deliberately its own action rather than folded into `confirmed_absent`. Nothing was
      * searched for, and saying it was absent would be the false statement this exists to stop.
      */
-    | "not_reconciled_repeatable";
+    | "not_reconciled_repeatable"
+    /**
+     * The adapter was asked and could not establish whether the operation happened (#169).
+     *
+     * Distinct from `unavailable`, which is a destination that cannot be queried at all, and from
+     * `confirmed_absent`, which is a completed search. This one asked and got no answer.
+     */
+    | "cannot_establish";
   explanation?: string;
 }
 
@@ -252,7 +264,7 @@ export class ReleaseExecutor {
     const findings: ReconciliationFinding[] = [];
     const repaired: ReleaseReceipt[] = [];
 
-    for (const { operation, idempotencyKey } of this.#plan(bundle)) {
+    for (const { operation, criticality, idempotencyKey } of this.#plan(bundle)) {
       const receipt = latest.get(idempotencyKey);
       if (receipt !== undefined && receipt.status !== "pending") {
         findings.push({
@@ -298,7 +310,102 @@ export class ReleaseExecutor {
         idempotencyKey,
         runId: bundle.runId,
       };
-      const remote = await adapter.lookup(request);
+      // Guarded, and the guard is criticality-aware. `reconcile` used to `await` this bare, so a
+      // throw from any operation's `lookup` aborted the whole pass before a single `execute` —
+      // a quota error raised while asking about a tidy-up blocked the upload beside it (#169).
+      //
+      // A required operation's throw still aborts. Fail-closed belongs where a mistake publishes
+      // twice; it does not belong where a best-effort tidy-up could not be queried.
+      let remote: RemoteState;
+      try {
+        remote = await adapter.lookup(request);
+      } catch (thrown) {
+        if (criticality === "required") throw thrown;
+        remote = cannotEstablish(
+          `querying destination "${operation.destination}" failed: ${
+            thrown instanceof Error ? thrown.message : String(thrown)
+          }`,
+        );
+      }
+
+      if (isCannotEstablish(remote)) {
+        // Asked, and no answer. What happens next depends on what the operation is for.
+        if (criticality === "required") {
+          // Unknown must never license a publish. A required operation whose prior outcome cannot
+          // be established is refused before anything executes, because performing it might
+          // repeat it and skipping it might drop it, and neither is a choice to make blind.
+          throw releaseError(
+            ReleaseErrorCodes.RECONCILIATION_UNAVAILABLE,
+            `Whether required operation "${operation.operationId}" already happened could not be ` +
+              `established: ${remote.reason}. Executing would risk performing it twice and ` +
+              "skipping it would risk dropping it, so the bundle is refused until the outcome is " +
+              "known (contract §17).",
+            {
+              category: "conflict",
+              retryable: false,
+              details: {
+                runId: bundle.runId,
+                operationId: operation.operationId,
+                destination: operation.destination,
+              },
+            },
+          );
+        }
+
+        // Best-effort: **no receipt**, and not performed this pass.
+        //
+        // Writing a `skipped` receipt was the obvious thing and it was wrong in the way this whole
+        // issue is about. `skipped` is terminal in both directions — `execute` skips it and
+        // `reconcile` treats it as already recorded — so one momentary query failure permanently
+        // retired the operation for that bundle. At the destination that produced #169 quota
+        // exhaustion is routine, so a rate limit while *asking about* a tidy-up would silently
+        // drop it forever, and the record would say `skipped`: a decision, when what happened was
+        // an unanswered question.
+        //
+        // A durable record of a transient failure is the same defect as a durable record of a
+        // search nobody performed. So the not-performing lives in this pass only — the finding and
+        // the warning say what happened now, and the next pass asks again.
+        //
+        // Not performed either, because executing on an unknown prior state is the other half of
+        // the trap: it might repeat an operation that already happened.
+        findings.push({
+          operationId: operation.operationId,
+          idempotencyKey,
+          action: "cannot_establish",
+          explanation:
+            `Whether "${operation.operationId}" already happened could not be established, so it ` +
+            `was not attempted: ${remote.reason}`,
+        });
+        continue;
+      }
+
+      // Not an issued cannot-establish, so it must be the other arm — and that has to be checked
+      // rather than assumed. An assembled `{ reason: "..." }` is not an issued state, so
+      // `isCannotEstablish` correctly rejects it, and it would then reach `!remote.exists` with
+      // `exists` undefined and be recorded as `confirmed_absent`: a completed search, asserted
+      // from a value that is not a `RemoteState` at all.
+      //
+      // Fifth instance of the same lesson in this contract (#170 has the other four). A narrowing
+      // that trusts the declared type is not a narrowing.
+      if (typeof remote.exists !== "boolean") {
+        throw releaseError(
+          ReleaseErrorCodes.OPERATION_INVALID,
+          `The adapter for destination "${operation.destination}" answered the lookup for ` +
+            `"${operation.operationId}" with a value that is neither a remote state nor an ` +
+            "issued `cannotEstablish`. Reading it as absent would record a completed search that " +
+            "did not happen (contract §17).",
+          {
+            category: "validation",
+            retryable: false,
+            details: {
+              runId: bundle.runId,
+              operationId: operation.operationId,
+              destination: operation.destination,
+            },
+          },
+        );
+      }
+
       if (!remote.exists) {
         // Reserved to a `lookup` that actually returned `exists: false`. Every other reason an
         // operation might not have been found now has its own action, so this one means what it
@@ -346,10 +453,16 @@ export class ReleaseExecutor {
     const warnings: string[] = [];
     const written: ReleaseReceipt[] = [];
 
+    // Operations this pass must not attempt, held in memory and never written down. A best-effort
+    // operation whose prior state could not be established is not performed now — executing on an
+    // unknown prior state might repeat something that already happened — and leaves no durable
+    // trace, so the next pass asks again rather than finding a terminal receipt (#169).
+    const unestablished = new Set<string>();
     if (options.reconcile !== false) {
       const report = await this.reconcile(bundle, { actor: options.actor });
       written.push(...report.repaired);
       for (const finding of report.findings) {
+        if (finding.action === "cannot_establish") unestablished.add(finding.operationId);
         if (finding.explanation !== undefined && OPERATOR_FACING_FINDINGS.has(finding.action)) {
           warnings.push(finding.explanation);
         }
@@ -371,6 +484,10 @@ export class ReleaseExecutor {
         );
         continue;
       }
+
+      // Skipped for this pass only. No receipt was written, so a later pass reaches the same
+      // operation with the same undecided state and asks the destination again.
+      if (unestablished.has(operation.operationId)) continue;
 
       const existing = latest.get(idempotencyKey);
       if (existing?.status === "succeeded" || existing?.status === "skipped") continue;
@@ -520,6 +637,11 @@ export class ReleaseExecutor {
         : {}),
       ...(outcome.status === "succeeded" && outcome.remoteUrl !== undefined
         ? { remoteUrl: outcome.remoteUrl }
+        : {}),
+      // Carried through to the durable record. A field an adapter can set and nothing reads is
+      // the defect #107 reported, one contract over.
+      ...(outcome.status === "succeeded" && outcome.note !== undefined
+        ? { note: outcome.note }
         : {}),
       // `pending` is not terminal, so it carries no completion time (contract §17).
       ...(outcome.status === "pending" ? {} : { completedAt: at }),

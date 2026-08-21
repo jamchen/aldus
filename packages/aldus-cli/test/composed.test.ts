@@ -370,7 +370,11 @@ describe("config module (ADR-0019)", () => {
         '    return { status: "succeeded", remoteId: "remote-a" };',
         "  },",
         "  async lookup() {",
-        "    return { present: false };",
+        // `{ present: false }` until #169 — a typo the runtime read as `exists: undefined`, so a
+        // fixture answering a question it was never asked was recorded as a completed search
+        // finding nothing. The new not-a-remote-state check refuses it, which is how this was
+        // found.
+        "    return { exists: false };",
         "  },",
         "};",
         "export default { releaseAdapters: [adapter] };",

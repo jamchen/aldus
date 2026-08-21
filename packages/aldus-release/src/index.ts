@@ -18,7 +18,10 @@
 export {
   AdapterRegistry,
   RecordingReleaseAdapter,
+  cannotEstablish,
+  isCannotEstablish,
   type AdapterOutcome,
+  type CannotEstablish,
   type RecordingAdapterOptions,
   type ReleaseAdapter,
   type ReleaseRequest,
