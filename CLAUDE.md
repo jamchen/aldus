@@ -176,44 +176,62 @@ asserts an **output fragment**, not only a status, because a status cannot tell 
 typo. Both invalid runs failed through `MODULE_NOT_FOUND` read as meaningful — assert on output
 wherever a check can afford to.
 
-### A guard is only tested when its result comes from the mechanism under test
+### Four ways a check misleads, by remedy
 
-The general form of four rules that arrived separately in one day, which is why it is stated here
-rather than left as four anecdotes:
+One day produced enough instances to catalogue rather than remember. The categories are
+distinguished by **what was wrong**, because the remedies differ:
 
-- _establish the instrument is sound before believing what it says_ — an invalid measurement that
-  agrees with a plausible worry is the hardest to discard, because discarding it feels like refusing
-  evidence;
-- _commit the instrument before probing it_ — `git reset --hard` deleted an uncommitted check, and
-  the cases that followed exited on `MODULE_NOT_FOUND` and read as passes;
-- _assert on output, not status, wherever a check can afford to_ — a missing file, a misspelled
-  filename and a real negative share an exit code;
-- and the case that produced the sentence: testing this runner's preflight and output assertions
-  required **committing** the modified manifest first, because with a dirty tree the worktree guard
-  fires and both look verified for the wrong reason. Two guards confirmed by a third.
+| what was wrong                                                           | remedy                                      |
+| ------------------------------------------------------------------------ | ------------------------------------------- |
+| the description drifted from the mechanism                               | **read the mechanism**                      |
+| the measurement was taken where the code will never run                  | **run it where it runs**                    |
+| the instrument declined to answer and the non-answer was recorded as one | **make that impossible to record**          |
+| an answer was given and pointed adjacent to the cause                    | **treat a diagnostic's location as a hint** |
 
-### Verify in the environment that will run it, or say that you did not
+**1. Description drifted from mechanism.** `absenceIsReadable` equivalent to `true`;
+"test-harness-only" said of a symbol exported from a package index; "all genuinely clean"
+trial-merged against the wrong base; a CI step named `Reject adopter-specific names` whose regex
+held no adopter name. In every one the description was checked and the mechanism was not — a name, a
+comment and a claim are all easier to read than the code under them, and they are read first.
 
-Three rules in this repository turn out to be one, and the third arrived by breaking `main`:
+Two habits catch most of it. Before describing a change's blast radius — _test-only_, _docs-only_,
+_additive_ — check the **export surface**, not the file path. Before claiming a measurement, ask
+what was measured, with what, and whether it answers the question the claim is about.
 
-- **the clean-consumer gate** — an adopter installs a published tarball, never a workspace link,
-  because a link resolves what a tarball cannot and passes checks the real thing fails;
-- **exact internal pins, never ranges** — a range is a promise about a package you did not test;
-- **and: a release check verified against a full local clone, when CI checks out shallow.** The
-  script read the previous commit's version, `actions/checkout` is shallow by default so that commit
-  was absent, and a merge that changed nothing shippable reported an attempted republish. The local
-  run passed. It could not have failed: a full clone is to a shallow checkout what a workspace link
-  is to a tarball — a more convenient version of the thing, missing the constraint that matters.
+**2. Measured where the code will never run.** The clean-consumer gate and exact internal pins are
+both this rule: a workspace link resolves what a tarball cannot, and a range is a promise about a
+package nobody tested. The instance that broke `main` was a release check verified against a full
+local clone when CI checks out shallow — the local run passed and could not have failed. A friendlier
+environment does not disprove a fault, and passing in one is not evidence about the other. Where the
+real environment cannot be reproduced, say so in the claim; the `does not:` line is where that goes.
 
-The rule is not "test more". It is that **a friendlier environment does not disprove a fault, and
-passing in one is not evidence about the other.** Where the real environment cannot be reproduced —
-and often it cannot — say so in the claim rather than leaving the reader to assume otherwise. The
-`does not:` line of an evidence block is where that belongs: _"reproduced locally with `--depth 1`,
-which is the condition CI has, not CI itself."_
+**3. A non-answer recorded as an answer.** The costliest of the four. `MODULE_NOT_FOUND` read as a
+meaningful exit code; a dirty-worktree refusal read as a preflight pass; uniform failures read as
+four disagreements; a vacuous-diff refusal read as a claim holding; a parse failure read as a check
+firing. In none of them was the object or the venue wrong.
 
-This sits beside "check the mechanism, not its description" rather than inside it. That one is about
-a description drifting from its code; this one is about a measurement taken somewhere the code will
-never run.
+Better wording does not fix it — checked, not assumed: one refusal printed `refusing to pass
+vacuously` on stderr with exit 2 against `holds across N changed paths` on stdout with exit 0. The
+tool was unmistakable; the reading was not. So: `DECLINED` is a state, never folded into pass or
+fail; assert on **output**, not status, since a missing file and a real negative share an exit code;
+**a guard is only tested when its result comes from the mechanism under test** — two guards were once
+confirmed by a third; and **a filter narrow enough to be useful is narrow enough to hide a
+refusal**, so read what a tool emits rather than an extraction of it.
+
+**4. An answer pointing adjacent to the cause.** A glob containing a star followed by a slash closes
+a block comment, and the parse error named the line _after_ the offending one — so the first repair
+fixed the wrong line and the error persisted unchanged. The general form: a diagnostic's location is
+where the **detector** stood, not where the fault is.
+
+**A case is a claim too.** Two mutant cases were written on premises that were never checked — a
+forty-zero base ref assumed to make a check decline, and an appended export assumed visible to an
+importer. Both read as failures of the thing under test. `invalidated by:` applies to cases, not
+only to findings.
+
+**And an instrument is only ever checked by its holder**, so the check has to be habitual rather
+than triggered by suspicion. An invalid measurement that agrees with a plausible worry is the
+hardest to discard, because discarding it feels like refusing evidence. Establish the instrument is
+sound before believing what it says, and commit it before probing it.
 
 ### A claim about another repository is not checkable from here
 
@@ -225,8 +243,8 @@ supposed contents came from a chat message rather than any artifact.
 
 There is no grep for the second. What there is: **attribute a cross-repository claim to where it was
 read, or do not make it.** "A search across the first adopter's integration finds neither export" is
-checkable by whoever has that repository. "Your `mutate.mjs` header names this error" is not
-checkable by anyone, because the file is not there.
+checkable by whoever has that repository. A header attributed to a file that is not there is
+checkable by nobody.
 
 **Checks that replace something a reviewer did by hand:**
 
@@ -249,38 +267,6 @@ result relayed forward as fact, a ruling written against an unpublished arm, and
 split that assumed a mechanism `allow-latest-move` does not have. All three were caught downstream,
 by reading the mechanism. **When a ruling asserts a mechanism, check the mechanism before building
 on it.** The review direction that matters most is implementation over coordination, not the reverse.
-
-## Check the mechanism, not its description
-
-Four defects in two days shared one mechanism, and it is worth stating separately from any of them
-because each looked like an isolated lapse:
-
-| the description                 | the mechanism                                               |
-| ------------------------------- | ----------------------------------------------------------- |
-| `absenceIsReadable`             | equivalent to `true`                                        |
-| "test-harness-only"             | a published surface (`RecordingReleaseAdapter` is exported) |
-| "all genuinely clean"           | trial-merged against the wrong base                         |
-| "Reject adopter-specific names" | a regex holding no adopter name                             |
-
-**In every one the description was checked and the mechanism was not.** Nobody re-read the regex
-against the sentence above it. A name, a comment and a claim are all easier to read than the code
-under them, and they are read first — so a mechanism that has drifted from its description keeps
-passing review for as long as reviewers read the description.
-
-Two habits that catch this cheaply, both earned rather than invented:
-
-- **Before describing a change's blast radius** — _test-only_, _docs-only_, _additive_ — check the
-  **export surface**, not the file path. Three of the four above would have fallen to that question
-  alone.
-- **Before claiming a measurement**, ask what was measured, with what, and whether it answers the
-  question the claim is about. "All genuinely clean" was true of what was measured and false of
-  what it was taken to mean; so were "trivial" and "test-harness-only".
-
-A corollary about instruments. A harness that lies is found by someone else; an instrument that
-lies is only ever found by the person holding it — so the check has to be habitual rather than
-triggered by suspicion. And an invalid measurement that happens to **agree with a plausible worry**
-is the hardest to discard, because discarding it feels like refusing evidence. Establish the
-instrument is sound before believing what it says.
 
 ## Style
 
