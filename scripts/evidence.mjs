@@ -34,6 +34,7 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const base = (() => {
@@ -46,6 +47,99 @@ const withSuites = args.includes("--suites");
 // unconditionally was mutual recursion, and it presented as a ten-minute hang rather than as an
 // error — a non-answer again, in the shape of no answer at all.
 const withMutants = !args.includes("--no-mutants");
+
+// --- --check <file>: validate a *filled* block ---------------------------------------------------
+//
+// The `verified at:` field exists to make an omission visible. If nothing checks that it was
+// filled, the omission is visible only to a reader already looking — which is the population that
+// did not need the field. An unvalidated required field restores the invisibility it was added to
+// remove and becomes decoration, which is worse than absent because it looks like coverage.
+//
+// Two behaviours, and the split is deliberate.
+//
+// **Refuses** structural absence: a residual `<FILL`, a claim with no `verified at:`, a claim with
+// no `invalidated by:`. Mechanical and unambiguous.
+//
+// **Surfaces without refusing** the substantive risk: claims whose locus is a report. A report can
+// be a legitimate locus — "NOT independently checked, because it is a counterfactual and cannot be"
+// is stronger than any file:line for a claim about the past — so refusing would be wrong. A
+// reviewer is told how many rest there without hunting for them.
+//
+// **What it does not do**, stated here because a validator implying otherwise would be the first
+// failure category inside the tool built for the fifth: it catches a missing or placeholder field,
+// never a false one. `verified at: yes` passes. It checks that the question was answered, not that
+// the answer is true.
+const checkIndex = args.indexOf("--check");
+if (checkIndex !== -1) {
+  const file = args[checkIndex + 1];
+  if (file === undefined) {
+    console.error("usage: evidence.mjs --check <file>");
+    process.exit(2);
+  }
+  const text = readFileSync(file, "utf8");
+  const problems = [];
+  const notes = [];
+
+  if (text.includes("<FILL")) {
+    const count = text.split("<FILL").length - 1;
+    problems.push(`${count} placeholder(s) still present: the block was emitted and not filled in`);
+  }
+
+  const claimsStart = text.indexOf("claims:");
+  if (claimsStart === -1) {
+    problems.push("no `claims:` section — a block with no claims establishes nothing");
+  } else {
+    const doesNot = text.indexOf("does not:", claimsStart);
+    const section = text.slice(claimsStart, doesNot === -1 ? text.length : doesNot);
+    // Split on `claim:` starts, dropping the `claims:` header itself.
+    const blocks = section
+      .split(/^\s*claim:/m)
+      .slice(1)
+      .map((block) => block.trim());
+    if (blocks.length === 0) {
+      problems.push("`claims:` contains no `claim:` entry");
+    }
+    blocks.forEach((block, index) => {
+      const label = (block.split("\n")[0] ?? "").trim().slice(0, 56) || `#${index + 1}`;
+      if (!/verified at:/.test(block)) {
+        problems.push(
+          `claim "${label}" has no \`verified at:\` — the omission this field exists for`,
+        );
+      }
+      if (!/invalidated by:/.test(block)) {
+        problems.push(`claim "${label}" has no \`invalidated by:\``);
+      }
+      const locus = block.match(/verified at:\s*(.*)/);
+      if (locus?.[1]?.trim().startsWith("report:") === true) {
+        notes.push(label);
+      }
+    });
+  }
+
+  if (problems.length > 0) {
+    console.error(`evidence --check ${file}: ${problems.length} structural problem(s):\n`);
+    for (const problem of problems) console.error(`  ${problem}`);
+    console.error(
+      "\nThis checks that each question was answered, never that an answer is true — " +
+        "`verified at: yes` would pass.",
+    );
+    process.exit(1);
+  }
+
+  console.log(`evidence --check ${file}: every claim states a locus and an invalidator.`);
+  if (notes.length > 0) {
+    console.log(
+      `\n${notes.length} claim(s) rest on a report rather than on code — legitimate, and worth a ` +
+        "reviewer's attention:",
+    );
+    for (const label of notes) console.log(`  ${label}`);
+  }
+  console.log(
+    "\nNot checked: whether any stated locus is real. This catches a missing or placeholder " +
+      "field, never a false one.",
+  );
+  process.exit(0);
+}
 
 const head = execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
 const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
@@ -156,9 +250,12 @@ lines.push(`           node scripts/run-mutants.mjs`);
 // instances caught at a glance. Blank is a hole rather than an absence.
 lines.push("claims:    <FILL — one block per claim, and leave nothing implicit>");
 lines.push("             claim:          <what is being claimed>");
-lines.push("             verified at:    <file:line — or `report: <who said it>` — or leave the");
-lines.push("                              hole visible. If this would be a command, the claim");
-lines.push("                              belongs in checks: above, not here.>");
+lines.push("             verified at:    <file:line — or `report: <who said it>`, adding why the");
+lines.push(
+  "                              hole is irreducible if it is — or leave it visibly empty.",
+);
+lines.push("                              If this would be a command, the claim belongs in");
+lines.push("                              checks: above, not here.>");
 lines.push("             invalidated by: <what would falsify it>");
 lines.push("does not:  <FILL: what this change does NOT establish>");
 lines.push("```");

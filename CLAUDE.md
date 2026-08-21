@@ -271,9 +271,25 @@ at all** — it belongs in `checks:`, where the emitter runs it and prints the e
 `claims:` after that move is the genuinely judgement-based residue, and none of the three above was
 in it. Two `ls` commands and a two-line docstring are not judgement.
 
-The difference from the other four is real and worth keeping: they **refuse**, and this one only
-makes the gap visible. A weak mechanism labelled as weak is worth more here than conceding the
-category to habit.
+`node scripts/evidence.mjs --check <file>` validates a **filled** block, because a required field
+nothing checks restores the invisibility it was added to remove and becomes decoration — worse than
+absent, since it looks like coverage. It **refuses** structural absence: a residual `<FILL`, a claim
+with no `verified at:`, a claim with no `invalidated by:`. It **surfaces without refusing** the
+claims whose locus is a report, because a report can be a legitimate locus and a reviewer should
+still be told how many rest there.
+
+**What it does not do, stated because a validator implying otherwise would be the first category
+inside the tool built for the fifth:** it catches a missing or placeholder field, never a false one.
+`verified at: yes` passes. It checks that the question was answered, not that the answer is true.
+
+A fourth honest answer, better than the three originally specified: **say why a hole is
+irreducible.** `report: … — NOT independently checked, because it is a counterfactual about past
+claims and cannot be` tells a reader the difference between _nobody checked_ and _nobody can_, which
+neither a `file:line` nor a bare `report:` conveys.
+
+The difference from the other four is real and worth keeping: they **refuse** outright, and this one
+refuses only the structural half and makes the substantive half visible. A weak mechanism labelled
+as weak is worth more here than conceding the category to habit.
 
 **A case is a claim too.** Two mutant cases were written on premises that were never checked — a
 forty-zero base ref assumed to make a check decline, and an appended export assumed visible to an
@@ -307,7 +323,8 @@ checkable by nobody.
 | `check-resolution-surface.mjs` | a merge's diff is a subset of the union of its parents' diffs                                 |
 | `check-claim-scope.mjs`        | `docs-only` / `no-shipped-change` is true rather than asserted                                |
 | `check-build-topology.mjs`     | every package compiles `src` to `dist`, which the rebuild predicate assumes                   |
-| `evidence.mjs`                 | emits the review block, measured; `run-mutants.mjs` runs the cases                            |
+| `evidence.mjs`                 | emits the review block, measured; `--check` validates a filled one                            |
+| `run-mutants.mjs`              | runs the cases in `mutants.mjs` and asserts each one's own result                             |
 
 `check-resolution-surface.mjs` does **not** establish that a resolution chose correctly — keeping
 one caller's shape and dropping the other's argument is a correct-surface, wrong-content failure,
