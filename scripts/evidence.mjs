@@ -143,7 +143,23 @@ for (const entry of checks) {
 }
 lines.push(`mutants:   ${mutantSummary}`);
 lines.push(`           node scripts/run-mutants.mjs`);
-lines.push("claims:    <FILL: each claim, and what would invalidate it>");
+// `claims:` requires **where each claim was verified**, not only what would invalidate it.
+//
+// The fifth failure mode is a premise inherited from a report and never checked in the code, and
+// what makes it survive is that the omission is invisible — nothing in a block distinguishes "I
+// opened the file" from "the report said so". A required field is the move for invisibility, the
+// way the vacuous-diff refusal is: it cannot tell a wrong claim from a right one, and it makes "I
+// measured nothing" impossible to record as "I measured and it was fine".
+//
+// Three honest answers and no fourth. A `file:line` requires opening the code, and opening the code
+// *is* the remedy. `report:` makes the inheritance visible, which is all three of that day's
+// instances caught at a glance. Blank is a hole rather than an absence.
+lines.push("claims:    <FILL — one block per claim, and leave nothing implicit>");
+lines.push("             claim:          <what is being claimed>");
+lines.push("             verified at:    <file:line — or `report: <who said it>` — or leave the");
+lines.push("                              hole visible. If this would be a command, the claim");
+lines.push("                              belongs in checks: above, not here.>");
+lines.push("             invalidated by: <what would falsify it>");
 lines.push("does not:  <FILL: what this change does NOT establish>");
 lines.push("```");
 
