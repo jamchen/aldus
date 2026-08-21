@@ -123,6 +123,28 @@ does not:  <what this change does NOT establish>
 
 The last two are the load-bearing ones.
 
+**The evidence block is emitted, not transcribed.** `node scripts/evidence.mjs --suites` measures
+the head sha, every check with its real exit, and the suite counts, and prints the block. `claims:`
+and `does not:` stay human — what a claim rests on and what a change fails to establish are
+judgements, and a tool emitting them would invent the part worth reading.
+
+The reason is a controlled experiment nobody designed. PR #176 carried two claims in the same hour
+by the same author: the mutant table, produced by `run-mutants.mjs`, correct at 14/14; and a
+`docs-only` claim, hand-copied, false twice — wrong path, and the run that "confirmed" it had
+refused as vacuous. The machine-produced claim was right and the transcribed one was wrong, so the
+transcription step is the defect.
+
+**A check has three states, and `DECLINED` is never folded into either other.** The costliest
+failure across this whole series was **a non-answer read as an answer** — `MODULE_NOT_FOUND` as a
+meaningful exit code, a dirty-worktree refusal read as a preflight pass, uniform failures read as
+four disagreements, and a vacuous-diff refusal read as a claim holding. In none of them was the
+object or the venue wrong: the instrument declined to answer and the answer was recorded anyway.
+
+Better wording does not fix it, and that was checked rather than assumed: the refusal printed
+`refusing to pass vacuously` on stderr with exit 2, against `holds across N changed paths` on stdout
+with exit 0. The tool was unmistakable; the reading was not. So `evidence.mjs` exits non-zero when
+any check declined, and says that a declined check is neither a pass nor a failure.
+
 **Mutants assert their own results.** `scripts/mutants.mjs` holds the cases as data — reviewable in
 the diff — and `node scripts/run-mutants.mjs` runs them and compares. The `mutants:` line of an
 evidence block is that one command.

@@ -1,0 +1,164 @@
+/**
+ * Emit the evidence block for a review request, measured rather than transcribed.
+ *
+ *   node scripts/evidence.mjs [--base origin/main] [--suites]
+ *
+ * ## Why this exists, from a controlled experiment nobody designed
+ *
+ * PR #176 carried two claims. The mutant table came from `run-mutants.mjs` and was correct, 14/14.
+ * The `docs-only` claim was hand-transcribed and was false twice — the path was wrong, and the run
+ * that "confirmed" it had refused as vacuous. Same author, same PR, same hour: the machine-produced
+ * claim was right and the human-copied one was wrong. The transcription step is the defect, so this
+ * removes it.
+ *
+ * ## Three states per check, not two
+ *
+ * The failure that has cost the most is **a non-answer read as an answer** — `MODULE_NOT_FOUND` as
+ * a meaningful exit code, a dirty-worktree refusal read as a preflight pass, and
+ * `check-claim-scope` refusing an empty diff read as `docs-only` holding. In none of those was the
+ * object or the venue wrong: the instrument declined to answer and the answer was recorded anyway.
+ *
+ * Better wording does not fix it. The refusal it hid behind printed `refusing to pass vacuously` on
+ * stderr with exit 2, against `holds across N changed paths` on stdout with exit 0. The tool was
+ * unmistakable; the reading was not.
+ *
+ * So a check here is `PASS`, `FAIL`, or **`DECLINED`**, and `DECLINED` is never folded into either.
+ * A block containing one is not a block with a failing check — it is a block with a question that
+ * was not answered, which is a different thing to hand a reviewer.
+ *
+ * ## What it will not do
+ *
+ * `claims:` and `does not:` stay human. What a claim rests on and what a change fails to establish
+ * are judgements, and a tool that emitted them would be inventing the part worth reading. It prints
+ * them as marked placeholders so that filling them in cannot be confused with a measured result.
+ */
+
+import { execFileSync, spawnSync } from "node:child_process";
+
+const args = process.argv.slice(2);
+const base = (() => {
+  const index = args.indexOf("--base");
+  return index === -1 ? "origin/main" : args[index + 1];
+})();
+const withSuites = args.includes("--suites");
+// `--no-mutants` exists so a mutant case can cover this emitter without the two invoking each
+// other forever. Adding an evidence case to `mutants.mjs` while this ran `run-mutants.mjs`
+// unconditionally was mutual recursion, and it presented as a ten-minute hang rather than as an
+// error — a non-answer again, in the shape of no answer at all.
+const withMutants = !args.includes("--no-mutants");
+
+const head = execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
+const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
+
+/**
+ * Run one check and classify it in three states.
+ *
+ * `declinedOn` lists exit codes the check documents as "I did not answer". Everything else is a
+ * real verdict. A check that exits 2 because it refused is not a check that failed.
+ */
+function check(label, command, { declinedOn = [2], kind = "gate" } = {}) {
+  const [bin, ...rest] = command;
+  const run = spawnSync(bin, rest, { encoding: "utf8" });
+  const output = `${run.stdout ?? ""}${run.stderr ?? ""}`.trim();
+  const first = output.split("\n")[0] ?? "";
+  // A **query** reports TRUE/FALSE; a **gate** reports PASS/FAIL. A false claim is an answer, not a
+  // failing check, and listing it as FAIL is the same category error one level up — a reviewer
+  // scanning for failures would stop at a line that is simply the answer to a question.
+  const declined = declinedOn.includes(run.status ?? -1);
+  const state = declined
+    ? "DECLINED"
+    : kind === "query"
+      ? run.status === 0
+        ? "TRUE"
+        : "FALSE"
+      : run.status === 0
+        ? "PASS"
+        : "FAIL";
+  return { label, command: command.join(" "), exit: run.status, state, first, output, kind };
+}
+
+const checks = [
+  check("generic-boundary", ["node", "scripts/check-generic-boundary.mjs"]),
+  check(
+    "claim: no-shipped-change",
+    ["node", "scripts/check-claim-scope.mjs", base, "no-shipped-change"],
+    { kind: "query" },
+  ),
+  check("claim: docs-only", ["node", "scripts/check-claim-scope.mjs", base, "docs-only"], {
+    kind: "query",
+  }),
+  check("version-bump", ["node", "scripts/check-version-bump.mjs", base]),
+  check("release-intent", ["node", "scripts/release-intent.mjs", base]),
+  ...(withMutants ? [check("mutants", ["node", "scripts/run-mutants.mjs"])] : []),
+];
+
+const suites = [];
+if (withSuites) {
+  for (const pkg of ["aldus-services", "aldus-stage-runner", "aldus-e2e"]) {
+    const run = spawnSync("npx", ["vitest", "run", "--root", `packages/${pkg}`], {
+      encoding: "utf8",
+    });
+    // stdout *and* stderr: vitest writes the summary to stderr, and the first version of this read
+    // stdout only and printed `e2e ?`. A `?` in an evidence block is a non-answer printed as data —
+    // the exact failure this emitter exists to prevent, in its own output. An unparseable count is
+    // now `DECLINED` and makes the whole block exit non-zero.
+    const combined = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+    const match = combined.match(/Tests\s+(?:\d+ failed \| )?(\d+) passed/);
+    const failed = /Tests\s+\d+ failed/.test(combined);
+    suites.push({
+      name: pkg.replace("aldus-", ""),
+      count: match?.[1],
+      failed,
+      state: match === undefined ? "DECLINED" : failed ? "FAIL" : "PASS",
+    });
+  }
+}
+
+const mutants = checks.find((entry) => entry.label === "mutants");
+const mutantSummary = withMutants
+  ? (mutants?.output.split("\n").find((line) => line.includes("behaved as stated")) ??
+    `(${mutants?.state})`)
+  : "(not run — --no-mutants)";
+
+const width = Math.max(...checks.map((entry) => entry.label.length));
+const lines = [
+  "```",
+  `head:      ${head}${dirty.length > 0 ? "  ⚠ WORKTREE DIRTY — this block describes uncommitted state" : ""}`,
+  `base:      ${base}`,
+];
+if (withSuites) {
+  lines.push(
+    `suites:    ${suites
+      .map((suite) => `${suite.name} ${suite.count ?? suite.state}${suite.failed ? " FAILED" : ""}`)
+      .join(" · ")}  (measured)`,
+  );
+}
+lines.push("checks:");
+for (const entry of checks) {
+  lines.push(`  ${entry.label.padEnd(width)}  exit=${entry.exit}  ${entry.state}`);
+  if (entry.state === "DECLINED" || entry.state === "FAIL") {
+    lines.push(`  ${" ".repeat(width)}    ${entry.first}`);
+  }
+}
+lines.push(`mutants:   ${mutantSummary}`);
+lines.push(`           node scripts/run-mutants.mjs`);
+lines.push("claims:    <FILL: each claim, and what would invalidate it>");
+lines.push("does not:  <FILL: what this change does NOT establish>");
+lines.push("```");
+
+console.log(lines.join("\n"));
+
+const declined = [
+  ...checks.filter((entry) => entry.state === "DECLINED"),
+  ...suites
+    .filter((suite) => suite.state !== "PASS")
+    .map((suite) => ({ label: `suite ${suite.name}`, first: `state ${suite.state}` })),
+];
+if (declined.length > 0) {
+  console.error(
+    `\n${declined.length} check(s) DECLINED to answer. That is not a pass and not a failure — ` +
+      "resolve it before pasting this block:",
+  );
+  for (const entry of declined) console.error(`  ${entry.label}: ${entry.first}`);
+  process.exit(2);
+}
