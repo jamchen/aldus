@@ -81,6 +81,19 @@ for (const testCase of cases) {
       const [path, line] = step.append;
       appendFileSync(path, `\n${line}\n`);
     }
+    if (step.replace !== undefined) {
+      // Mutating an **existing exported value**, which `append` cannot do. A case that appends a
+      // new export cannot be measured through the package boundary at all, because the index
+      // re-exports named symbols — the first version of the rebuild guard's own case made that
+      // mistake and read as a guard failure.
+      const [path, from, to] = step.replace;
+      const contents = readFileSync(path, "utf8");
+      if (!contents.includes(from)) {
+        console.error(`run-mutants: replace target not found in ${path}: ${JSON.stringify(from)}`);
+        process.exit(2);
+      }
+      writeFileSync(path, contents.replace(from, to));
+    }
     if (step.version !== undefined) {
       const path = "packages/aldus-core/package.json";
       const manifest = JSON.parse(readFileSync(path, "utf8"));
@@ -91,6 +104,37 @@ for (const testCase of cases) {
   if (testCase.setup.length > 0) {
     git("add", "-A");
     git("-c", "user.email=mutants@local", "-c", "user.name=mutants", "commit", "-qm", "mutant");
+  }
+
+  // **Rebuild before measuring**, whenever the setup edited a built source.
+  //
+  // Without this the mutation never reaches the code under test: `@aldus-runtime/core` resolves
+  // through package `exports` to `dist`, so a sibling importing it sees the last build. Measured —
+  // `src` set to `99.99` and a sibling still resolving `1.11`. A case that edited a built source
+  // and measured through another package would report **SURVIVED for a mutation that never took
+  // effect**, which is worse than the dirty-worktree and vacuous-diff cases: those refused to
+  // answer, and this one would answer wrongly.
+  //
+  // Derived from the setup paths rather than declared per case, because a flag that must be
+  // remembered is the thing this whole file exists to replace. Incremental, so it costs nothing
+  // for the cases that touch no source.
+  const touchesBuiltSource = testCase.setup.some((step) => {
+    const path = step.append?.[0] ?? step.replace?.[0];
+    return path !== undefined && /^packages\/[^/]+\/src\//.test(path);
+  });
+  if (touchesBuiltSource) {
+    const build = spawnSync("npm", ["run", "build"], { encoding: "utf8" });
+    if (build.status !== 0) {
+      git("reset", "-q", "--hard", base);
+      console.log(`✗ ${testCase.name}`);
+      console.log(`    build failed after setup (exit ${build.status}) — case not measured`);
+      failures.push({
+        name: testCase.name,
+        problems: ["build failed after setup; the case was not measured"],
+        output: [],
+      });
+      continue;
+    }
   }
 
   const [command, ...args] = testCase.command;
@@ -118,6 +162,9 @@ for (const testCase of cases) {
   }
 }
 
+// Restores the **tree** after the loop. The per-case rebuild above is what makes each measurement
+// valid; this is what stops the tree being left stale for whatever runs next.
+//
 // Every case commits a source edit and resets it, which gives the restored files mtimes newer than
 // the build they came from. `fresh-build.test.ts` then fails, correctly: a suite loading a stale
 // build tests something other than the source, which is the same principle as verifying in the

@@ -134,6 +134,16 @@ by the same author: the mutant table, produced by `run-mutants.mjs`, correct at 
 refused as vacuous. The machine-produced claim was right and the transcribed one was wrong, so the
 transcription step is the defect.
 
+**A mutation must reach the code under test.** `run-mutants.mjs` rebuilds before measuring whenever
+a case's setup edited `packages/*/src`, derived from the setup paths rather than declared per case,
+because a flag that must be remembered is what this file exists to replace.
+
+Without it the mutation never arrives: `@aldus-runtime/core` resolves through package `exports` to
+`dist`, so an importer sees the last build. Measured — `src` set to `99.99`, a sibling still
+resolving `1.11`. A case that edited a built source and measured through another package would
+report **SURVIVED for a mutation that never took effect**, which is the worst form of the
+non-answer: the dirty worktree and the vacuous diff both _refused_, and this one answers, wrongly.
+
 **A check has three states, and `DECLINED` is never folded into either other.** The costliest
 failure across this whole series was **a non-answer read as an answer** — `MODULE_NOT_FOUND` as a
 meaningful exit code, a dirty-worktree refusal read as a preflight pass, uniform failures read as
