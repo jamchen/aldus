@@ -118,6 +118,22 @@ for (const testCase of cases) {
   }
 }
 
+// Every case commits a source edit and resets it, which gives the restored files mtimes newer than
+// the build they came from. `fresh-build.test.ts` then fails, correctly: a suite loading a stale
+// build tests something other than the source, which is the same principle as verifying in the
+// environment that will run it. Rebuilding here means running mutants never leaves a tree whose
+// next suite run is measuring the wrong thing.
+if (cases.some((testCase) => testCase.setup.length > 0)) {
+  process.stdout.write("\nrebuilding after source resets… ");
+  const build = spawnSync("npm", ["run", "build"], { encoding: "utf8" });
+  console.log(build.status === 0 ? "done" : `FAILED (exit ${build.status})`);
+  if (build.status !== 0) {
+    console.error(build.stdout ?? "");
+    console.error(build.stderr ?? "");
+    process.exit(2);
+  }
+}
+
 console.log(`\n${cases.length - failures.length}/${cases.length} mutant cases behaved as stated.`);
 if (failures.length > 0) {
   console.log("\nFailing cases, first lines of output:");

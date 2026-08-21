@@ -105,6 +105,28 @@ export const cases = [
     wantOutput: "is not a merge commit",
   },
   {
+    // The emitter must never let a non-answer read as an answer — the failure mode that cost the
+    // most across this series. `--base HEAD` is an empty diff, which is exactly #176's condition:
+    // the claim checks refuse as vacuous, and the block must exit non-zero rather than print a
+    // clean-looking table.
+    //
+    // The first version of this case used a forty-zero base, on the assumption that an unknown ref
+    // would make them decline. It does not — that was a premise asserted rather than checked, in a
+    // case written to catch exactly that.
+    name: "evidence: a declined check exits non-zero rather than printing a clean block",
+    setup: [],
+    command: ["node", "scripts/evidence.mjs", "--no-mutants", "--base", "HEAD"],
+    wantExit: 2,
+    wantOutput: "DECLINED to answer",
+  },
+  {
+    name: "evidence: a false claim reads as FALSE, not as a failing check",
+    setup: [],
+    command: ["node", "scripts/evidence.mjs", "--no-mutants"],
+    wantExit: 0,
+    wantOutput: "claim: docs-only",
+  },
+  {
     name: "generic-boundary: an adopter name in docs/ must fire (the breach that got through)",
     setup: [{ append: ["docs/adr/README.md", "megaphone" + "-aldus"] }],
     command: ["node", "scripts/check-generic-boundary.mjs"],
