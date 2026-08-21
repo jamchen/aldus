@@ -115,6 +115,27 @@ Stated three ways, as ADR-0048 established:
 `SCHEMA_VERSION` goes to 1.11 for `ReleaseReceipt.note` — an additive optional field, a MINOR bump
 under ADR-0003 — with the addition sanctioned in `contract-conformance.test.ts` and justified here.
 
+### The recording adapter is a published surface, not a test file
+
+`RecordingReleaseAdapter` and `RecordingAdapterOptions` are exported from
+`packages/aldus-release/src/index.ts`, and the package ships both `dist` and `src`. So the seeding
+change reaches an adopter's **test suite** the way a contract change reaches their production code,
+and it gets the same three-way statement rather than being waved through as harness work. Calling
+it test-only during review was the same mistake as the rest of this thread in a smaller place: an
+assumption about a boundary, stated instead of checked.
+
+- **A plain-object seed: unchanged.**
+- **A `Map` seed: a behaviour change, and a fixing one.** It previously seeded nothing —
+  `Object.entries(aMap)` is `[]` — so every lookup answered `{ exists: false }` and any assertion
+  written against it was running against an empty world while appearing to pass. Their tests get
+  the behaviour they were written to expect.
+- **Anything else: a new refusal where there was silence.** A wanted break: a double that seeds
+  nothing and answers as though nothing was there makes a test assert the wrong thing and pass.
+- The `remote?` type widening is additive for a producer.
+
+No adopter is affected today — `git grep` across `megaphone-aldus` finds neither export. Recorded
+anyway, because the next adopter is not that one.
+
 ### What the new check found
 
 A latent bug the runtime had been papering over. A CLI test fixture's adapter returned
