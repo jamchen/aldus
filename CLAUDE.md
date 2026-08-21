@@ -93,6 +93,38 @@ field is a MINOR bump; anything else is MAJOR. Rationale: ADR-0003.
 - Anything that could reach a log goes through `redact()` first.
 - Secrets are referenced, never embedded in manifests, errors, or fixtures.
 
+## Check the mechanism, not its description
+
+Four defects in two days shared one mechanism, and it is worth stating separately from any of them
+because each looked like an isolated lapse:
+
+| the description                 | the mechanism                                               |
+| ------------------------------- | ----------------------------------------------------------- |
+| `absenceIsReadable`             | equivalent to `true`                                        |
+| "test-harness-only"             | a published surface (`RecordingReleaseAdapter` is exported) |
+| "all genuinely clean"           | trial-merged against the wrong base                         |
+| "Reject adopter-specific names" | a regex holding no adopter name                             |
+
+**In every one the description was checked and the mechanism was not.** Nobody re-read the regex
+against the sentence above it. A name, a comment and a claim are all easier to read than the code
+under them, and they are read first — so a mechanism that has drifted from its description keeps
+passing review for as long as reviewers read the description.
+
+Two habits that catch this cheaply, both earned rather than invented:
+
+- **Before describing a change's blast radius** — _test-only_, _docs-only_, _additive_ — check the
+  **export surface**, not the file path. Three of the four above would have fallen to that question
+  alone.
+- **Before claiming a measurement**, ask what was measured, with what, and whether it answers the
+  question the claim is about. "All genuinely clean" was true of what was measured and false of
+  what it was taken to mean; so were "trivial" and "test-harness-only".
+
+A corollary about instruments. A harness that lies is found by someone else; an instrument that
+lies is only ever found by the person holding it — so the check has to be habitual rather than
+triggered by suspicion. And an invalid measurement that happens to **agree with a plausible worry**
+is the hardest to discard, because discarding it feels like refusing evidence. Establish the
+instrument is sound before believing what it says.
+
 ## Style
 
 - ESM only, `NodeNext` resolution, explicit `.js` extensions on relative imports.
