@@ -228,6 +228,16 @@ export const SPEND_TRANSITION_KINDS = [
   "reservation.released",
   /** The provider charged and did not say how much. */
   "reservation.billing_unknown",
+  /**
+   * A human investigated and stopped without an answer (#155 step 5).
+   *
+   * **Non-terminal and repeatable**, and deliberately not `reservation.reconciled`. Recording an
+   * abandoned investigation on the terminal seam consumed it: the projection stayed
+   * `billing_unknown`, so a later decision looked legal, and the append was then refused because
+   * the last transition was already `reconciled`. Ending one investigation permanently prevented
+   * later evidence from settling or releasing the reservation.
+   */
+  "reservation.investigation_recorded",
   /** A human or a provider lookup resolved an unknown charge. */
   "reservation.reconciled",
 ] as const;
@@ -290,6 +300,14 @@ const ALLOWED_AFTER: Record<string, readonly SpendTransitionKind[]> = {
     "reservation.billing_unknown",
   ],
   "reservation.billing_unknown": [
+    "reservation.investigation_recorded",
+    "reservation.reconciled",
+    "reservation.settled",
+    "reservation.released",
+  ],
+  // Repeatable: a second investigation may end unresolved too, and a third may find the answer.
+  "reservation.investigation_recorded": [
+    "reservation.investigation_recorded",
     "reservation.reconciled",
     "reservation.settled",
     "reservation.released",
@@ -297,7 +315,17 @@ const ALLOWED_AFTER: Record<string, readonly SpendTransitionKind[]> = {
   // Terminal. A reservation that stopped consuming authorization never resumes.
   "reservation.settled": [],
   "reservation.released": [],
-  "reservation.reconciled": ["reservation.settled", "reservation.released"],
+  // Repeatable, because one reservation may hold several independently billed observations. A
+  // partial settlement failure leaves each unwritten observation needing its own decision — they
+  // can have different providers, and one record cannot name two. The reservation stays
+  // `billing_unknown` until the last one is resolved, so a decision covering observation A does
+  // not release authorization for B.
+  "reservation.reconciled": [
+    "reservation.reconciled",
+    "reservation.investigation_recorded",
+    "reservation.settled",
+    "reservation.released",
+  ],
 };
 
 /** Why a proposed transition is not legal for the current stream. */
@@ -387,6 +415,10 @@ export function reduceReservations(
           ...existing,
           costIds: (detail["costIds"] as string[] | undefined) ?? existing.costIds,
         });
+        break;
+      // Recorded and deliberately inert: an abandoned investigation resolves nothing, so the
+      // projection is unchanged and the reservation keeps consuming its reserved amount.
+      case "reservation.investigation_recorded":
         break;
     }
   }
