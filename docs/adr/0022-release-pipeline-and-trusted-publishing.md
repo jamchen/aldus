@@ -84,12 +84,25 @@ The release workflow triggers **only** on a `v*` tag or manual dispatch — neve
 `id-token: write` on the publish job alone and uses npm's OIDC trusted publishing, which removes
 the long-lived automation token from repository secrets entirely.
 
-The publish job runs in a `npm-publish` GitHub Environment with the owner as a required
-reviewer. **The owner's approval is therefore enforced by the platform**, not by anyone
-remembering to withhold a tag. Everything that can fail — verification, readiness, tag/manifest
-agreement, the clean-consumer gate, packing — runs _before_ the gate, so approval is asked for
-only when the release is otherwise ready, and the tarballs are uploaded as an artifact for
-inspection before approving.
+The publish job runs in a `npm-publish` GitHub Environment. It had the owner as a required
+reviewer, and this paragraph said the owner's approval was _"therefore enforced by the platform,
+not by anyone remembering to withhold a tag"_.
+
+> **Superseded by ADR-0050.** The reviewer is gone: the `next` line publishes unattended on merge
+> to `main`, because it is unvalidated by construction and a countersignature on it authorized
+> nothing a reviewer could evaluate. The sentence above was not merely stale but **inverted** —
+> with the reviewer removed and the trigger still `push: tags: v*`, the only thing between a tag
+> and a publish was exactly someone remembering to withhold one. The trigger has moved to merge on
+> `main` so the reviewed merge is the publish event.
+>
+> `latest`'s protection is unchanged and was never this Environment: nothing in CI assigns
+> `latest`, and promotion is ADR-0042's interactive script behind npm 2FA.
+>
+> The Environment declaration stays in the workflow — npm's trusted-publisher binding is scoped to
+> workflow plus environment name, so removing it would break OIDC rather than tighten anything. Everything that can fail — verification, readiness, tag/manifest
+> agreement, the clean-consumer gate, packing — runs _before_ the gate, so approval is asked for
+> only when the release is otherwise ready, and the tarballs are uploaded as an artifact for
+> inspection before approving.
 
 Readiness is re-checked inside the publish job rather than trusted from the earlier one, because
 approval may arrive hours later, and that step is the last point before an irreversible act.
