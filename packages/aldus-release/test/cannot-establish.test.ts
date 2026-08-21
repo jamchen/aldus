@@ -295,3 +295,46 @@ describe("a query failure retires nothing", () => {
     ).toBe(true);
   });
 });
+
+describe("the harness itself does not answer quietly (#169)", () => {
+  /**
+   * A double that lies quietly is worse than one that will not start.
+   *
+   * `RecordingAdapterOptions.remote` was `Readonly<Record<...>>` while the field it becomes is a
+   * `Map`. Seeding it with a `Map` — the natural mistake, since the field is one — seeded
+   * **nothing**: `Object.entries(aMap)` is `[]`, no error, and every lookup then fell through to
+   * `{ exists: false }`, which reads as a completed search finding nothing.
+   *
+   * That is the same trap as the CLI fixture returning `{ present: false }`, and it cost a review
+   * pass: a mis-seeded probe reported an operation as executed rather than repaired, and looked
+   * like a defect in the code under test.
+   */
+  const key = deriveIdempotencyKey(aMinimalBundle().required[0]!);
+
+  it("seeds from a Map, which used to seed nothing", async () => {
+    const { executor, a } = makeHarness({
+      a: { remote: new Map([[key, { exists: true, remoteId: "remote-9" }]]) },
+    });
+
+    const report = await executor.reconcile(aMinimalBundle(), { actor: OPERATOR });
+
+    // Repaired, not confirmed absent. Previously the Map seeded nothing and this said absent.
+    expect(report.findings.find((f) => f.operationId === "upload-media")?.action).toBe("repaired");
+    expect(a.executionCount("upload-media")).toBe(0);
+  });
+
+  it("seeds from a plain object, as it always did", async () => {
+    const { executor } = makeHarness({
+      a: { remote: { [key]: { exists: true, remoteId: "remote-9" } } },
+    });
+
+    const report = await executor.reconcile(aMinimalBundle(), { actor: OPERATOR });
+
+    expect(report.findings.find((f) => f.operationId === "upload-media")?.action).toBe("repaired");
+  });
+
+  it("refuses a seed that is neither, rather than answering as though it were empty", () => {
+    expect(() => makeHarness({ a: { remote: [] as never } })).toThrow(/plain object or a Map/);
+    expect(() => makeHarness({ a: { remote: "nope" as never } })).toThrow(/plain object or a Map/);
+  });
+});

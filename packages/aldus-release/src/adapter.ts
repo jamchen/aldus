@@ -213,11 +213,42 @@ export class AdapterRegistry {
 }
 
 /** Scripted behaviour for {@link RecordingReleaseAdapter}. */
+/**
+ * Build the remote-state map from either accepted shape, and refuse anything else.
+ *
+ * Refusing rather than tolerating, because the failure this replaces was silence: a mis-seeded
+ * harness answered every lookup as a completed search finding nothing, and a test written against
+ * it would assert the wrong behaviour and pass. A double that lies quietly is worse than one that
+ * will not start.
+ */
+function seedRemote(remote: RecordingAdapterOptions["remote"]): Map<string, RemoteState> {
+  if (remote === undefined) return new Map();
+  if (remote instanceof Map) return new Map(remote);
+  if (typeof remote === "object" && remote !== null && !Array.isArray(remote)) {
+    return new Map(Object.entries(remote));
+  }
+  throw releaseError(
+    ReleaseErrorCodes.OPERATION_INVALID,
+    "A recording adapter's `remote` seed must be a plain object or a Map keyed by idempotency " +
+      "key. Anything else seeds nothing, and every lookup then answers as a completed search " +
+      "that found nothing — which is the defect this double is used to test for.",
+    { category: "validation", retryable: false, details: {} },
+  );
+}
+
 export interface RecordingAdapterOptions {
   /** Outcome per `operationId`. Anything unlisted succeeds. */
   outcomes?: Readonly<Record<string, AdapterOutcome>>;
-  /** Remote state per idempotency key, as reconciliation would find it. */
-  remote?: Readonly<Record<string, RemoteState>>;
+  /**
+   * Remote state per idempotency key, as reconciliation would find it.
+   *
+   * A plain object or a `Map`, because the field it becomes is a `Map` and seeding it with one is
+   * the natural mistake. `Object.entries(aMap)` is `[]`, so a `Map` used to seed **nothing**, with
+   * no error — and every lookup then fell through to `{ exists: false }`, which reads as a
+   * completed search finding nothing. The same trap as an adapter returning `{ present: false }`:
+   * an input accepted quietly and answered as though nothing was there.
+   */
+  remote?: Readonly<Record<string, RemoteState>> | ReadonlyMap<string, RemoteState>;
   /** Omit `lookup` entirely, modelling a destination that cannot be queried. */
   withoutLookup?: boolean;
   /**
@@ -261,7 +292,7 @@ export class RecordingReleaseAdapter implements ReleaseAdapter {
   constructor(destination: string, options: RecordingAdapterOptions = {}) {
     this.destination = destination;
     this.#options = options;
-    this.remote = new Map(Object.entries(options.remote ?? {}));
+    this.remote = seedRemote(options.remote);
     if (options.withoutLookup !== true) {
       this.lookup = (request: ReleaseRequest): Promise<RemoteState> => {
         this.lookedUp.push(request);
