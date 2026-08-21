@@ -15,6 +15,30 @@
 /** `append` writes a line to a file; `version` sets aldus-core's version. Both are committed. */
 export const cases = [
   {
+    // The guard itself: a setup that edits a built source, measured **through the package
+    // boundary** rather than by a script reading files. Without a rebuild between the edit and the
+    // measurement, `@aldus-runtime/core` resolves through `exports` to `dist` and the importer sees
+    // the previous value — so the case would pass while measuring nothing.
+    name: "runner: a mutation to a built source reaches an importer (rebuild before measuring)",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/schema-version.ts",
+          'export const SCHEMA_VERSION = "1.11"',
+          'export const SCHEMA_VERSION = "99.99"',
+        ],
+      },
+    ],
+    command: [
+      "node",
+      "--input-type=module",
+      "-e",
+      "const m = await import('@aldus-runtime/core'); if (m.SCHEMA_VERSION !== '99.99') { console.error('stale build: SCHEMA_VERSION is ' + m.SCHEMA_VERSION); process.exit(1); } console.log('importer saw the mutation');",
+    ],
+    wantExit: 0,
+    wantOutput: "importer saw the mutation",
+  },
+  {
     name: "version-bump: a src/ change to a published package must fire",
     setup: [{ append: ["packages/aldus-core/src/schema-version.ts", "// mutant"] }],
     command: ["node", "scripts/check-version-bump.mjs", "origin/main"],
