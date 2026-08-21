@@ -64,6 +64,26 @@ if (previous !== undefined && previous === current) {
   process.exit(0);
 }
 
+// The previous version could not be read, so **intent is unknown** — and unknown intent must not be
+// inferred from the registry. Falling through to the whole-set check treats "I cannot see the
+// history" as "this merge bumped to a version already published", which is a different claim and a
+// false one. It failed on the first run after the trigger moved: `actions/checkout` is shallow by
+// default, so the previous `main` commit was not in the local history at all, and a merge that
+// changed nothing shippable reported an attempted republish and turned `main` red.
+//
+// Not publishing is the safe answer here, and it costs nothing real: the PR-side
+// `check-version-bump.mjs` already refuses a shipped change that did not bump, so a bump this
+// cannot see is a bump that was reviewed.
+if (previous === undefined) {
+  console.log(
+    `release-intent: cannot read the previous version at ${before ?? "(no ref given)"}, so ` +
+      "whether this merge bumped is unknown; publishing nothing rather than inferring intent " +
+      "from the registry.",
+  );
+  console.log("publish=false");
+  process.exit(0);
+}
+
 const dirs = publishDirs();
 if (dirs.length === 0) {
   console.error("release-intent: no publishable packages found; refusing to pass vacuously.");

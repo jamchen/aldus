@@ -53,6 +53,23 @@ export const cases = [
     wantOutput: "none alter shipped contents",
   },
   {
+    // The failure that turned `main` red on the first run after the trigger moved. CI's checkout is
+    // shallow, so the previous commit was absent and "cannot read the history" was inferred as
+    // "bumped to a version already published". A SHA no repository contains reproduces it.
+    name: "release-intent: an unreadable previous version publishes nothing, not a republish claim",
+    setup: [],
+    command: ["node", "scripts/release-intent.mjs", "0".repeat(40)],
+    wantExit: 0,
+    wantOutput: "publishing nothing rather than inferring intent",
+  },
+  {
+    name: "release-intent: an unchanged version publishes nothing",
+    setup: [],
+    command: ["node", "scripts/release-intent.mjs", "HEAD"],
+    wantExit: 0,
+    wantOutput: "version unchanged",
+  },
+  {
     name: "claim-scope: an unknown claim must refuse rather than be satisfied",
     setup: [],
     command: ["node", "scripts/check-claim-scope.mjs", "origin/main", "not-a-real-claim"],
