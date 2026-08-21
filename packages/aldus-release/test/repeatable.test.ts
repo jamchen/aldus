@@ -50,12 +50,64 @@ describe("a declaration that repeating the effect is safe", () => {
   });
 
   it("cannot be assembled as an object literal", () => {
-    // The brand, checked the way `RequiredOperation`'s is. A shape a caller can write is a shape
-    // that gets written from configuration by someone who has not thought about it.
+    // The brand, checked the way `RequiredOperation`'s is.
     const smuggled = { reason: "because I said so" } as unknown;
     // @ts-expect-error a repeatable declaration is minted, never assembled
     const rejected: ReturnType<typeof repeatable> = smuggled;
     expect(rejected).toBeDefined();
+  });
+
+  it("is refused at the bundle boundary when the cast bypasses the constructor", async () => {
+    // The type is not the enforcement, and this is the third time that has been true in this
+    // codebase — `executionId`, then `maxSpend`, now here. A caller can write
+    // `{ reason: "" } as RepeatableDeclaration`, and the code that will assemble operations from
+    // configuration is exactly the code that does. Before this check the operation was treated as
+    // repeatable and the warning ended in a bare colon where the justification should be.
+    const { executor } = makeHarness();
+    const bundle = aMinimalBundle({
+      bestEffort: [
+        bestEffortOperation({
+          operationId: "marker-remove",
+          kind: "marker.remove",
+          destination: DESTINATION_A,
+          inputHashes: [],
+          repeatable: { reason: "  " } as unknown as ReturnType<typeof repeatable>,
+        }),
+      ],
+    });
+
+    await expect(executor.execute(bundle, { actor: OPERATOR })).rejects.toMatchObject({
+      code: ReleaseErrorCodes.OPERATION_INVALID,
+    });
+    await expect(executor.reconcile(bundle, { actor: OPERATOR })).rejects.toMatchObject({
+      code: ReleaseErrorCodes.OPERATION_INVALID,
+    });
+  });
+});
+
+describe("the not-asking is not an operator warning", () => {
+  it("stays out of the warnings of an ordinary release", async () => {
+    // I said this was the intent and did not implement it: the filter was a deny-list — any
+    // finding with an explanation except `confirmed_absent` — so a new action carrying an
+    // explanation was opted in by default. Every ordinary release of a bundle with a repeatable
+    // operation reported that the expected thing had happened.
+    const { executor } = makeHarness();
+    const outcome = await executor.execute(bundleWithCleanup(), { actor: OPERATOR });
+
+    expect(outcome.warnings.filter((warning) => warning.includes("safe to repeat"))).toEqual([]);
+    expect(outcome.warnings.filter((warning) => warning.includes("was not queried"))).toEqual([]);
+  });
+
+  it("still warns about a repair, which is something that went differently", async () => {
+    // The allow-list has to keep letting the real warnings through, or the fix is a mute button.
+    const { executor, receipts } = makeHarness();
+    const bundle = bundleWithCleanup();
+    await executor.execute(bundle, { actor: OPERATOR });
+    receipts.forget(RUN_ID);
+
+    const second = await executor.execute(bundle, { actor: OPERATOR });
+
+    expect(second.warnings.some((warning) => warning.includes("repaired"))).toBe(true);
   });
 });
 

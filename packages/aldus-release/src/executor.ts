@@ -78,6 +78,33 @@ export interface BundleStatus {
 }
 
 /** What reconciliation did about one operation. */
+/**
+ * Which reconciliation findings an operator is warned about (§20; #169).
+ *
+ * An **allow-list**, keyed on the action. It was a deny-list — any finding carrying an explanation
+ * except `confirmed_absent` — so every action added later was opted in by default, with nobody
+ * deciding. `not_reconciled_repeatable` was opted in exactly that way, and appeared in the
+ * warnings of every ordinary release of a bundle holding a repeatable operation, reporting that
+ * the expected thing had happened.
+ *
+ * Membership answers the question a warning asks: **did something go differently than intended?**
+ *
+ * - `repaired` — yes. The local record was wrong and had to be corrected.
+ * - `unavailable` — yes. Reconciliation could not run, so an operator is being told that a
+ *   protection they may assume is absent.
+ * - `confirmed_absent` — no. The ordinary path; most operations in a fresh bundle are absent, and
+ *   one line each would bury the two above.
+ * - `not_reconciled_repeatable` — no. The declared, approved state of the bundle. The reason is in
+ *   the reconciliation report for anyone reading it.
+ *
+ * Adding an action now requires either adding it here or leaving it out, and both are decisions.
+ * Neither happens by default.
+ */
+const OPERATOR_FACING_FINDINGS: ReadonlySet<ReconciliationFinding["action"]> = new Set([
+  "repaired",
+  "unavailable",
+]);
+
 export interface ReconciliationFinding {
   operationId: string;
   idempotencyKey: string;
@@ -323,7 +350,7 @@ export class ReleaseExecutor {
       const report = await this.reconcile(bundle, { actor: options.actor });
       written.push(...report.repaired);
       for (const finding of report.findings) {
-        if (finding.explanation !== undefined && finding.action !== "confirmed_absent") {
+        if (finding.explanation !== undefined && OPERATOR_FACING_FINDINGS.has(finding.action)) {
           warnings.push(finding.explanation);
         }
       }

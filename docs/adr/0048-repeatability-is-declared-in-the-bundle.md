@@ -63,6 +63,15 @@ empty — an operation that may be repeated is one an approver is being asked to
 repetition of, and "safe to repeat" with no account of why is not something anyone can approve or
 audit.
 
+**And checked at runtime, because the type is not the enforcement.** `assertBundleValid` refuses a
+declaration whose reason is blank. A caller can write `{ reason: "" } as RepeatableDeclaration`,
+and the code that will assemble operations from configuration is exactly the code that does — the
+argument this codebase has now had to apply three times, at `executionId`, at `maxSpend`, and here.
+The first version validated only in the constructor, so a cast produced an operation treated as
+repeatable whose warning ended in a bare colon where the justification should be. Higher stakes
+than the usual version: the declaration licenses an external effect happening twice, and §13.4
+binds approval to the bundle, so a blank reason is an approval of nothing.
+
 **Absence means one-shot.** That is the conservative reading and the behaviour every existing
 bundle already has; repetition is licensed only by saying so. This is deliberately an optional
 field rather than a required closed one, because the two readings of absence that usually make an
@@ -99,11 +108,19 @@ of asking.
 
 Also:
 
-- The warning filter in `execute` still excludes `confirmed_absent` explanations, deliberately.
-  That is the ordinary path — most operations in a fresh bundle are absent — and surfacing one per
-  operation would bury the warnings that matter. `not_reconciled_repeatable` is likewise not a
-  warning: it is the declared, approved state of the bundle rather than something that went
-  differently than intended.
+- **The warning filter became an allow-list.** It was a deny-list — any finding carrying an
+  explanation except `confirmed_absent` — which meant every action added later was opted in by
+  default, with nobody deciding. `not_reconciled_repeatable` was opted in exactly that way and
+  appeared in the warnings of every ordinary release of a bundle holding a repeatable operation,
+  reporting that the expected thing had happened.
+
+  Membership now answers the question a warning asks — _did something go differently than
+  intended?_ `repaired` and `unavailable` yes; `confirmed_absent` and `not_reconciled_repeatable`
+  no. Adding an action requires either adding it here or leaving it out, and both are decisions.
+
+  A deny-list on a growing union is the general defect: the safe default is silence, and it was
+  configured as noise.
+
 - Mechanism two — a third answer for an operation that is reconcilable in principle and cannot be
   established _now_ — remains open and independent (#169). This ADR does not address it.
 

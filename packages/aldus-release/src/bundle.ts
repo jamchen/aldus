@@ -74,6 +74,29 @@ export function assertBundleValid(bundle: ReleaseBundle): void {
       );
     }
     seen.add(operation.operationId);
+
+    // Checked at runtime, because the type is not the enforcement. `repeatable()` refuses an empty
+    // reason and nothing stops a caller writing `{ reason: "" } as RepeatableDeclaration` — and
+    // the code that will assemble operations from configuration is exactly the code that does
+    // that. Without this the operation was treated as repeatable and the warning ended in a bare
+    // colon where the justification should be.
+    //
+    // Higher stakes than the usual version of this argument: the declaration licenses performing
+    // an external effect more than once, and §13.4 binds a release approval to the bundle, so a
+    // blank reason is an approval of nothing.
+    const repeatable = operation.repeatable;
+    if (repeatable !== undefined && repeatable.reason.trim().length === 0) {
+      throw releaseError(
+        ReleaseErrorCodes.OPERATION_INVALID,
+        `Release bundle "${bundle.bundleId}" declares "${operation.operationId}" safe to repeat ` +
+          "with no reason. Repeating an external effect is something an approver accepts, and an " +
+          "empty justification is an approval of nothing (contract §13.4, §17).",
+        {
+          category: "validation",
+          details: { bundleId: bundle.bundleId, operationId: operation.operationId },
+        },
+      );
+    }
   }
 }
 
