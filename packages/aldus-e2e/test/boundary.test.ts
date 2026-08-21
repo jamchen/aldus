@@ -10,6 +10,7 @@
  * walked into, which is itself a good argument for the comment.
  */
 
+import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +46,22 @@ function sourceFiles(directory: string): string[] {
 }
 
 const files = sourceFiles(packageRoot);
+
+describe("the repository-wide boundary check (§4.2; #173)", () => {
+  it("passes over packages/ and docs/, and is the same list CI uses", () => {
+    // The mirror that matters. The suite below scans **this package only**, and CI's inline
+    // pattern scanned `packages/` only — so an adopter's repository name reached `docs/` with
+    // three checks in place and none of them looking. Running the real script here means the
+    // local check and the CI check cannot disagree about either the list or the scope.
+    const script = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "scripts");
+    const result = spawnSync("node", [join(script, "check-generic-boundary.mjs")], {
+      cwd: join(script, ".."),
+      encoding: "utf8",
+    });
+    expect(result.stdout + result.stderr).not.toContain("no files to scan");
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+  });
+});
 
 describe("the generic boundary (§4.2)", () => {
   it("finds files to check", () => {

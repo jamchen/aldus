@@ -29,6 +29,21 @@ Test fixtures use obviously fictional placeholders (`example-show`, `example-hos
 `provider-a`, `destination-a`). Private Knowledge Packs MUST never be required by Core tests
 (§19.2).
 
+**An adopter's identity does not belong in `docs/` either.** Provider and platform names appear in
+`docs/` deliberately — §4.2 quotes "YouTube channel IDs" to state its own rule — but a specific
+adopter's repository, product or company has no place in the record any more than in the runtime.
+Where an adopter's case is the evidence, "the first adopter" carries the same substance.
+
+`scripts/check-generic-boundary.mjs` enforces both, with the list in one place and a per-category
+scope: provider/platform/cloud in `packages/`, adopter identity in `packages/` **and** `docs/`. CI
+runs it and `packages/aldus-e2e/test/boundary.test.ts` runs the same script, so the local check and
+the CI check cannot disagree.
+
+The check it replaced was named "Reject adopter-specific names", said in its comment that it covered
+adopter identity, contained none, and scanned `packages/` only — so two files reached `main` naming
+an adopter, one of them in `docs/` (#173). A claim about a boundary has to be enforceable rather
+than asserted, and a neutrality rule enforced by attention fails on the busiest day.
+
 ## Layout
 
 ```

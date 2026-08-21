@@ -1,7 +1,7 @@
 /**
  * An operation that may safely be performed again (#169, ADR-0048).
  *
- * The adopter's case, from `megaphone-aldus`: an upload publishes a temporary marker and a
+ * The first adopter's case: an upload publishes a temporary marker and a
  * best-effort cleanup removes it once the receipt is durable. The cleanup **cannot** answer
  * `lookup`, and not because answering is expensive:
  *

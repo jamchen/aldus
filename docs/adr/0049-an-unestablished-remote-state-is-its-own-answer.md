@@ -133,7 +133,8 @@ assumption about a boundary, stated instead of checked.
   nothing and answers as though nothing was there makes a test assert the wrong thing and pass.
 - The `remote?` type widening is additive for a producer.
 
-No adopter is affected today — `git grep` across `megaphone-aldus` finds neither export. Recorded
+No adopter is affected today — a search across the first adopter's integration finds neither
+export. Recorded
 anyway, because the next adopter is not that one.
 
 ### What the new check found
