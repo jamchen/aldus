@@ -64,11 +64,20 @@ repetition of, and "safe to repeat" with no account of why is not something anyo
 audit.
 
 **And checked at runtime, because the type is not the enforcement.** `assertBundleValid` refuses a
-declaration whose reason is blank. A caller can write `{ reason: "" } as RepeatableDeclaration`,
+declaration that is not one — a non-object, a missing reason, a reason that is not a string, or a
+blank one. A caller can write `{ reason: "" } as RepeatableDeclaration`,
 and the code that will assemble operations from configuration is exactly the code that does — the
 argument this codebase has now had to apply three times, at `executionId`, at `maxSpend`, and here.
-The first version validated only in the constructor, so a cast produced an operation treated as
-repeatable whose warning ended in a bare colon where the justification should be. Higher stakes
+It took two passes, and the second is the more instructive. The first version validated only in the
+constructor, so a cast produced an operation treated as repeatable whose warning ended in a bare
+colon where the justification should be. The second read `repeatable.reason.trim()` — **the check
+written to stop a cast made the assumption it exists to prevent.** `repeatable: true`, the single
+most likely thing someone writes in a config file when they mean this, threw a bare `TypeError`:
+fail-closed, so nothing unsafe, but with no code, no bundle or operation id and no sentence saying
+what was wrong, arriving from exactly the source the check's own comment named.
+
+Every malformed shape is now one table in the tests, so a fifth is a row rather than a
+rediscovery. Higher stakes
 than the usual version: the declaration licenses an external effect happening twice, and §13.4
 binds approval to the bundle, so a blank reason is an approval of nothing.
 

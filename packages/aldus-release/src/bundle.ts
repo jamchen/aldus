@@ -84,18 +84,33 @@ export function assertBundleValid(bundle: ReleaseBundle): void {
     // Higher stakes than the usual version of this argument: the declaration licenses performing
     // an external effect more than once, and §13.4 binds a release approval to the bundle, so a
     // blank reason is an approval of nothing.
-    const repeatable = operation.repeatable;
-    if (repeatable !== undefined && repeatable.reason.trim().length === 0) {
-      throw releaseError(
-        ReleaseErrorCodes.OPERATION_INVALID,
-        `Release bundle "${bundle.bundleId}" declares "${operation.operationId}" safe to repeat ` +
-          "with no reason. Repeating an external effect is something an approver accepts, and an " +
-          "empty justification is an approval of nothing (contract §13.4, §17).",
-        {
-          category: "validation",
-          details: { bundleId: bundle.bundleId, operationId: operation.operationId },
-        },
-      );
+    //
+    // The **shape** as well as the emptiness. The first version read `repeatable.reason.trim()`,
+    // which assumes `reason` is a string — the assumption this check exists because it cannot
+    // make. `repeatable: true` is the single most likely thing someone writes in a config file
+    // when they mean this, and it threw a bare `TypeError` with no code, no bundle or operation
+    // id, and no sentence saying what was wrong. Fail-closed, so nothing unsafe happened; what was
+    // lost was the refusal, arriving from exactly the source the paragraph above names.
+    const declaration: unknown = (operation as { repeatable?: unknown }).repeatable;
+    if (declaration !== undefined) {
+      const reason =
+        typeof declaration === "object" && declaration !== null
+          ? (declaration as { reason?: unknown }).reason
+          : undefined;
+      if (typeof reason !== "string" || reason.trim().length === 0) {
+        throw releaseError(
+          ReleaseErrorCodes.OPERATION_INVALID,
+          `Release bundle "${bundle.bundleId}" declares "${operation.operationId}" safe to ` +
+            "repeat without a usable reason. Repeating an external effect is something an " +
+            "approver accepts, and neither a blank justification nor a value that is not a " +
+            "declaration is something anyone can approve. Build it with `repeatable(reason)` " +
+            "(contract §13.4, §17).",
+          {
+            category: "validation",
+            details: { bundleId: bundle.bundleId, operationId: operation.operationId },
+          },
+        );
+      }
     }
   }
 }

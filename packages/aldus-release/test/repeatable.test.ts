@@ -57,12 +57,29 @@ describe("a declaration that repeating the effect is safe", () => {
     expect(rejected).toBeDefined();
   });
 
-  it("is refused at the bundle boundary when the cast bypasses the constructor", async () => {
-    // The type is not the enforcement, and this is the third time that has been true in this
-    // codebase — `executionId`, then `maxSpend`, now here. A caller can write
-    // `{ reason: "" } as RepeatableDeclaration`, and the code that will assemble operations from
-    // configuration is exactly the code that does. Before this check the operation was treated as
-    // repeatable and the warning ended in a bare colon where the justification should be.
+  /**
+   * Every shape a caller can put where a declaration belongs, as one table.
+   *
+   * The type is not the enforcement — the fourth time this codebase has had to apply that, after
+   * `executionId`, `maxSpend`, and the blank reason this table's first row covers. The fourth was
+   * the sharpest: the check written to stop a cast **made the assumption it exists to prevent**,
+   * reading `repeatable.reason.trim()` as though `reason` were a string. Every malformed shape
+   * threw a bare `TypeError` — fail-closed, so nothing unsafe, but with no code, no bundle or
+   * operation id and no sentence saying what was wrong, arriving from exactly the source that
+   * check's own comment names.
+   *
+   * A table rather than four tests, so a fifth shape is a row rather than a rediscovery.
+   */
+  const malformed: readonly (readonly [string, unknown])[] = [
+    ["a blank reason", { reason: "  " }],
+    ["no reason at all", {}],
+    ["a bare boolean, which is what someone writes in a config file", true],
+    ["a string where a declaration belongs", "safe to repeat"],
+    ["a reason that is not a string", { reason: 42 }],
+    ["null", null],
+  ];
+
+  it.each(malformed)("refuses %s at the bundle boundary", async (_shape, value) => {
     const { executor } = makeHarness();
     const bundle = aMinimalBundle({
       bestEffort: [
@@ -71,17 +88,28 @@ describe("a declaration that repeating the effect is safe", () => {
           kind: "marker.remove",
           destination: DESTINATION_A,
           inputHashes: [],
-          repeatable: { reason: "  " } as unknown as ReturnType<typeof repeatable>,
+          repeatable: value as ReturnType<typeof repeatable>,
         }),
       ],
     });
 
+    // A refusal, not a crash: the code, and the bundle and operation the author has to fix.
     await expect(executor.execute(bundle, { actor: OPERATOR })).rejects.toMatchObject({
       code: ReleaseErrorCodes.OPERATION_INVALID,
+      details: { bundleId: bundle.bundleId, operationId: "marker-remove" },
     });
+    // Both entry points, because `assertBundleValid` is where the check lives.
     await expect(executor.reconcile(bundle, { actor: OPERATOR })).rejects.toMatchObject({
       code: ReleaseErrorCodes.OPERATION_INVALID,
     });
+  });
+
+  it("accepts a declaration the constructor actually minted", async () => {
+    // The control. A shape check that refused everything would pass the table above and break
+    // the feature.
+    const { executor } = makeHarness();
+    const outcome = await executor.execute(bundleWithCleanup(), { actor: OPERATOR });
+    expect(outcome.state).toBe("succeeded");
   });
 });
 
