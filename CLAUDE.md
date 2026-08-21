@@ -93,6 +93,59 @@ field is a MINOR bump; anything else is MAJOR. Rationale: ADR-0003.
 - Anything that could reach a log goes through `redact()` first.
 - Secrets are referenced, never embedded in manifests, errors, or fixtures.
 
+## Review protocol
+
+Agreed with the owner and the architecture coordinator on 2026-08-21. Recorded here because the
+cross-session channel does not survive a restart and this does.
+
+**What a review pass is.** The coordinator does not re-run suites CI has already run — a green
+suite re-run produces no information. What produces findings is the other half: mutants, and
+sequences nobody wrote. Every real finding in the #165–#171 series came from one of those — a
+two-pass test where the first pass wrote a terminal receipt, a retry after a durable cost write,
+reverting a rule to see whether four composed tests were load-bearing. Make those two things cheap
+to reproduce and the round-trip shrinks on both sides.
+
+**Batch or ping, by the same content line the owner uses for authorizations.** Batch anything whose
+failure a follow-up commit can repair: two or three changes, then one review request. Ping
+immediately and singly for anything touching publish, an irreversible external effect, or a
+contract an adopter pins exactly.
+
+**Every review request carries an evidence block**, so a reviewer starts at the reasoning rather
+than parsing prose for it:
+
+```
+head:      <sha>
+suites:    <package: count, …>  (in one tree, not the union of separate passes)
+mutants:   <a runnable command per mutant, not a description>
+claims:    <each claim, and what would invalidate it>
+does not:  <what this change does NOT establish>
+```
+
+The last two are the load-bearing ones. **Mutants as commands** is the highest-leverage item: a
+reviewer re-ran mutants three times in one day and twice it changed the outcome, and reconstructing
+the setup was most of the cost. A one-liner per mutant turns verification of a verification into one
+command.
+
+**Checks that replace something a reviewer did by hand:**
+
+| script                         | the claim it verifies                                                                         |
+| ------------------------------ | --------------------------------------------------------------------------------------------- |
+| `check-generic-boundary.mjs`   | no provider/platform/cloud name in `packages/`, no adopter identity in `packages/` or `docs/` |
+| `check-version-bump.mjs`       | a PR changing `files`-scoped contents bumps the version                                       |
+| `check-resolution-surface.mjs` | a merge's diff is a subset of the union of its parents' diffs                                 |
+| `check-claim-scope.mjs`        | `docs-only` / `no-shipped-change` is true rather than asserted                                |
+
+`check-resolution-surface.mjs` does **not** establish that a resolution chose correctly — keeping
+one caller's shape and dropping the other's argument is a correct-surface, wrong-content failure,
+and no diff comparison catches it.
+
+**A coordinator sits upstream, so its errors are amplified rather than filtered.** Three times in
+one day a coordinator's error propagated into implementation before being caught: a trial-merge
+result relayed forward as fact, a ruling written against an unpublished arm, and a two-Environment
+split that assumed a mechanism `allow-latest-move` does not have. All three were caught downstream,
+by reading the mechanism. **When a ruling asserts a mechanism, check the mechanism before building
+on it.** The review direction that matters most is implementation over coordination, not the reverse.
+
 ## Check the mechanism, not its description
 
 Four defects in two days shared one mechanism, and it is worth stating separately from any of them
