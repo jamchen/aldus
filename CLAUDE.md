@@ -160,6 +160,29 @@ rather than left as four anecdotes:
   required **committing** the modified manifest first, because with a dirty tree the worktree guard
   fires and both look verified for the wrong reason. Two guards confirmed by a third.
 
+### Verify in the environment that will run it, or say that you did not
+
+Three rules in this repository turn out to be one, and the third arrived by breaking `main`:
+
+- **the clean-consumer gate** — an adopter installs a published tarball, never a workspace link,
+  because a link resolves what a tarball cannot and passes checks the real thing fails;
+- **exact internal pins, never ranges** — a range is a promise about a package you did not test;
+- **and: a release check verified against a full local clone, when CI checks out shallow.** The
+  script read the previous commit's version, `actions/checkout` is shallow by default so that commit
+  was absent, and a merge that changed nothing shippable reported an attempted republish. The local
+  run passed. It could not have failed: a full clone is to a shallow checkout what a workspace link
+  is to a tarball — a more convenient version of the thing, missing the constraint that matters.
+
+The rule is not "test more". It is that **a friendlier environment does not disprove a fault, and
+passing in one is not evidence about the other.** Where the real environment cannot be reproduced —
+and often it cannot — say so in the claim rather than leaving the reader to assume otherwise. The
+`does not:` line of an evidence block is where that belongs: _"reproduced locally with `--depth 1`,
+which is the condition CI has, not CI itself."_
+
+This sits beside "check the mechanism, not its description" rather than inside it. That one is about
+a description drifting from its code; this one is about a measurement taken somewhere the code will
+never run.
+
 ### A claim about another repository is not checkable from here
 
 `check-generic-boundary.mjs` catches an adopter's identity entering our record. It cannot catch the
