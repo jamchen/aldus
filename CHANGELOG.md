@@ -10,7 +10,35 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 ## Unreleased
 
-Nothing yet.
+### Behaviour changes
+
+**`@aldus-runtime/regression` now refuses a corpus or evaluator run declaring a schema version
+newer than the runtime implements.** `parseDefectCorpus` and `parseEvaluatorRun` previously
+validated `schemaVersion` for _shape_ only — any `MAJOR.MINOR` string was accepted, including one
+from a future release. A shape check with no value check is worse than none: the field looks
+validated and guarantees nothing.
+
+The refusal is `ALDUS_SCHEMA_VERSION_UNSUPPORTED`. If you feed either parser records produced by a
+newer runtime, calls that used to return now throw.
+
+**Both record schemas are strict: an unknown key is refused rather than stripped.** Previously a
+record from a later runtime parsed and its added fields were silently discarded, so the caller
+received an object that looked complete and was not — a read path returning a wrong answer with no
+signal. Records carrying extra keys now throw `ALDUS_CORPUS_MALFORMED`.
+
+An **older** record still parses. A record has to be readable in order to be upgraded, so a parser
+that refused everything it did not stamp would make a corpus unable to outlive a release — the
+property the version field exists for. Whether an older run is _comparable_ to today's is policy
+and stays with the caller.
+
+### Features
+
+**`compareSchemaVersion(recordVersion)`** returns `"older" | "same" | "newer"` against
+`REGRESSION_SCHEMA_VERSION`, and can be asked before parsing. It exists so the comparison is not
+reimplemented per caller — that is the part that drifts. Minor versions compare numerically, so
+`1.10` is correctly newer than `1.9`.
+
+No record shape changed, so `SCHEMA_VERSION` does not move.
 
 ## 0.2.0-next.0 — 2026-08-18
 

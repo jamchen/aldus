@@ -22,6 +22,7 @@
 export {
   REGRESSION_SCHEMA_VERSION,
   defectCaseSchema,
+  compareSchemaVersion,
   defectCorpusSchema,
   evaluatorFindingSchema,
   evaluatorOutcomeSchema,
@@ -39,6 +40,7 @@ export {
   type EvaluatorRun,
   type HumanFinding,
   type ScopeDimensions,
+  type SchemaVersionRelation,
 } from "./corpus.js";
 
 // --- Scope slicing (§12.1) --------------------------------------------------------------------

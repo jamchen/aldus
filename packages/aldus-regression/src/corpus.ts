@@ -156,6 +156,11 @@ export const defectCorpusSchema = z
     /** The labelled cases. */
     cases: z.array(defectCaseSchema).max(100_000),
   })
+  // Strict: an unknown key is refused, not stripped. Without this a record from a later runtime
+  // parses and its added fields vanish, handing the caller an object that looks complete and is
+  // not. See SCHEMA_VERSION_UNSUPPORTED — the version check and this are the same guarantee, one
+  // for a declared newer version and one for an undeclared newer shape.
+  .strict()
   .meta({
     id: "DefectCorpus",
     title: "DefectCorpus",
@@ -238,6 +243,7 @@ export const evaluatorRunSchema = z
     /** When the run was executed. */
     executedAt: z.iso.datetime({ offset: true }),
   })
+  .strict()
   .meta({
     id: "EvaluatorRun",
     title: "EvaluatorRun",
@@ -252,6 +258,70 @@ export type EvaluatorRun = z.infer<typeof evaluatorRunSchema>;
 
 /** Schema version this package stamps on records it constructs. */
 export const REGRESSION_SCHEMA_VERSION = SCHEMA_VERSION;
+
+/** How a record's declared schema version relates to the one this runtime implements. */
+export type SchemaVersionRelation = "older" | "same" | "newer";
+
+/**
+ * Compare a record's declared schema version against {@link REGRESSION_SCHEMA_VERSION}.
+ *
+ * Exported because the two directions are not the same kind of question. **Newer** is soundness
+ * and belongs here: this runtime cannot know what a later version's fields mean, so it refuses.
+ * **Older** is policy and belongs to the caller — whether a run from an earlier version is
+ * comparable to today's depends on what changed between them, which this package cannot know
+ * either. What it can do is stop every caller reimplementing the comparison, which is the part
+ * that would drift.
+ *
+ * A record must be readable in order to be upgraded, so this is deliberately a question a caller
+ * can ask *before* parsing, and an older record still parses.
+ *
+ * @param recordVersion - The `schemaVersion` field of a record, `MAJOR.MINOR` (ADR-0003).
+ * @throws {AldusError} `ALDUS_CORPUS_MALFORMED` if `recordVersion` is not `MAJOR.MINOR`.
+ */
+export function compareSchemaVersion(recordVersion: string): SchemaVersionRelation {
+  const parse = (value: string): readonly [number, number] => {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value);
+    if (match === null) {
+      // Path and code only — never the received value (contract §19.2).
+      throw regressionError(
+        RegressionErrorCodes.CORPUS_MALFORMED,
+        "A schema version must be MAJOR.MINOR.",
+        {
+          category: "validation",
+          details: { issues: [{ path: "schemaVersion", code: "invalid_format" }] },
+        },
+      );
+    }
+    return [Number(match[1]), Number(match[2])] as const;
+  };
+  const [recordMajor, recordMinor] = parse(recordVersion);
+  const [runtimeMajor, runtimeMinor] = parse(REGRESSION_SCHEMA_VERSION);
+  if (recordMajor !== runtimeMajor) return recordMajor > runtimeMajor ? "newer" : "older";
+  if (recordMinor !== runtimeMinor) return recordMinor > runtimeMinor ? "newer" : "older";
+  return "same";
+}
+
+/**
+ * Refuse a record declaring a version this runtime does not implement.
+ *
+ * Only `newer` is refused. An older record parses, and {@link compareSchemaVersion} is how a
+ * caller decides whether to trust it.
+ */
+function assertSchemaVersionSupported(recordVersion: string, record: "corpus" | "run"): void {
+  if (compareSchemaVersion(recordVersion) !== "newer") return;
+  throw regressionError(
+    RegressionErrorCodes.SCHEMA_VERSION_UNSUPPORTED,
+    `A ${record} declares a schema version newer than this runtime implements. Its fields cannot ` +
+      "be interpreted here, and the schema discards what it does not declare, so accepting it " +
+      "would return a record that looks complete and is not.",
+    {
+      category: "validation",
+      // The runtime's own version is this package's constant, not received input, so naming it is
+      // not a value leak. The record's version is not named (contract §19.2).
+      details: { runtimeSchemaVersion: REGRESSION_SCHEMA_VERSION, relation: "newer" },
+    },
+  );
+}
 
 /**
  * Validate a corpus and check the uniqueness constraint Zod cannot express.
@@ -276,6 +346,8 @@ export function parseDefectCorpus(input: unknown): DefectCorpus {
       },
     );
   }
+
+  assertSchemaVersionSupported(result.data.schemaVersion, "corpus");
 
   const seen = new Set<string>();
   for (const entry of result.data.cases) {
@@ -314,6 +386,8 @@ export function parseEvaluatorRun(input: unknown): EvaluatorRun {
       },
     );
   }
+
+  assertSchemaVersionSupported(result.data.schemaVersion, "run");
 
   const seen = new Set<string>();
   for (const outcome of result.data.outcomes) {

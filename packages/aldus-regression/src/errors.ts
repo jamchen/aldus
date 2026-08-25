@@ -34,6 +34,16 @@ export const RegressionErrorCodes = {
   BLIND_SPOT_DUPLICATE: "ALDUS_BLIND_SPOT_DUPLICATE",
   /** A promotion policy is internally inconsistent — a threshold outside its valid range. */
   POLICY_INVALID: "ALDUS_POLICY_INVALID",
+  /**
+   * A record declares a schema version newer than this runtime implements.
+   *
+   * Refused rather than accepted, because this runtime cannot know what a later version's fields
+   * mean and the schemas discard what they do not declare. Accepting one returns an object that
+   * looks complete and is not — a read path answering wrongly with no signal, which is worse than
+   * refusing. Whether an *older* record is comparable is the caller's policy, not this package's:
+   * see `compareSchemaVersion`.
+   */
+  SCHEMA_VERSION_UNSUPPORTED: "ALDUS_SCHEMA_VERSION_UNSUPPORTED",
 } as const;
 
 /** @see RegressionErrorCodes */
