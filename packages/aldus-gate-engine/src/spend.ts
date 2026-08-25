@@ -91,16 +91,27 @@ export interface SpendGrant {
   /**
    * Maximum total spend authorized across the Run (§13.2 "maximum authorized cost").
    *
-   * **Read together with `maxPerRequest` when `unestimatedExecution` is
-   * `"reserve_max_per_request"`.** Each unestimated dispatch reserves the *whole* per-request
-   * ceiling, so `maxTotal ÷ maxPerRequest` is a **count of dispatches**, not a pool of money that
-   * partly-used requests return to. A grant of $25 total and $3 per request authorizes eight
-   * unestimated dispatches whatever they actually cost.
+   * **Two different things consume it**, and confusing them mis-sizes a grant in either direction:
    *
-   * That is the correct behaviour — an unestimated effect has no smaller truthful number to
-   * reserve — but it is not what "total budget $25" reads as, and an operator picking the two
-   * numbers independently will pick them wrongly. Measured by an adopter: a $3/$3 grant permitted
-   * exactly one dispatch and refused the second with the budget almost untouched.
+   * - **settled charges**, permanently — the actual `CostRecord` amounts;
+   * - **active and unresolved reservations**, at their *reserved* amount until they settle.
+   *
+   * `availableAuthorization` is `maxTotal − settled − active`, and on settlement a reservation
+   * stops being counted at what it reserved and starts being counted at what it actually cost —
+   * so **unused headroom returns**.
+   *
+   * That matters under `unestimatedExecution: "reserve_max_per_request"`, where each unestimated
+   * dispatch reserves the *whole* per-request ceiling because there is no smaller truthful number.
+   * `maxTotal ÷ maxPerRequest` bounds how many such dispatches can be **outstanding at once** — in
+   * flight, or with billing still unresolved. It does **not** bound the run: once they settle
+   * below the ceiling the difference is available again, and a $25 / $3 grant can authorize far
+   * more than eight sequential dispatches when each settles cheaply.
+   *
+   * Both readings mis-size a grant. Read as a lifetime pool it ignores that eight worst-case
+   * reservations can be outstanding before any of them settles; read as a concurrency bound alone
+   * it over-provisions a run whose charges are small. Measured by an adopter: a $3 / $3 grant
+   * permitted one dispatch and refused a case dispatching twice, with the budget almost untouched
+   * — because the first had not settled yet.
    */
   maxTotal: Money;
   /**

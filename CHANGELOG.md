@@ -12,6 +12,44 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.23 — 2026-08-25
+
+### Documentation on the money path
+
+No behaviour changes. Three semantics that were already true of the shipped runtime and that
+nothing said out loud, all from the first adopter migration through `#155` and ADR-0044. **All
+three compile cleanly and behave wrongly**, which is worse than failing to compile — nothing tells
+you.
+
+**`effectKey`: one attempt is not necessarily one effect.** A stage dispatching twice within a
+single attempt — a writer and then a reviewer, a segment loop — has two independently billed
+effects, and keying both on the attempt gives them one key. The second reserve is refused at
+runtime, correctly, _after the first has been paid for_: a stage dying mid-attempt having spent
+money. Derive the key from what makes an effect the same effect if repeated, and distinguish
+effects within an attempt — `${attemptId}:${purpose}`, not `attemptId`. The dispatcher's identity
+and version are prepended by the runtime; adding them yourself double-versions the key and defeats
+the idempotency it exists for.
+
+**`maxPerRequest` changed meaning without changing type.** It was a statement about what a
+_backend_ enforces, so leaving it unset where the backend enforced nothing was the honest choice.
+Under ADR-0044 it is what the _runtime reserves_. Still optional, still compiles, and under
+`unestimatedExecution: "reserve_max_per_request"` an unset ceiling makes every unestimated dispatch
+refuse.
+
+**`maxTotal` is consumed by two different things**, and reading it as one mis-sizes a grant in
+either direction. Settled charges consume it permanently at their actual amount; active and
+unresolved reservations consume it at their _reserved_ amount until they settle, at which point
+unused headroom returns. So `maxTotal ÷ maxPerRequest` bounds how many unestimated dispatches can
+be **outstanding at once**, not how many a run may make — nine dispatches settling cheaply against
+a $25 / $3 grant leave $23.20 available. Read as a lifetime pool it ignores that eight worst-case
+reservations can be outstanding before any settles; read as a concurrency bound alone it
+over-provisions a run whose charges are small.
+
+`packages/aldus-gate-engine/test/settlement-headroom.test.ts` holds that behaviour to the protocol,
+so the prose fails when it drifts again.
+
+Nothing yet.
+
 ## 0.2.0-next.21 — 2026-08-25
 
 Published from `main` (ADR-0050). **These notes were written after the fact**: the release shipped
