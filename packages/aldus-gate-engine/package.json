@@ -1,6 +1,6 @@
 {
   "name": "@aldus-runtime/gate-engine",
-  "version": "0.2.0-next.27",
+  "version": "0.2.0-next.28",
   "type": "module",
   "description": "Aldus Gate Engine — hash-bound human gates, cascading invalidation, and spend authorization.",
   "license": "Apache-2.0",
@@ -33,10 +33,10 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "0.2.0-next.27"
+    "@aldus-runtime/core": "0.2.0-next.28"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "0.2.0-next.27",
+    "@aldus-runtime/testkit": "0.2.0-next.28",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
