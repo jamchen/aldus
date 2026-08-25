@@ -33,6 +33,14 @@ export const GateEngineErrorCodes = {
   /** A decision was submitted that does not bind the subjects its gate requires. */
   GATE_SUBJECTS_INCOMPLETE: "ALDUS_GATE_SUBJECTS_INCOMPLETE",
   /**
+   * A waiver was recorded without a reason, or asked not to expire when its subjects change.
+   *
+   * Both refusals exist because a waiver is not an approval. An approval says the content was
+   * judged and passed; a waiver says the check was **bypassed** — so it must say why, and it must
+   * not outlive the content it was granted against.
+   */
+  GATE_WAIVER_INVALID: "ALDUS_GATE_WAIVER_INVALID",
+  /**
    * An operation requiring authorization was attempted without a valid one.
    *
    * Contract §13.2: paid TTS MUST NOT run until the operator approves. This is the refusal that

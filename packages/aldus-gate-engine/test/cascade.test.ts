@@ -250,6 +250,7 @@ describe("waivers (§13)", () => {
       runId: RUN_ID,
       gateId: CONTENT_FREEZE,
       decision: "waived",
+      comment: "waived for this test; the engine requires a reason",
       subjects: subjects[CONTENT_FREEZE] ?? [],
       decidedBy: OPERATOR,
       decidedAt: AT,

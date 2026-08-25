@@ -24,6 +24,7 @@ Commands
   retry <stage>             Re-attempt a stage
   approve <gate>            Record an approval
   reject <gate>             Record a rejection
+  waive <gate>              Record that a check was bypassed, not passed (--reason required)
   cancel                    Abandon a Run
   costs                     Cost records and totals
 
@@ -67,6 +68,7 @@ Command options
   run           --stage-version <version> --input <json> --force
   retry         --stage-version <version> --input <json> --force
   approve       --comment <text>
+  waive         --reason <text>   (required; a waiver always expires when its subjects change)
   cancel        --reason <text>
   reject        --comment <text>
   release       --bundle <path>            plan, reconcile, and execute

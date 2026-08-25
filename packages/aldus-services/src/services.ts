@@ -149,6 +149,21 @@ export interface GateDecisionRequest {
   actor?: ActorRef;
 }
 
+/**
+ * What a waiver needs, which is not what a decision needs.
+ *
+ * `reason` is **required** where `GateDecisionRequest.comment` is optional, and there is no
+ * `expiresOnChange`: a waiver's cannot be chosen. Both differences are the point of the type —
+ * a waiver recorded in the shape of an approval is the thing this verb exists to stop.
+ */
+export interface GateWaiverRequest {
+  runId: string;
+  gateId: string;
+  /** Why the check is being bypassed. Recorded as the decision's comment (§19.2). */
+  reason: string;
+  actor?: ActorRef;
+}
+
 /** Application services bound to one workspace. */
 export class AldusServices {
   readonly #context: AldusContext;
@@ -989,6 +1004,22 @@ export class AldusServices {
   }
 
   /**
+   * Record a waiver — the check was **bypassed**, not passed (contract §13).
+   *
+   * `waived` has been a first-class decision since §13 was written: attributable, dated,
+   * subject-binding, and voided when its subjects drift. What was missing was a door to it, so an
+   * operator who could not honestly approve a gate had only two shapes available — widen
+   * `permittedActorKinds`, or approve something they did not judge — and both record a decision
+   * that misdescribes what happened.
+   *
+   * `reason` is required, and the engine refuses a non-expiring waiver. Neither rule lives here:
+   * the engine owns §13, and a copy of the rule beside it is a second place to get it wrong.
+   */
+  waive(request: GateWaiverRequest): Promise<ServiceResult<GateDecisionReport>> {
+    return this.#decide({ ...request, comment: request.reason }, "waived");
+  }
+
+  /**
    * Record a decision through the gate engine (contract §3.6, §13).
    *
    * The engine owns every rule here — which actors may decide (§13.3), what a decision must bind
@@ -998,7 +1029,7 @@ export class AldusServices {
    */
   async #decide(
     request: GateDecisionRequest,
-    decision: "approved" | "rejected" | "changes_requested",
+    decision: "approved" | "rejected" | "changes_requested" | "waived",
   ): Promise<ServiceResult<GateDecisionReport>> {
     const actor = requireActor(request.actor ?? this.#context.actor, decision);
     const manifest = await this.#requireRun(request.runId);

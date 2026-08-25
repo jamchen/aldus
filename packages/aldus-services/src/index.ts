@@ -126,6 +126,7 @@ export {
 export {
   AldusServices,
   type GateDecisionRequest,
+  type GateWaiverRequest,
   type InitRequest,
   type RunStageRequest,
   type CancelRunRequest,
