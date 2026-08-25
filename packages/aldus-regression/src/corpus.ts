@@ -155,6 +155,25 @@ export const defectCorpusSchema = z
     description: z.string().max(2000).optional(),
     /** The labelled cases. */
     cases: z.array(defectCaseSchema).max(100_000),
+    /**
+     * Adopter-owned data carried with this record.
+     *
+     * A declared extension point, because strictness without one is a rule with no exit. Refusing
+     * an undeclared key is right — a record from a later runtime whose added fields vanish hands
+     * the caller an object that looks complete and is not. But that argument is about *the
+     * runtime's* future fields, and it was applied to an adopter's own data, which is a different
+     * category and had a real pattern behind it: the provenance of a label belongs beside the
+     * label, in the same file, versioned together, because a label whose source lives in another
+     * file is one refactor away from a label with no source.
+     *
+     * So the two cases are separated rather than collapsed. An unknown key is refused; a declared
+     * one is **preserved through the parse**, which the previous sibling-key arrangement could not
+     * do — it survived only because readers went around the parser to the raw JSON.
+     *
+     * Core never interprets this. Same shape as `WorkflowEvent.details` and
+     * `SpendReservationTransition.detail` (§4.2: adopter-shaped concepts are opaque here).
+     */
+    metadata: z.record(z.string(), z.unknown()).optional(),
   })
   // Strict: an unknown key is refused, not stripped. Without this a record from a later runtime
   // parses and its added fields vanish, handing the caller an object that looks complete and is
@@ -242,6 +261,8 @@ export const evaluatorRunSchema = z
     outcomes: z.array(evaluatorOutcomeSchema).max(100_000),
     /** When the run was executed. */
     executedAt: z.iso.datetime({ offset: true }),
+    /** @see defectCorpusSchema.metadata */
+    metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
   .meta({
