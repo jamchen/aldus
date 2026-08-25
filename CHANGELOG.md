@@ -17,9 +17,14 @@ Nothing yet.
 ### Documentation on the money path
 
 No behaviour changes. Three semantics that were already true of the shipped runtime and that
-nothing said out loud, all from the first adopter migration through `#155` and ADR-0044. **All
-three compile cleanly and behave wrongly**, which is worse than failing to compile — nothing tells
-you.
+nothing said out loud, all from the first adopter migration through `#155` and ADR-0044.
+
+What makes them worth a release note is the shape of getting them wrong. **The natural misuse of
+each one compiles cleanly and then refuses or overspends at runtime** — a wrong `effectKey` grain
+type-checks and is refused only after the first effect has been paid for; an unset `maxPerRequest`
+type-checks and refuses every unestimated dispatch; a `maxTotal` sized as a lifetime pool
+type-checks and simply provisions the wrong amount. Nothing before runtime says so, which is worse
+than a change that fails to compile.
 
 **`effectKey`: one attempt is not necessarily one effect.** A stage dispatching twice within a
 single attempt — a writer and then a reviewer, a segment loop — has two independently billed
@@ -47,8 +52,6 @@ over-provisions a run whose charges are small.
 
 `packages/aldus-gate-engine/test/settlement-headroom.test.ts` holds that behaviour to the protocol,
 so the prose fails when it drifts again.
-
-Nothing yet.
 
 ## 0.2.0-next.21 — 2026-08-25
 
