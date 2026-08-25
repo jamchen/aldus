@@ -5,6 +5,7 @@ import { GateEngine } from "../src/engine.js";
 import { GateEngineErrorCodes } from "../src/errors.js";
 import { MemoryGateDecisionStore, MemoryGateEventSink } from "../src/ports.js";
 import {
+  AGENT,
   AT,
   CONTENT_FREEZE,
   EPISODE_ID,
@@ -137,5 +138,25 @@ describe("a waiver cannot outlive the content it was granted against", () => {
       episodeId: EPISODE_ID,
     });
     expect(decision.expiresOnChange).toBe(false);
+  });
+});
+
+describe("waiving does not route around who may decide", () => {
+  it("refuses an agent waiving a human_oracle gate", async () => {
+    // Asserted to an adopter before it was measured, which is not the standard either of us has
+    // been holding. `permittedActorKinds` is checked on **recording**, before the decision's type
+    // is looked at, so the new verb inherits it rather than needing its own copy — but "inherits
+    // it" is a claim about ordering and ordering is exactly what a refactor moves.
+    await expect(waive({ decidedBy: AGENT })).rejects.toSatisfy(
+      (thrown) => codeOf(thrown) === GateEngineErrorCodes.GATE_ACTOR_NOT_PERMITTED,
+    );
+  });
+
+  it("refuses the agent before complaining about a missing reason", async () => {
+    // Both rules would refuse this call. The actor check must be the one that fires, or an agent
+    // learns it needs a better reason rather than that it may not decide this gate at all.
+    await expect(waive({ decidedBy: AGENT, comment: undefined })).rejects.toSatisfy(
+      (thrown) => codeOf(thrown) === GateEngineErrorCodes.GATE_ACTOR_NOT_PERMITTED,
+    );
   });
 });
