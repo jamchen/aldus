@@ -125,8 +125,20 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------------------------
-  # Publishing. Gated by a GitHub Environment, so the owner's approval is enforced by the
-  # platform rather than by anyone remembering to withhold a tag.
+  # Publishing. The `npm-publish` Environment carries **no required reviewers** — measured:
+  # `protection_rules[].type` returns `branch_policy` and nothing else. Its only rule is a
+  # deployment branch policy.
+  #
+  # This comment previously said the Environment enforced the owner's approval. That became false
+  # when the required reviewer was removed for ADR-0050, and the header above corrected the same
+  # claim in the same edit while this one, 120 lines down, was missed. Both were describing a
+  # control that no longer existed. What gates a publish now is: `needs: verify`, so every
+  # readiness check and the clean-consumer gate run first; `verify.outputs.publish`, which is false
+  # unless the merge bumped a version; `release-intent`, which refuses a version already on the
+  # registry; and `--tag next`, so nothing here can move `latest`.
+  #
+  # A false safety claim in a release pipeline is relied on rather than merely read (#173), so this
+  # block states what is measured rather than what was once configured.
   # ---------------------------------------------------------------------------------------------
   publish:
     name: publish to npm (next)
