@@ -124,3 +124,34 @@ describe("an undeclared newer shape", () => {
     expect(() => parseEvaluatorRun(run(REGRESSION_SCHEMA_VERSION))).not.toThrow();
   });
 });
+
+describe("adopter-owned metadata", () => {
+  it("is preserved through the parse rather than stripped", () => {
+    const parsed = parseDefectCorpus(
+      corpus(REGRESSION_SCHEMA_VERSION, { metadata: { labelProvenance: { source: "review-a" } } }),
+    ) as { metadata?: Record<string, unknown> };
+    // The sibling-key arrangement this replaces survived only because readers went around the
+    // parser to the raw JSON. A declared field is readable through it.
+    expect(parsed.metadata).toEqual({ labelProvenance: { source: "review-a" } });
+  });
+
+  it("is available on a run too", () => {
+    const parsed = parseEvaluatorRun(
+      run(REGRESSION_SCHEMA_VERSION, { metadata: { harness: "local" } }),
+    ) as { metadata?: Record<string, unknown> };
+    expect(parsed.metadata).toEqual({ harness: "local" });
+  });
+
+  it("does not reopen the door strictness closed", () => {
+    // An undeclared sibling is still refused — the point is that the two cases are separated,
+    // not that strictness was relaxed.
+    expectCode(
+      () => parseDefectCorpus(corpus(REGRESSION_SCHEMA_VERSION, { labelProvenance: {} })),
+      "ALDUS_CORPUS_MALFORMED",
+    );
+  });
+
+  it("is optional, so no existing record needs it", () => {
+    expect(() => parseDefectCorpus(corpus(REGRESSION_SCHEMA_VERSION))).not.toThrow();
+  });
+});

@@ -67,3 +67,4 @@ Rules:
 | [0048](0048-repeatability-is-declared-in-the-bundle.md)                                     | Repeatability is a property of the operation, declared in the bundle                       | Accepted | #169              |
 | [0049](0049-an-unestablished-remote-state-is-its-own-answer.md)                             | An unestablished remote state is its own answer                                            | Accepted | #169              |
 | [0050](0050-the-next-line-publishes-unattended.md)                                          | The `next` line publishes unattended; `latest` keeps its reviewer                          | Accepted | #173              |
+| [0051](0051-strictness-needs-a-declared-extension-point.md)                                 | Strictness needs a declared extension point                                                | Accepted | #186              |
