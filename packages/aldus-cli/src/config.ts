@@ -21,7 +21,7 @@
 import { pathToFileURL } from "node:url";
 
 import type { ArtifactArchive } from "@aldus-runtime/artifact-registry";
-import { AldusError } from "@aldus-runtime/core";
+import { AldusError, type ActorKind } from "@aldus-runtime/core";
 import type { GateDefinition } from "@aldus-runtime/gate-engine";
 import type { ReleaseAdapter } from "@aldus-runtime/release";
 import type {
@@ -111,6 +111,22 @@ export interface AldusConfig {
    * `aldus synthesis run` able to spend money, which is why it is an explicit act.
    */
   synthesisAdapter?: SynthesisAdapter;
+  /**
+   * Actor kinds that may accept or reject a take (contract §13.3). Omit for human-only.
+   *
+   * Declared here because the refusal names it. `ALDUS_TTS_TAKE_ACTOR_NOT_PERMITTED` told an
+   * adopter to "declare `permittedDecisionActorKinds` if that is the case here" while no
+   * composition could declare it — the option existed on the ledger, was documented, and
+   * `ledgerFor` never passed it. A remedy an adopter cannot perform is worse than no remedy: it
+   * sends them looking for a key that is not there.
+   *
+   * **Declaring it is granting away the human ear**, which §13.3 keeps human-owned "until a
+   * scoped evaluator is demonstrably reliable". Accepting a take *is* that judgement, and
+   * `ALDUS_ACTOR` is a string the caller chooses with nothing authenticating it — so an adopter
+   * that sets this makes "a person listened and approved" derivable from an environment variable.
+   * The clause is real and reachable; it is not a convenience.
+   */
+  takeDecisionActorKinds?: readonly ActorKind[];
   /** Spend grants in force, per plan (contract §13.2, §19.3). */
   spendGrants?: SpendGrantProvider;
   /** Where irreplaceable artifact bytes are kept (contract §8.1). */
@@ -168,6 +184,7 @@ const KNOWN_CONFIG_KEYS = [
   "stages",
   "subjects",
   "synthesisAdapter",
+  "takeDecisionActorKinds",
   "dispatchSpendGrants",
   "workers",
   "workflow",

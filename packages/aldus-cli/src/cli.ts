@@ -308,6 +308,9 @@ async function withConfig(
     ...(environment.spendGrants === undefined && config.spendGrants !== undefined
       ? { spendGrants: config.spendGrants }
       : {}),
+    ...(config.takeDecisionActorKinds !== undefined
+      ? { takeDecisionActorKinds: config.takeDecisionActorKinds }
+      : {}),
     ...(environment.archive === undefined && config.archive !== undefined
       ? { archive: config.archive }
       : {}),

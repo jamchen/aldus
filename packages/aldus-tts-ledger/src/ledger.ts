@@ -75,6 +75,10 @@ export interface TtsLedgerOptions {
    * omission (ADR-0034).
    */
   permittedDecisionActorKinds?: readonly ActorKind[];
+  // Supplied by a composition as `takeDecisionActorKinds`. The refusal below names *that* key,
+  // because it named this one for four days while no composition could pass it — an option
+  // documented as configurable that nobody can configure is decoration, and a remedy an adopter
+  // cannot perform is worse than no remedy: it sends them looking for a key that is not there.
   /** Injected for deterministic tests. Defaults to the real clock. */
   now?: () => Date;
   /** Injected for deterministic tests. Defaults to freshly minted ULID-based ids. */
@@ -418,8 +422,9 @@ export class TtsLedger {
         `Take "${takeId}" accepts decisions from ` +
           `[${this.#permittedDecisionActorKinds.join(", ")}], but "${decidedBy.id}" is a ` +
           `${decidedBy.kind}. Contract §13.3 keeps final performance approval human-owned until ` +
-          "a scoped evaluator is demonstrably reliable; declare " +
-          "`permittedDecisionActorKinds` if that is the case here.",
+          "a scoped evaluator is demonstrably reliable. If that is the case here, declare " +
+          "`takeDecisionActorKinds` in the workspace config — and note that doing so hands away " +
+          "the human ear, since accepting a take is that judgement.",
         {
           category: "policy",
           retryable: false,

@@ -15,7 +15,7 @@
 
 import { join } from "node:path";
 
-import type { ActorRef } from "@aldus-runtime/core";
+import type { ActorKind, ActorRef } from "@aldus-runtime/core";
 import {
   ArtifactRegistry,
   stageArtifactRecorder,
@@ -128,6 +128,25 @@ export interface AldusContextOptions {
    * can reach it without §13.2's authorization succeeding first — see `synthesis.ts`.
    */
   synthesisAdapter?: SynthesisAdapter;
+  /**
+   * Actor kinds that may accept or reject a take (contract §13.3). Defaults to `["human"]`.
+   *
+   * Threaded through to {@link TtsLedger} because it could not be supplied otherwise. The option
+   * exists so §13.3's "until a scoped evaluator is demonstrably reliable" is reachable — #100 had
+   * enforced the clause as an absolute, which protected the supervised case and made the "until"
+   * satisfiable by nobody — and `ledgerFor` never passed it, so the clause was unreachable again
+   * through every composition anyone actually writes.
+   *
+   * An option documented as configurable that no composition can supply is decoration. Found by
+   * an adopter as the fourth instance of that shape, after `workflow`, `agentBackend` and
+   * `workers`.
+   *
+   * The default stays human-only, and the asymmetry is deliberate: a supervised show that
+   * accidentally permits agents loses its human-ear guarantee **silently**, while an automated
+   * show that accidentally forbids them fails loudly on its first take. Opt out by declaration,
+   * never by omission (ADR-0034).
+   */
+  takeDecisionActorKinds?: readonly ActorKind[];
   /** Spend grants in force, per plan (contract §13.2, §19.3). */
   spendGrants?: SpendGrantProvider;
   /**
@@ -175,6 +194,7 @@ export class AldusContext {
   readonly #paidDispatch: RuntimePaidDispatchController;
   readonly #agentDispatch: RuntimeStageAgentDispatcher | undefined;
   readonly #ledgerStores: ReturnType<typeof fileLedgerStores>;
+  readonly #takeDecisionActorKinds: readonly ActorKind[] | undefined;
 
   constructor(options: AldusContextOptions) {
     this.workspace = options.workspace;
@@ -263,6 +283,7 @@ export class AldusContext {
     const stores = fileLedgerStores(this.workspace.layout, this.workspace.locks);
     this.ledgerLayout = stores.layout;
     this.#ledgerStores = stores;
+    this.#takeDecisionActorKinds = options.takeDecisionActorKinds;
   }
 
   /**
@@ -368,6 +389,9 @@ export class AldusContext {
       lexicon: this.#ledgerStores.lexicon,
       events: new LedgerEventStoreSink(this.workspace.events),
       ...(authorizer === undefined ? {} : { authorizer }),
+      ...(this.#takeDecisionActorKinds === undefined
+        ? {}
+        : { permittedDecisionActorKinds: this.#takeDecisionActorKinds }),
       now: this.now,
     });
   }

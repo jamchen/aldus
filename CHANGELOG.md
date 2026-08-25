@@ -12,6 +12,41 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.31 — 2026-08-26
+
+### Behaviour changes
+
+**A refusal named a remedy no adopter could perform.**
+`ALDUS_TTS_TAKE_ACTOR_NOT_PERMITTED` told an adopter to _"declare `permittedDecisionActorKinds`"_ —
+an option that exists on `TtsLedger`, is documented there, and that `ledgerFor` never passed. The
+CLI's config rejected the key as unknown, so **following the message was refused for having
+followed it.**
+
+`takeDecisionActorKinds` is now a config key, threaded to the ledger, and the refusal names it.
+
+The option exists so §13.3's _"until a scoped evaluator is demonstrably reliable"_ is reachable —
+`#100` had enforced the clause as an absolute, which protected the supervised case and left the
+condition satisfiable by nobody. The same clause has been configurable on gates the whole time; the
+take layer was the one place it was not. Default is unchanged and still human-only.
+
+**Declaring it hands away the human ear.** Accepting a take _is_ the §13.3 judgement, and
+`ALDUS_ACTOR` is a string the caller chooses with nothing authenticating it. The refusal says so
+now rather than presenting the key as a fix.
+
+### Fixed
+
+**The test that exists to prevent this could not detect it.** `config-reach.test.ts` was written
+after three instances of the same shape — a seam that exists, tests that pass, and no config field
+to reach it. Its per-capability case built `{ [field]: undefined }` and asserted the object had
+`field`: trivially true for any string, touching neither `KNOWN_CONFIG_KEYS` nor `loadConfig`,
+while its comment claimed _"a config carrying it must survive `loadConfig`'s unknown-key refusal"_.
+
+Removing a known key left every case green. The guard against this class had never worked, which is
+why the class recurred a fourth time.
+
+It now writes a real config module and loads it, with a control asserting an unknown key is still
+refused. The mutation that used to survive — deleting a key from the known list — now fails.
+
 ## 0.2.0-next.30 — 2026-08-26
 
 ### Behaviour changes

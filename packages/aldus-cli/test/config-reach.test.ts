@@ -1,7 +1,7 @@
 /**
  * Every capability an adopter is expected to supply must be reachable from a config file.
  *
- * Three integration gaps have now had one shape: the seam existed, its tests passed, and no
+ * Four integration gaps have now had one shape: the seam existed, its tests passed, and no
  * adopter could reach it because `AldusConfig` had no field for it.
  *
  * | gap | seam existed | config could reach it |
@@ -9,6 +9,11 @@
  * | #46 `workflow` | yes | no, until fixed |
  * | AF-14 `agentBackend` | yes | no, until #121 |
  * | #111 `workers` | yes | no, until #121 |
+ * | AF-18 `takeDecisionActorKinds` | yes | no, and **the refusal named it as the remedy** |
+ *
+ * The fourth is the worst of them: `ALDUS_TTS_TAKE_ACTOR_NOT_PERMITTED` told an adopter to declare
+ * the option, and declaring it produced `ALDUS_CONFIG_UNKNOWN_KEY`. Following the message was
+ * refused for having followed it. A remedy an adopter cannot perform is worse than no remedy.
  *
  * Each was found by an adopter trying to use a finished feature, and package tests passed every
  * time — because a `StageRunner` or `AldusContext` constructed directly in a test *can* be handed
@@ -18,9 +23,20 @@
  * check has to compare the two surfaces rather than exercise either one.
  */
 
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { loadConfig, type AldusConfig } from "../src/config.js";
+
+let dir: string | undefined;
+/** One throwaway directory for the config modules these cases write. */
+async function workspace(): Promise<string> {
+  dir ??= await mkdtemp(join(tmpdir(), "aldus-config-reach-"));
+  return dir;
+}
 
 /**
  * Capabilities an adopter supplies, and the `AldusConfig` field that carries each.
@@ -39,6 +55,7 @@ const ADOPTER_SUPPLIED: Record<string, keyof AldusConfig> = {
   workers: "workers",
   "agent backend": "agentBackend",
   "worker spend grants": "dispatchSpendGrants",
+  "take decision actor kinds": "takeDecisionActorKinds",
 };
 
 /**
@@ -56,11 +73,34 @@ const DELIBERATELY_NOT_IN_CONFIG: Record<string, string> = {
 };
 
 describe("every adopter-supplied capability has a config field (#121)", () => {
-  it.each(Object.entries(ADOPTER_SUPPLIED))("an adopter can supply %s", (_label, field) => {
-    // A type-level assertion made runtime-visible: the field must exist on the interface, and a
-    // config carrying it must survive `loadConfig`'s unknown-key refusal.
-    const config: AldusConfig = { [field]: undefined } as AldusConfig;
-    expect(Object.hasOwn(config, field)).toBe(true);
+  it.each(Object.entries(ADOPTER_SUPPLIED))("an adopter can supply %s", async (_label, field) => {
+    // **This assertion used to be decoration**, and that is why AF-18 happened a fourth time.
+    //
+    // It built `{ [field]: undefined }` and asserted the object had `field` — trivially true for
+    // any string, touching neither `KNOWN_CONFIG_KEYS` nor `loadConfig`. Its own comment claimed
+    // "a config carrying it must survive `loadConfig`'s unknown-key refusal", which it never
+    // checked: a description that had drifted from its mechanism, inside the test written to stop
+    // exactly this class. Removing a key from the known list left all cases green.
+    //
+    // Now it writes a real config module and loads it, which is the only thing that exercises the
+    // list an adopter actually collides with.
+    const file = join(await workspace(), `config-${field}.mjs`);
+    await writeFile(file, `export default { ${field}: undefined };\n`, "utf8");
+
+    await expect(
+      loadConfig(file, dirname(file), { workspace: dirname(file) }),
+    ).resolves.toBeDefined();
+  });
+
+  it("fails when a known key is removed, so the case above is not decoration again", async () => {
+    // The control on the control. A field that is *not* in KNOWN_CONFIG_KEYS must be refused, or
+    // the cases above would pass for any name and we would be back where we started.
+    const file = join(await workspace(), "config-unknown.mjs");
+    await writeFile(file, "export default { notAKnownKey: 1 };\n", "utf8");
+
+    await expect(loadConfig(file, dirname(file), { workspace: dirname(file) })).rejects.toThrow(
+      /notAKnownKey/,
+    );
   });
 
   it("refuses a key it does not know, which is why omissions are fatal rather than ignored", async () => {
