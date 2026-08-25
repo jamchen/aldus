@@ -164,8 +164,17 @@ node scripts/pack.mjs --out /tmp/aldus-release
 tar -tzf "/tmp/aldus-release/aldus-runtime-core-${VERSION}.tgz" | head -30
 ```
 
-Check by eye: `package/LICENSE`, `package/NOTICE`, `package/dist/`, nothing from `src/`, no
-fixtures you did not intend, no secrets.
+Check by eye: `package/LICENSE`, `package/NOTICE`, `package/dist/`, `package/src/`, no fixtures you
+did not intend, no secrets.
+
+> **`src/` belongs in the tarball.** This line previously said "nothing from `src/`", which
+> contradicted the rationale further down this same file — _"`src` ships, so source maps resolve"_
+> — and every package's `files` list, which names `src` deliberately. A releaser following the
+> checklist would have rejected the artifact the repository is built to produce. Two statements of
+> one policy in one document, and only one of them was true.
+>
+> What to actually look for: `src/` carries the TypeScript the maps in `dist/*.map` reference, and
+> nothing else. A stray fixture or scratch file under `src/` ships too.
 
 ### Step 6 — the clean-consumer gate
 
@@ -209,7 +218,13 @@ Merging the PR starts `Release`. It verifies, gates, packs, uploads the tarballs
 artifact, and then **publishes without waiting for anyone** — the reviewed merge _is_ the
 authorization (ADR-0050). There is no approval step and no second chance to inspect.
 
-So inspect **before** merging: the tarball artifact is on the PR's own CI run.
+So inspect **before** merging — and **the tarballs are not on the PR's CI run.** `Pack for
+inspection` and `Upload tarballs` exist only in the Release workflow, which runs _after_ the merge.
+The bytes you inspect are the ones you packed locally in Step 5, and that step is not optional for
+a release-bearing merge.
+
+If PR-attached artifacts would be better, that is a separate non-publishing change to `ci.yml`.
+Until it exists, do not go looking for an artifact that is not produced.
 
 The workflow publishes with `--tag next --access public --provenance`. **It never assigns
 `latest`.**
