@@ -56,11 +56,24 @@ For **each** of the twelve public packages, on npmjs.com:
 
 `Settings → Environments → New environment → npm-publish`
 
-- Add **yourself** as a required reviewer. This is what makes the publish gate a platform
-  control rather than a convention.
-- Restrict deployment branches and tags to `v*`.
+- **Deployment branches and tags: add `main` as a _branch_ policy.** Keep `v*` as a _tag_ policy
+  only if you still tag releases for other reasons — the workflow no longer publishes from a tag
+  (ADR-0050).
+- **No required reviewer.** ADR-0050 removed it deliberately, and this document told you to add
+  one for four days after that stopped being true.
 
 Without this environment the publish job cannot run at all.
+
+> **This section previously said to add yourself as a required reviewer and to restrict
+> deployments to `v*`.** Both were correct before ADR-0050 and wrong after it, and following them
+> would rebuild the exact failure this repository shipped for four days: the environment admitted
+> only _tag_ deployments while the workflow triggered on a `main` push, so the publish job was
+> skipped on every merge — eleven consecutive green Release runs in which the publish path never
+> executed once. Verified after the fix: `1b4c428` and `6d6ce9f` both show
+> `publish to npm (next) — success`.
+>
+> A runbook that teaches a topology the pipeline no longer has is worse than a stale one, because
+> someone follows it.
 
 ---
 
@@ -151,8 +164,17 @@ node scripts/pack.mjs --out /tmp/aldus-release
 tar -tzf "/tmp/aldus-release/aldus-runtime-core-${VERSION}.tgz" | head -30
 ```
 
-Check by eye: `package/LICENSE`, `package/NOTICE`, `package/dist/`, nothing from `src/`, no
-fixtures you did not intend, no secrets.
+Check by eye: `package/LICENSE`, `package/NOTICE`, `package/dist/`, `package/src/`, no fixtures you
+did not intend, no secrets.
+
+> **`src/` belongs in the tarball.** This line previously said "nothing from `src/`", which
+> contradicted the rationale further down this same file — _"`src` ships, so source maps resolve"_
+> — and every package's `files` list, which names `src` deliberately. A releaser following the
+> checklist would have rejected the artifact the repository is built to produce. Two statements of
+> one policy in one document, and only one of them was true.
+>
+> What to actually look for: `src/` carries the TypeScript the maps in `dist/*.map` reference, and
+> nothing else. A stray fixture or scratch file under `src/` ships too.
 
 ### Step 6 — the clean-consumer gate
 
@@ -171,33 +193,60 @@ Write them before publishing, while you still remember what changed. Cover: what
 changed in a public API, known limitations with issue numbers, and the fact that this is a `next`
 release not yet promoted to `latest`.
 
-### Step 8 — commit, tag, push
+### Step 8 — open a pull request, and get the owner's word
+
+**`main` is protected and you cannot push to it.** `enforce_admins` is on, so this holds for the
+owner too. The bump goes in a pull request like any other change.
 
 ```bash
 git add -A
 git commit -m "release: ${VERSION}"
-git tag "v${VERSION}"
-git push origin main --follow-tags
+git push -u origin "release/${VERSION}"
+gh pr create --title "release: ${VERSION}"
 ```
 
-The tag must match the manifests exactly; the workflow refuses the run otherwise.
+Say in the PR body that merging **will publish**. A release-bearing merge requires the owner's
+explicit authorization in an interactive session — not a GitHub comment, because every agent
+session authenticates as `jamchen` and an `OWNER RULING` marker cannot prove who typed it.
 
-### Step 9 — approve the publish
+Tagging is optional and **publishes nothing**. Before ADR-0050 a tag push was the release trigger;
+it is not one now.
 
-Pushing the tag starts `Release`. It verifies, gates, packs, and uploads the tarballs as a
-workflow artifact, then **waits** on the `npm-publish` environment.
+### Step 9 — the merge is the publish
 
-Download the tarball artifact and inspect it before approving. Once you approve, publishing
-happens and cannot be undone.
+Merging the PR starts `Release`. It verifies, gates, packs, uploads the tarballs as a workflow
+artifact, and then **publishes without waiting for anyone** — the reviewed merge _is_ the
+authorization (ADR-0050). There is no approval step and no second chance to inspect.
+
+So inspect **before** merging — and **the tarballs are not on the PR's CI run.** `Pack for
+inspection` and `Upload tarballs` exist only in the Release workflow, which runs _after_ the merge.
+The bytes you inspect are the ones you packed locally in Step 5, and that step is not optional for
+a release-bearing merge.
+
+If PR-attached artifacts would be better, that is a separate non-publishing change to `ci.yml`.
+Until it exists, do not go looking for an artifact that is not produced.
 
 The workflow publishes with `--tag next --access public --provenance`. **It never assigns
 `latest`.**
+
+> **Read the `publish to npm (next)` job's own conclusion, never the run's.** A run whose publish
+> job was _skipped_ still reports `success`, and did so eleven times in a row while the path was
+> broken. `gh run view <id> --json jobs` is the answer; the green tick beside the run is not.
 
 ### Step 10 — verify what landed
 
 ```bash
 npm view @aldus-runtime/core dist-tags
 ```
+
+**`dist-tags`, not `version`.** `npm view <pkg> version` returns whatever `latest` points at, so
+against a prerelease line it reports the _previous_ release and reads as "the publish did not
+land". The tell is that every package shows the same number as `latest`.
+
+Check the **whole set**, not one package. A publish that fails partway leaves some packages at the
+new version and some not, and that cannot be undone — a republish of the ones that landed is
+refused by design. Know which succeeded before deciding anything, and treat a partial publish as
+the owner's call rather than a retry.
 
 Expect `next` to be `${VERSION}`, and **`latest` to be unchanged** — it stays wherever the last
 deliberate promotion left it (ADR-0023). Compare it against the snapshot the workflow took, not
@@ -209,6 +258,10 @@ mkdir /tmp/aldus-check && cd /tmp/aldus-check && npm init -y
 npm i @aldus-runtime/cli@next
 npx aldus --help
 ```
+
+**Then exercise the thing this release changed**, not only that the binary starts. `dist-tags` says
+a version exists; only an install that runs the change says the change is in it, and a green
+publish job says neither. This is the last point at which a wrong artifact is still cheap to find.
 
 Check the package page shows the Apache-2.0 licence, the repository link, and the provenance
 badge.

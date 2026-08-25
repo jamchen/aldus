@@ -78,6 +78,16 @@ that an omission cannot read as a permission.
 | `AgentExecutionInput` requires `operation`, `expectation`, `effectKey` | `@aldus-runtime/services`     | See the three notes below.                                                                                                                                                                                                |
 | `StageWorkerRequest` requires `spend: DispatchSpendDeclaration`        | `@aldus-runtime/stage-runner` | The stage states what it is asking for — and **not** `grantId`, `authorizationId`, or attribution, which the composed Runtime resolves. A caller that names its own authorization can name one that did not authorize it. |
 
+<!-- Machine-readable coverage for check-breaking-notes.mjs. Comments, so they do not render. -->
+<!-- breaking: aldus-stage-runner:AgentBackend.version -->
+<!-- breaking: aldus-gate-engine:grantLimitsDigest -->
+<!-- breaking: aldus-gate-engine:SpendGrant.scope -->
+<!-- breaking: aldus-services:AgentExecutionOptions.spend -->
+<!-- breaking: aldus-services:AgentExecutionInput.operation -->
+<!-- breaking: aldus-services:AgentExecutionInput.expectation -->
+<!-- breaking: aldus-services:AgentExecutionInput.effectKey -->
+<!-- breaking: aldus-stage-runner:StageWorkerRequest.spend -->
+
 **`expectation` replaced `estimated?: Money`.** Absence used to mean both _"nobody stated one"_ and
 _"nothing will be charged"_, so an unestimated effect was dispatched **with no spend check at all**
 and the two readings were indistinguishable from outside. Three arms: `{ kind: "free" }` (no grant,

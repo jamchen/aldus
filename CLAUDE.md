@@ -353,6 +353,14 @@ and a pinned adopter is, by construction, the last party to know and has no way 
 information. A detection that only the last party can perform has to move to the other side of the
 line.
 
+Its pass condition is bound to **this tree's version** and requires **every** reported symbol to be
+named in that section, or waived explicitly with a reason. The first version accepted any `BREAKING`
+string in the newest two sections, which passes when the heading belongs to the _previous_ release,
+when one finding of eight is documented, and when a heading names none of the symbols under it. That
+made the green easier to earn than the tool's own failure message — _"the migration for each"_ — and
+a check whose pass is weaker than its red text is the first category living inside the tool built for
+the third. Found by review, not by use.
+
 Its own first run produced two false positives, both fixed and both recorded in the source: a
 one-line `type` alias whose body was taken from the _following_ declaration, and Zod-inferred types
 where optionality lives in `z.ZodOptional<…>` rather than in a `?`, so every optional schema field
