@@ -69,3 +69,53 @@ describe("a gate's class is not its state", () => {
     expect(out).not.toContain("stops work");
   });
 });
+
+describe("status says why a gate is stuck", () => {
+  it("shows the explanation the engine composed for an unproduced subject", () => {
+    // The engine writes this sentence precisely so `pending` is not read as "nobody has got to it
+    // yet". An adopter hit an unproduced subject three times in one run and read all three that
+    // way, because the sentence never left the report.
+    const out = renderStatus(
+      report([
+        gate({
+          gateId: "caption.sync",
+          state: "pending",
+          blocking: true,
+          missingSubjects: ["subtitle/sync-report"],
+          explanation:
+            'Gate "caption.sync" has no recorded decision, and "subtitle/sync-report" has not ' +
+            "been supplied: nothing has produced what the approval would bind.",
+        }),
+      ]),
+    );
+
+    expect(out).toContain("nothing has produced");
+  });
+
+  it("names the missing subjects and the upstream blocker", () => {
+    const out = renderStatus(
+      report([
+        gate({
+          gateId: "release.upload",
+          state: "blocked_upstream",
+          blocking: true,
+          missingSubjects: ["release/receipt"],
+          blockedBy: ["caption.sync"],
+        }),
+      ]),
+    );
+
+    expect(out).toContain("not supplied: release/receipt");
+    expect(out).toContain("blocked by: caption.sync");
+  });
+
+  it("stays quiet about a satisfied gate, so the line that matters is still read", () => {
+    // The control. Noise is how an explanation stops being read, so a gate that is fine says
+    // nothing beyond its row.
+    const out = renderStatus(
+      report([gate({ state: "satisfied", blocking: false, explanation: "should not appear" })]),
+    );
+
+    expect(out).not.toContain("should not appear");
+  });
+});

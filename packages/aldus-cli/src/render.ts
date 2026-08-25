@@ -149,6 +149,26 @@ function renderRunReport(report: RunReport): string[] {
       // passing gate in their repository reported as advisory, and none of them is.
       const stops = gate.blocking ? "  — stops work" : "";
       lines.push(`  ${gate.gateId}  ${gate.state}  (${gate.enforcement})${stops}`);
+
+      // **Why** it is stuck, which the engine already composed and this dropped.
+      //
+      // A gate binding a subject nothing produces reports `pending` — correctly, it is pending —
+      // and `pending` reads as "nobody has got to it yet". The engine writes the distinguishing
+      // sentence for exactly that case: "nothing has produced what the approval would bind". An
+      // adopter hit an unproduced subject three times in one run and read all three as a step not
+      // yet reached, because the sentence never left the report.
+      //
+      // Shown only where the operator needs it. A satisfied gate explaining itself is noise, and
+      // noise is how the line that matters stops being read.
+      if (gate.state !== "satisfied" && gate.state !== "waived") {
+        if (gate.explanation !== undefined) lines.push(`      ${gate.explanation}`);
+        if (gate.missingSubjects !== undefined && gate.missingSubjects.length > 0) {
+          lines.push(`      not supplied: ${gate.missingSubjects.join(", ")}`);
+        }
+        if (gate.blockedBy !== undefined && gate.blockedBy.length > 0) {
+          lines.push(`      blocked by: ${gate.blockedBy.join(", ")}`);
+        }
+      }
     }
   }
 

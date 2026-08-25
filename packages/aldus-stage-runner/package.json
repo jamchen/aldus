@@ -1,6 +1,6 @@
 {
   "name": "@aldus-runtime/stage-runner",
-  "version": "0.2.0-next.27",
+  "version": "0.2.0-next.28",
   "type": "module",
   "description": "Aldus Stage Runner — stage definitions, attempt lifecycle, retry and idempotency policy, cancellation, and gate halts.",
   "license": "Apache-2.0",
@@ -33,13 +33,13 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "0.2.0-next.27",
-    "@aldus-runtime/file-store": "0.2.0-next.27",
+    "@aldus-runtime/core": "0.2.0-next.28",
+    "@aldus-runtime/file-store": "0.2.0-next.28",
     "@types/node": "^26.2.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "0.2.0-next.27",
+    "@aldus-runtime/testkit": "0.2.0-next.28",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },

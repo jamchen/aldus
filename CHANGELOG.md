@@ -12,6 +12,37 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.28 — 2026-08-25
+
+### Behaviour changes
+
+**`aldus status` now says why a gate is stuck.**
+
+The engine already composed the sentence. A gate binding a subject nothing has produced reports
+`pending` — correctly, it _is_ pending — and the engine writes the line that distinguishes it from
+"nobody has got to it yet":
+
+> …has not been supplied: nothing has produced what the approval would bind.
+
+That explanation, along with `missingSubjects` and `blockedBy`, never left the report: the gate row
+printed only its id, state and class. An adopter hit an unproduced bound subject **three times in
+one run** and read all three as a step not yet reached.
+
+```
+  caption.sync    pending  (blocking) — stops work
+      Gate "caption.sync" has no recorded decision, and "subtitle/sync-report" has not been
+      supplied: nothing has produced what the approval would bind.
+      not supplied: subtitle/sync-report
+  release.upload  blocked_upstream  (blocking) — stops work
+      blocked by: caption.sync
+```
+
+Shown only for a gate that is neither satisfied nor waived. A satisfied gate explaining itself is
+noise, and noise is how the line that matters stops being read.
+
+The engine is unchanged, as it was for `next.27`. Both releases are the same defect one field
+apart: the report carried what the operator needed and the renderer did not print it.
+
 ## 0.2.0-next.27 — 2026-08-25
 
 ### Behaviour changes
