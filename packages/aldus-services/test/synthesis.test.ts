@@ -671,3 +671,99 @@ describe("synthesis reserves before dispatch (#155 step 4)", () => {
     expect(second.outcome).toBe("refused");
   });
 });
+
+describe("a free adapter does not block the segments after the first (#199-adjacent, adopter rehearsal)", () => {
+  it("settles a declared-free take instead of leaving the grant indeterminate", async () => {
+    // Measured by the first adopter on a real rehearsal: a local TTS adapter returning
+    // `incurredCharge: false` produced one take and then every later segment was refused with
+    // "remaining authorization is indeterminate: 1 unresolved charge(s) of unknown size". The
+    // adapter had said what happened; the runtime read the absence of a cost record as silence.
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.declares = { incursCharge: false };
+    harness.synthesis.costRecordId = undefined;
+    harness.synthesis.observation = { incurredCharge: false, costs: [] };
+
+    const first = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    expect(first.outcome).toBe("ok");
+
+    // The whole point: a second segment through the same grant.
+    const second = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    expect(second.outcome).toBe("ok");
+  });
+
+  it("declared free reserves nothing at all, so there is nothing to leave unresolved", async () => {
+    // `{ kind: "free" }` requires no grant and creates no reservation (ADR-0044), which is why the
+    // declaration fixes the adopter's blockage at the root rather than settling it afterwards.
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.declares = { incursCharge: false };
+    harness.synthesis.costRecordId = undefined;
+    harness.synthesis.observation = { incurredCharge: false, costs: [] };
+
+    await harness.services.synthesiseSegment({ plan, segmentId: "seg-1", actor: OPERATOR });
+
+    const records = await harness.context.workspace.runs.listRecords(RUN_ID, "costs");
+    expect(records).toHaveLength(0);
+  });
+
+  it("an adapter that only knows afterwards settles free rather than going unknown", async () => {
+    // The second arm, and the one an adapter that cannot declare in advance lands on: it reserved
+    // because nothing said it was free, and then reported `incurredCharge: false`. That is a
+    // statement, not silence, and it settles to a `free` record rather than committing
+    // authorization nobody spent.
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.costRecordId = undefined;
+    harness.synthesis.observation = { incurredCharge: false, costs: [] };
+
+    const first = await harness.services.synthesiseSegment({
+      plan,
+      segmentId: "seg-1",
+      actor: OPERATOR,
+    });
+    expect(first.outcome).toBe("ok");
+
+    const records = await harness.context.workspace.runs.listRecords(RUN_ID, "costs");
+    expect(records).toHaveLength(1);
+    expect(records[0]?.billingStatus).toBe("free");
+    expect(records[0]?.actual?.amount).toBe("0");
+    // Derived from the reservation, so a settlement retry cannot duplicate it.
+    expect(records[0]?.costId).toBe(`${records[0]?.reservationId}:cost:0`);
+
+    // And the grant is not indeterminate afterwards.
+    expect(
+      (await harness.services.synthesiseSegment({ plan, segmentId: "seg-1", actor: OPERATOR }))
+        .outcome,
+    ).toBe("ok");
+  });
+
+  it("still leaves silence unresolved, so the fix did not widen into the case it must not", async () => {
+    // The control. An adapter that says nothing is unchanged: uncertainty, not zero.
+    const plan = aPlan();
+    const harness = await armed({ plan });
+    await approveSynthesis(harness);
+    harness.synthesis.costRecordId = undefined;
+    harness.synthesis.observation = { costs: [] };
+
+    expect(
+      (await harness.services.synthesiseSegment({ plan, segmentId: "seg-1", actor: OPERATOR }))
+        .outcome,
+    ).toBe("ok");
+    expect(
+      (await harness.services.synthesiseSegment({ plan, segmentId: "seg-1", actor: OPERATOR }))
+        .outcome,
+    ).toBe("refused");
+  });
+});
