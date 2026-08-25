@@ -40,6 +40,52 @@ Not on `CostRecord`: a free execution writes no cost record, so an artifact prod
 would have no producer identity — and a `source` artifact is exactly as irreproducible whether or
 not anyone was billed.
 
+## 0.2.0-next.25 — 2026-08-25
+
+**A free synthesis adapter could produce exactly one take per grant.** Measured by the first
+adopter on a real rehearsal, and it made the free rehearsal path — the point of which is to
+exercise production without spending — unusable past its first segment.
+
+### Behaviour changes
+
+**A synthesis adapter can declare that it incurs no charge.**
+`SynthesisAdapterCapabilities.incursCharge: false` makes the expectation `{ kind: "free" }`, which
+requires no grant and creates no reservation.
+
+The synthesis path had only two arms — an estimate, or `unestimated` when none was present — so **a
+genuinely free adapter was indistinguishable from a paid one nobody estimated**, and a grant
+without `unestimatedExecution` refused it. That is the exact ambiguity `CostExpectation`'s closed
+shape was introduced to remove, surviving in the one path where the free case is real.
+
+Declared rather than inferred from a zero estimate: a zero estimate **predicts** that nothing will
+be charged; this **states** that nothing can be. An adopter reduced to writing `estimatedCost: 0`
+for a local engine noted the difference themselves, and this package already draws that line for
+the unknown case — _"Zero is a numerical assertion; this is an uncertainty state."_
+
+**A result reporting `incurredCharge: false` now settles as a free charge instead of going
+unknown.** An adapter reporting no charge has _said what happened_; it simply has no cost record to
+hand over. Reading that as "reported nothing about billing" left one unresolved charge of unknown
+size standing against the grant, so remaining authorization became **indeterminate** and every
+later segment was refused:
+
+```
+Remaining authorization on grant "…" is indeterminate: 1 unresolved charge(s)
+of unknown size stand against it.
+```
+
+Settlement writes a `billingStatus: "free"` record with a zero amount — not an invented figure, the
+adapter stated it — and `free` consumes no budget, so the reservation releases. This closes the
+round trip: expressing `free` at plan time alone would have left the blockage in place for an
+adapter that can only report after the fact.
+
+**Silence is unchanged.** An adapter that says nothing at all about billing still leaves the
+reservation unresolved and the grant indeterminate. That is uncertainty, not zero, and the arm
+above exists to stop a _declaration_ arriving as silence.
+
+This is the third instance of one rule reaching one entry point and not another: the spend service
+already records that _"truthfully reported `billingStatus: \"free\"` was recorded as an
+unauthorized charge"_, fixed there and not inherited here.
+
 ## 0.2.0-next.21 — 2026-08-25
 
 Published from `main` (ADR-0050). **These notes were written after the fact**: the release shipped
