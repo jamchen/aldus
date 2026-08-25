@@ -10,35 +10,81 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.2.0-next.21 — 2026-08-25
+
+Published from `main` (ADR-0050). **These notes were written after the fact**: the release shipped
+describing only the `@aldus-runtime/regression` change below, and an adopter pinned exactly found
+the rest by compiling. That is precisely the failure this file's own preamble names, so the whole
+surface is recorded here rather than the part that was remembered.
+
+`SCHEMA_VERSION` moved **1.8 → 1.11** across the versions this release collapses — three MINOR
+bumps, additive only (ADR-0003). No record shape you already hold becomes invalid.
+
+### BREAKING — signatures on the paid-spend and agent-execution path
+
+This release lands `#155`'s reservation and settlement protocol, ADR-0044's `CostExpectation`, and
+ADR-0045 through ADR-0047. Six required fields appeared, all on the money path. Every one exists so
+that an omission cannot read as a permission.
+
+| what changed                                                           | where                         | migration                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AgentBackend` requires `version`                                      | `@aldus-runtime/stage-runner` | Name the backend's version. A reservation records **which version was dispatched under an enforced ceiling**, and that evidence cannot be reconstructed by re-reading today's capabilities.                               |
+| `grantLimitsDigest` removed                                            | `@aldus-runtime/gate-engine`  | Use `grantTermsDigest`. Renamed because scope is now a term: widening a grant from agent-only to TTS-capable changes what an approval permits exactly as raising a ceiling does.                                          |
+| `SpendGrant` requires `scope: { operations }`                          | `@aldus-runtime/gate-engine`  | List the operations the grant authorizes. **Adopter-defined open strings** — Core names none. Digest-bound and sorted, so adding one invalidates the approval.                                                            |
+| `AgentExecutionOptions` requires `spend`                               | `@aldus-runtime/services`     | Supply the `SpendService`. Without it an execution cannot reserve, and previously it dispatched anyway.                                                                                                                   |
+| `AgentExecutionInput` requires `operation`, `expectation`, `effectKey` | `@aldus-runtime/services`     | See the three notes below.                                                                                                                                                                                                |
+| `StageWorkerRequest` requires `spend: DispatchSpendDeclaration`        | `@aldus-runtime/stage-runner` | The stage states what it is asking for — and **not** `grantId`, `authorizationId`, or attribution, which the composed Runtime resolves. A caller that names its own authorization can name one that did not authorize it. |
+
+**`expectation` replaced `estimated?: Money`.** Absence used to mean both _"nobody stated one"_ and
+_"nothing will be charged"_, so an unestimated effect was dispatched **with no spend check at all**
+and the two readings were indistinguishable from outside. Three arms: `{ kind: "free" }` (no grant,
+no reservation), `{ kind: "estimated", amount }` (grant required, estimate reserved), and
+`{ kind: "unestimated" }` (grant required, **and its policy must permit it**). Declaring `free` is
+now a statement someone makes rather than a field they omitted.
+
+**`unestimatedExecution` on the grant is what permits the third arm**, and **absent reads as
+`"refuse"`**. An existing grant refuses every unestimated dispatch until someone sets
+`"reserve_max_per_request"` and a meaningful `maxPerRequest`. It lives on the grant, not on an
+execution input, because a caller that could assert its own permission is the shape `#107` exists
+to prevent — and it is digest-bound, so changing it invalidates the approval.
+
+**`effectKey` identifies the independently billed effect (`#154`, ADR-0043).** Retrying the same
+effect resolves to the **same** reservation rather than reserving twice, which is what makes
+`reserve` idempotent. You supply `billingEffectKey`; the runtime namespaces it by dispatcher
+identity and version. Derive it from what makes an effect _the same effect if repeated_ — never
+from a timestamp or a fresh id, which reserves twice for one charge. The same key under different
+terms is refused rather than silently re-reserved.
+
 ### Behaviour changes
 
-**`@aldus-runtime/regression` now refuses a corpus or evaluator run declaring a schema version
-newer than the runtime implements.** `parseDefectCorpus` and `parseEvaluatorRun` previously
-validated `schemaVersion` for _shape_ only — any `MAJOR.MINOR` string was accepted, including one
-from a future release. A shape check with no value check is worse than none: the field looks
-validated and guarantees nothing.
-
-The refusal is `ALDUS_SCHEMA_VERSION_UNSUPPORTED`. If you feed either parser records produced by a
-newer runtime, calls that used to return now throw.
+**`@aldus-runtime/regression` refuses a corpus or evaluator run declaring a schema version newer
+than the runtime implements.** `parseDefectCorpus` and `parseEvaluatorRun` previously validated
+`schemaVersion` for _shape_ only — any `MAJOR.MINOR` string was accepted, a future release's
+included. A shape check with no value check is worse than none: the field looks validated and
+guarantees nothing. The refusal is `ALDUS_SCHEMA_VERSION_UNSUPPORTED`.
 
 **Both record schemas are strict: an unknown key is refused rather than stripped.** Previously a
 record from a later runtime parsed and its added fields were silently discarded, so the caller
-received an object that looked complete and was not — a read path returning a wrong answer with no
-signal. Records carrying extra keys now throw `ALDUS_CORPUS_MALFORMED`.
+received an object that looked complete and was not. Records carrying extra keys now throw
+`ALDUS_CORPUS_MALFORMED`. **If you hold committed corpora with extra keys, they will refuse at this
+bump** — cheap to grep for, expensive to discover during a paid run.
 
 An **older** record still parses. A record has to be readable in order to be upgraded, so a parser
 that refused everything it did not stamp would make a corpus unable to outlive a release — the
-property the version field exists for. Whether an older run is _comparable_ to today's is policy
-and stays with the caller.
+property the version field exists for. Whether an older run is _comparable_ is policy and stays
+with the caller.
 
 ### Features
 
 **`compareSchemaVersion(recordVersion)`** returns `"older" | "same" | "newer"` against
-`REGRESSION_SCHEMA_VERSION`, and can be asked before parsing. It exists so the comparison is not
-reimplemented per caller — that is the part that drifts. Minor versions compare numerically, so
-`1.10` is correctly newer than `1.9`.
+`REGRESSION_SCHEMA_VERSION`, and can be asked before parsing. Minor compares numerically, so `1.10`
+is newer than `1.9`.
 
-No record shape changed, so `SCHEMA_VERSION` does not move.
+The decisions behind the spend work are ADR-0044 (spend is reserved before the effect), ADR-0045
+(authority originates at a boundary), ADR-0046 (a Worker is a paid gateway) and ADR-0047 (a Stage
+dispatches an agent explicitly).
 
 ## 0.2.0-next.0 — 2026-08-18
 
