@@ -241,6 +241,23 @@ export interface SynthesisAdapterCapabilities {
    * sent.
    */
   maySubstitute?: boolean;
+  /**
+   * Whether this adapter incurs a provider charge at all.
+   *
+   * `false` makes the synthesis path able to say `{ kind: "free" }`. Without it the expectation was
+   * `unestimated` whenever no estimate was present, so **a genuinely free adapter was
+   * indistinguishable from a paid one nobody estimated** — and a grant that does not permit
+   * unestimated execution refused it. That is the exact ambiguity `CostExpectation`'s closed shape
+   * was introduced to remove, surviving in the one path where the free case is real (ADR-0044).
+   *
+   * Declared by the adapter rather than inferred from a zero estimate, because a zero estimate is
+   * a *prediction* that nothing will be charged and this is a *statement* that nothing can be. An
+   * adopter reduced to writing `estimatedCost: 0` for a local engine said so themselves: it is
+   * honest and it is not the same statement.
+   *
+   * Absent means unknown, and is treated as before.
+   */
+  incursCharge?: boolean;
 }
 
 /** Supplies the spend grant in force for a plan (contract §13.2, §19.3). */
@@ -484,10 +501,13 @@ export class SynthesisGateway {
           (take) => take.segmentId === segment.segmentId,
         ).length + 1
       }`,
+      // Three arms, because the free case is real here and absence used to swallow it.
       expectation:
-        segment.estimatedCost === undefined
-          ? { kind: "unestimated" }
-          : { kind: "estimated", amount: segment.estimatedCost },
+        declared?.incursCharge === false
+          ? { kind: "free" }
+          : segment.estimatedCost === undefined
+            ? { kind: "unestimated" }
+            : { kind: "estimated", amount: segment.estimatedCost },
     });
     if (reserveOutcome?.reserved === false && reserveOutcome.reason === "refused") {
       return { permitted: false, explanation: reserveOutcome.explanation };
@@ -566,9 +586,37 @@ export class SynthesisGateway {
           takeId,
         });
         costIds = settled.costs.map((record) => record.costId);
+      } else if (incurredCharge === false) {
+        // **Declared free is not silence.** An adapter that returns `incurredCharge: false` — or a
+        // zero `charged` — has said what happened; it simply had no cost record to hand over.
+        // Reading that as "reported nothing" left one unresolved charge of unknown size standing
+        // against the grant, which made `remaining` indeterminate and refused **every later
+        // segment**. Measured by an adopter: a local synthesis adapter could produce exactly one
+        // take per grant, which made the free rehearsal path unusable past its first segment.
+        //
+        // The truthful settlement is a `free` cost record. It is not an invented amount: the
+        // adapter stated it, `isUncharged` counts `free` as consuming nothing, and the reservation
+        // releases rather than committing authorization nobody spent.
+        const settled = await this.#spend.settle(
+          reservation,
+          [
+            {
+              provider: this.#adapter.id,
+              operation: "tts.synthesize",
+              actual: { amount: "0", currency: reservation.reserved.currency },
+              billingStatus: "free",
+              ...(outcome.providerRequestId === undefined
+                ? {}
+                : { providerRequestId: outcome.providerRequestId }),
+            },
+          ],
+          { authorizationId: permit.decisionId, takeId },
+        );
+        costIds = settled.costs.map((record) => record.costId);
       } else {
-        // Dispatched and reported nothing about billing. That is uncertainty, not zero: the
-        // reservation stays committed and the effect non-retryable until it is reconciled.
+        // Dispatched and said **nothing** about billing. That is uncertainty, not zero: the
+        // reservation stays committed and the effect non-retryable until it is reconciled. The arm
+        // above is what keeps a declaration from arriving here as silence.
         await this.#spend.markUnknown(reservation);
         costIds = [];
       }
