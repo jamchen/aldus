@@ -26,7 +26,7 @@ export type Reconstructability = (typeof RECONSTRUCTABILITY)[number];
  *
  * Field list is transcribed verbatim from contract §8.
  */
-export const artifactRefSchema = z
+export const artifactRefSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -164,7 +164,7 @@ export const artifactRefSchema = z
   });
 
 /** @see artifactRefSchema */
-export type ArtifactRef = z.infer<typeof artifactRefSchema>;
+export type ArtifactRef = z.infer<typeof artifactRefSchemaBase>;
 
 /**
  * Why an artifact's producer provenance is incomplete, or `undefined` if it is not.

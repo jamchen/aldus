@@ -14,13 +14,13 @@
 import { AldusError } from "../errors.js";
 import { validateWith } from "../validate.js";
 import { KnowledgeErrorCodes } from "./errors.js";
-import { knowledgePackManifestSchema, type KnowledgePackManifest } from "./manifest.js";
+import { knowledgePackManifestSchemaBase, type KnowledgePackManifest } from "./manifest.js";
 
 /**
  * Decodes manifest source text into an untyped document.
  *
  * Returns the decoded document, or throws. The result is validated against
- * {@link knowledgePackManifestSchema} afterwards, so a parser is not responsible for shape.
+ * {@link knowledgePackManifestSchemaBase} afterwards, so a parser is not responsible for shape.
  */
 export type ManifestSourceParser = (source: string) => unknown;
 
@@ -110,10 +110,14 @@ export function parsePackManifestDocument(
   document: unknown,
   sourceRef?: string,
 ): KnowledgePackManifest {
-  const result = validateWith(knowledgePackManifestSchema, normalizeManifestDocument(document), {
-    code: KnowledgeErrorCodes.MANIFEST_INVALID,
-    subject: "KnowledgePackManifest",
-  });
+  const result = validateWith(
+    knowledgePackManifestSchemaBase,
+    normalizeManifestDocument(document),
+    {
+      code: KnowledgeErrorCodes.MANIFEST_INVALID,
+      subject: "KnowledgePackManifest",
+    },
+  );
   if (result.ok) return result.value;
 
   const error = new AldusError(result.error.code, result.error.message, {

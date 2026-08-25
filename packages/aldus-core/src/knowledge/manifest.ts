@@ -62,7 +62,7 @@ export type PackDependency = z.infer<typeof packDependencySchema>;
  * version, scope, authority, dependencies, precedence, included resources, tests or fixtures,
  * and source revision. §9.3's negative knowledge gets a home of its own.
  */
-export const knowledgePackManifestSchema = z
+export const knowledgePackManifestSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -158,4 +158,4 @@ export const knowledgePackManifestSchema = z
   });
 
 /** @see knowledgePackManifestSchema */
-export type KnowledgePackManifest = z.infer<typeof knowledgePackManifestSchema>;
+export type KnowledgePackManifest = z.infer<typeof knowledgePackManifestSchemaBase>;

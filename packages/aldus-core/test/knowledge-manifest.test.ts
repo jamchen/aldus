@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { AldusError } from "../src/errors.js";
 import { KnowledgeErrorCodes } from "../src/knowledge/errors.js";
-import { knowledgePackManifestSchema } from "../src/knowledge/manifest.js";
+import { knowledgePackManifestSchema } from "../src/index.js";
 import {
   normalizeManifestDocument,
   parsePackManifest,

@@ -34,7 +34,7 @@ export type GateDecisionValue = (typeof GATE_DECISIONS)[number];
  * Field list is transcribed verbatim from contract §13, plus `schemaVersion` and `decisionId`
  * per GitHub issue #1.
  */
-export const gateDecisionSchema = z
+export const gateDecisionSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -95,4 +95,4 @@ export const gateDecisionSchema = z
   });
 
 /** @see gateDecisionSchema */
-export type GateDecision = z.infer<typeof gateDecisionSchema>;
+export type GateDecision = z.infer<typeof gateDecisionSchemaBase>;

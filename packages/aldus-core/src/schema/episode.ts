@@ -14,7 +14,7 @@ import { nonEmptyString, schemaVersionString } from "./common.js";
  *
  * Field list is transcribed verbatim from contract §6.1.
  */
-export const episodeRefSchema = z
+export const episodeRefSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -55,4 +55,4 @@ export const episodeRefSchema = z
   });
 
 /** @see episodeRefSchema */
-export type EpisodeRef = z.infer<typeof episodeRefSchema>;
+export type EpisodeRef = z.infer<typeof episodeRefSchemaBase>;

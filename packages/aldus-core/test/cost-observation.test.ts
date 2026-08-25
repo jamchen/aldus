@@ -11,7 +11,8 @@
 import { describe, expect, it } from "vitest";
 
 import { SCHEMA_VERSION } from "../src/schema-version.js";
-import { costObservationSchema, costRecordSchema } from "../src/schema/cost.js";
+import { costObservationSchema } from "../src/schema/cost.js";
+import { costRecordSchema } from "../src/index.js";
 
 /** Fields the Runtime states, which an observation must therefore not carry. */
 const RUNTIME_ATTRIBUTION = [
