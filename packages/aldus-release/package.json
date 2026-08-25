@@ -1,8 +1,8 @@
 {
   "name": "@aldus-runtime/release",
-  "version": "0.2.0-next.20",
+  "version": "0.2.0-next.21",
   "type": "module",
-  "description": "Aldus Release \u2014 release bundles, resumable idempotent operations, adapter contracts, and external-state reconciliation.",
+  "description": "Aldus Release — release bundles, resumable idempotent operations, adapter contracts, and external-state reconciliation.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -33,12 +33,12 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "0.2.0-next.20",
-    "@aldus-runtime/file-store": "0.2.0-next.20",
-    "@aldus-runtime/gate-engine": "0.2.0-next.20"
+    "@aldus-runtime/core": "0.2.0-next.21",
+    "@aldus-runtime/file-store": "0.2.0-next.21",
+    "@aldus-runtime/gate-engine": "0.2.0-next.21"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "0.2.0-next.20",
+    "@aldus-runtime/testkit": "0.2.0-next.21",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
