@@ -41,6 +41,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { parseWaivers, selectSection, uncoveredFindings } from "./breaking-coverage.mjs";
+
 const baseRef = process.argv[2];
 if (baseRef === undefined) {
   console.error("usage: check-breaking-notes.mjs <base-ref>");
@@ -141,81 +143,64 @@ if (breaking.length === 0) {
   process.exit(0);
 }
 
-// The section is bound to **this tree's version**, and every finding must appear in it.
-//
-// The first version of this check accepted any `BREAKING` string in the newest two sections. Three
-// ways that passes while the notes are wrong, all found by review rather than by use: a heading
-// left over from the *previous* release covers a new one that documents nothing; one documented
-// finding passes for all of them; and a heading can exist while naming none of the symbols listed
-// below it.
-//
-// That made the pass condition weaker than the tool's own failure message, which says "the
-// migration for each" — a check whose green is easier to earn than its red text describes is the
-// first failure category living inside the tool built for the third. So the message is now the
-// rule.
+// The admission rule lives in `breaking-coverage.mjs` as pure functions, so its false-green paths
+// are tested without a worktree and a build. See `packages/aldus-e2e/test/breaking-coverage.test.ts`.
 const version = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version;
 const changelog = readFileSync(join(repoRoot, "CHANGELOG.md"), "utf8");
+const { heading, body } = selectSection(changelog, version);
 
-// The notes for a bump land either under a heading naming the new version, or under `Unreleased`
-// before the bump commit. Both are legitimate; a *previous* version's heading is not.
-const sections = new Map();
-for (const part of changelog.split(/^## /m).slice(1)) {
-  sections.set(part.split("\n")[0].trim(), part);
-}
-const heading = [...sections.keys()].find((key) => key.startsWith(version));
-const section = sections.get(heading ?? "") ?? sections.get("Unreleased") ?? "";
-
-if (section === "") {
+if (heading === undefined) {
   console.error(`${breaking.length} breaking surface change(s), and CHANGELOG.md has no section`);
   console.error(`for ${version} and no Unreleased section to hold them.`);
   process.exit(1);
 }
 
-// A waiver is explicit, per symbol, and carries a reason — so declining to document a finding is
-// a thing someone wrote down rather than a thing nobody noticed.
-//   <!-- breaking-waiver: pkg:Symbol.member — why this is not breaking -->
-const waived = new Set(
-  [...changelog.matchAll(/<!--\s*breaking-waiver:\s*([^\s—-]+)/g)].map((match) => match[1]),
-);
-
-const undocumented = breaking.filter((item) => {
-  const symbol = item.replace(/^(removed export|newly required member): /, "");
-  if (waived.has(symbol)) return false;
-  // The section must name the symbol itself, not merely carry the word BREAKING. Matched on the
-  // bare name so `SpendGrant.scope` is satisfied by prose naming `SpendGrant` and `scope`.
-  return !symbol
-    .split(":")[1]
-    .split(".")
-    .every((part) => section.includes(part));
-});
-
-if (!/BREAKING/.test(section)) {
-  console.error(`${breaking.length} breaking surface change(s) against ${baseRef}, and the`);
-  console.error(`CHANGELOG section for ${heading ?? "Unreleased"} carries no BREAKING entry:\n`);
-  for (const item of breaking) console.error(`  ${item}`);
+const { waived, malformed } = parseWaivers(body);
+if (malformed.length > 0) {
+  console.error(`${malformed.length} malformed waiver(s) in the ${heading} section:\n`);
+  for (const item of malformed) console.error(`  <!-- breaking-waiver: ${item} -->`);
   console.error(
-    "\nAn adopter pinned exactly finds these by compiling, and is the last party to know. Add a " +
-      "BREAKING section with the migration for each.",
+    "\nA waiver states a symbol and a reason:\n" +
+      "  <!-- breaking-waiver: pkg:Symbol.member — why this is not breaking -->\n" +
+      "One without a reason is malformed, not lenient.",
   );
   process.exit(1);
 }
 
-if (undocumented.length > 0) {
-  console.error(`${undocumented.length} of ${breaking.length} breaking change(s) are not named in`);
-  console.error(`the ${heading ?? "Unreleased"} section, which carries a BREAKING entry that does`);
-  console.error("not cover them:\n");
-  for (const item of undocumented) console.error(`  ${item}`);
+const uncovered = uncoveredFindings(breaking, body, waived);
+
+if (!/BREAKING/.test(body)) {
+  console.error(`${breaking.length} breaking surface change(s) against ${baseRef}, and the`);
+  console.error(`CHANGELOG section for ${heading} carries no BREAKING entry:\n`);
+  for (const item of breaking) console.error(`  ${item}`);
   console.error(
-    "\nA heading is not coverage. Name each symbol with its migration, or waive it explicitly:\n" +
+    "\nAn adopter pinned exactly finds these by compiling, and is the last party to know. Add a " +
+      "BREAKING section with the migration for each, and mark each one:\n" +
+      "  <!-- breaking: pkg:Symbol.member -->",
+  );
+  process.exit(1);
+}
+
+if (uncovered.length > 0) {
+  console.error(`${uncovered.length} of ${breaking.length} breaking change(s) are not marked in`);
+  console.error(`the ${heading} section:\n`);
+  for (const item of uncovered) console.error(`  ${item}`);
+  console.error(
+    "\nA heading is not coverage, and prose is not a match — a type name and a member name in " +
+      "unrelated sentences would satisfy a text search. Mark each finding explicitly:\n" +
+      "  <!-- breaking: pkg:Symbol.member -->\n" +
+      "or waive it with a reason:\n" +
       "  <!-- breaking-waiver: pkg:Symbol.member — why this is not breaking -->",
   );
   process.exit(1);
 }
 
 console.log(
-  `${breaking.length} breaking surface change(s), each named in the ${heading ?? "Unreleased"} ` +
-    "section.",
+  `${breaking.length} breaking surface change(s), each marked in the ${heading} section.`,
 );
 for (const item of breaking) console.log(`  ${item}`);
-if (waived.size > 0) console.log(`\n${waived.size} waiver(s) present in CHANGELOG.md.`);
+if (waived.size > 0) {
+  console.log(`\n${waived.size} waiver(s) in this section:`);
+  for (const [symbol, reason] of waived) console.log(`  ${symbol} — ${reason}`);
+}
 process.exit(0);
