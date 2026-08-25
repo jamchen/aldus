@@ -76,6 +76,8 @@ export interface ArtifactArchive {
 
 /** Options for {@link LocalDirectoryArchive}. */
 export interface LocalDirectoryArchiveOptions {
+  /** PROBE ONLY — a deliberately breaking required field. This branch is never merged. */
+  probeRequiredField: string;
   /** Overrides the default `archiveId`. */
   archiveId?: string;
 }
@@ -106,7 +108,7 @@ export class LocalDirectoryArchive implements ArtifactArchive {
   readonly archiveId: string;
   readonly #root: string;
 
-  constructor(root: string, options: LocalDirectoryArchiveOptions = {}) {
+  constructor(root: string, options: LocalDirectoryArchiveOptions = { probeRequiredField: "" }) {
     this.#root = root;
     this.archiveId = options.archiveId ?? "local-directory";
   }
