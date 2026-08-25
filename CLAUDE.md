@@ -105,6 +105,32 @@ two-pass test where the first pass wrote a terminal receipt, a retry after a dur
 reverting a rule to see whether four composed tests were load-bearing. Make those two things cheap
 to reproduce and the round-trip shrinks on both sides.
 
+**A marker is protocol, not authentication.** Every session authenticates as the same account, so
+GitHub cannot show who wrote a comment. Two markers, and the distinction is what they claim rather
+than who typed them:
+
+- `COORDINATOR RULING` — delegated architecture authority. Contract consistency, ADR
+  interpretation, implementation boundaries, reversible technical decisions. Carries scope,
+  evidence, authority and conditions.
+- `OWNER RULING` — the owner's own product or risk decision. **An automated session must never
+  write this marker**, whatever the substance.
+
+The limit has to be stated with the rule, because a marker that looks like proof is worse than no
+marker: **no marker alone authorizes a paid execution, a publish, a release-bearing merge, a
+deletion, or a visibility or security change.** Those need the owner in an interactive session. An
+agent may record the outcome on GitHub marked `Recorded from owner session`, and must not claim the
+author field establishes identity. The durable fix is separate bot identities, leaving the owner's
+account to the owner — at which point an author check discriminates again.
+
+One instance is on the record rather than tidied away: #186's ruling carries `OWNER RULING` on its
+first line and was written by the coordinator. Its body says "Coordinator ruling under delegated
+architecture authority", so the substance was honest and the ADR it authorized stands. **The first
+line is the defect, and it is a protocol defect regardless of the outcome being right** — which is
+the only reason worth writing it down, since a rule that only applies when the result was also
+wrong is not a rule.
+
+`OWNER REVIEW REQUESTED` is unchanged. It asks for something and claims nothing.
+
 **Batch or ping, by the same content line the owner uses for authorizations.** Batch anything whose
 failure a follow-up commit can repair: two or three changes, then one review request. Ping
 immediately and singly for anything touching publish, an irreversible external effect, or a
