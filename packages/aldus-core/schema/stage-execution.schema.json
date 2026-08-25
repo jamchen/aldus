@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.12:StageExecution",
+  "$id": "urn:aldus:schema:1.13:StageExecution",
   "type": "object",
   "properties": {
     "schemaVersion": {
@@ -253,6 +253,38 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "producers": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "versionEvidence": {
+                "type": "string",
+                "enum": [
+                  "reported",
+                  "requested"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "versionEvidence"
+            ]
           }
         },
         "reconstructability": {

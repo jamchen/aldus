@@ -128,19 +128,6 @@ export const spendReservationSchema = z
      *
      * Retrying the same effect resolves to the same reservation rather than reserving twice, which
      * is what makes the reserve operation idempotent.
-     *
-     * **One attempt is not necessarily one effect.** A stage that dispatches twice within a single
-     * attempt — a writer and then a reviewer, a segment loop — has two independently billed
-     * effects, and keying both on the attempt gives them one key. That compiles, and the second
-     * reserve is refused at runtime *after* the first has already been paid for: a stage that dies
-     * mid-attempt having spent money. Measured by an adopter, on the one stage of seven where it
-     * was not true.
-     *
-     * Derive the key from what makes an effect **the same effect if repeated**, and add whatever
-     * distinguishes effects within an attempt — `${attemptId}:${purpose}` rather than `attemptId`.
-     * Never from a timestamp or a fresh id, which reserves twice for one charge. The dispatcher's
-     * identity and version are prepended by the runtime; adding them yourself double-versions the
-     * key and silently defeats the idempotency it exists for.
      */
     effectKey: nonEmptyString,
     /**

@@ -49,6 +49,8 @@ export interface RegisterArtifactInput {
   producerRunId: string;
   /** Stage that produced it (contract §8.1). */
   producerStageId: string;
+  /** What produced the bytes. Opaque to Core (§4.2). @see ArtifactRef.producer */
+  producers?: ArtifactRef["producers"];
   /** How recoverable it is (contract §8). */
   reconstructability: Reconstructability;
   /**
@@ -177,6 +179,7 @@ export class ArtifactRegistry {
       sizeBytes,
       producerRunId: input.producerRunId,
       producerStageId: input.producerStageId,
+      ...(input.producers === undefined ? {} : { producers: input.producers }),
       inputHashes: input.inputHashes ?? [],
       reconstructability: input.reconstructability,
       createdAt: input.createdAt ?? this.#now().toISOString(),
