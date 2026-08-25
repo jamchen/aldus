@@ -238,6 +238,41 @@ export class GateEngine {
       );
     }
 
+    // A waiver is not an approval, and the two refusals below are what keep it from becoming one.
+    //
+    // **It must not outlive the content it was granted against.** `expiresOnChange` is a per-
+    // decision override of the gate's default, which is defensible for an *approval* whose subject
+    // cannot drift. A non-expiring **waiver** says the check stays bypassed whatever the content
+    // becomes — that is a config flag disabling a gate, reached through the decision API instead of
+    // the config file, and it is precisely what this design exists to avoid.
+    //
+    // Closing it is also what makes the rest safe. Every gate being waivable — `release.public`
+    // included — is defensible **only** because a waiver cannot survive the subjects moving. Leave
+    // the override open and every gate needs a non-waivable declaration; close it and none does.
+    //
+    // **And it must say why.** A waiver with no reason is a blank with a timestamp: the one thing a
+    // reader of the approvals log needs from it is the part that would be missing.
+    if (input.decision === "waived") {
+      if (input.expiresOnChange === false) {
+        throw gateEngineError(
+          GateEngineErrorCodes.GATE_WAIVER_INVALID,
+          `A waiver of gate "${gate.gateId}" may not be recorded as non-expiring. A waiver says ` +
+            "the check was bypassed rather than passed, so it must not outlive the content it was " +
+            "granted against (§13.1, §13.2).",
+          { category: "policy", details: { gateId: gate.gateId } },
+        );
+      }
+      if (input.comment === undefined || input.comment.trim() === "") {
+        throw gateEngineError(
+          GateEngineErrorCodes.GATE_WAIVER_INVALID,
+          `A waiver of gate "${gate.gateId}" needs a reason. An approval records that the content ` +
+            "was judged; a waiver records that the check was bypassed, and without a reason the " +
+            "log carries a blank with a timestamp (§13.3, §19.2).",
+          { category: "validation", details: { gateId: gate.gateId } },
+        );
+      }
+    }
+
     const decision: GateDecision = {
       schemaVersion: SCHEMA_VERSION,
       decisionId: input.decisionId ?? newGateDecisionId(),
@@ -248,7 +283,9 @@ export class GateEngine {
       decidedBy: input.decidedBy,
       decidedAt: input.decidedAt,
       ...(input.comment !== undefined ? { comment: input.comment } : {}),
-      expiresOnChange: input.expiresOnChange ?? gate.expiresOnChange,
+      // Forced for a waiver, never taken from the gate default or the caller. See above.
+      expiresOnChange:
+        input.decision === "waived" ? true : (input.expiresOnChange ?? gate.expiresOnChange),
     };
 
     // Validate before persisting. A malformed decision written to the approvals log is worse

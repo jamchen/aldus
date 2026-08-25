@@ -145,6 +145,7 @@ describe("approving upload does not authorize publication", () => {
       runId: RUN_ID,
       gateId: RELEASE_UPLOAD,
       decision: "waived",
+      comment: "waived for this test; the engine requires a reason",
       subjects: subjects[RELEASE_UPLOAD] ?? [],
       decidedBy: OPERATOR,
       decidedAt: AT,

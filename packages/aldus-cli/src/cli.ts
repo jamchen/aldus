@@ -349,6 +349,8 @@ async function dispatch(
       return await runDecision(argv, environment, "approve");
     case "reject":
       return await runDecision(argv, environment, "reject");
+    case "waive":
+      return await runWaive(argv, environment);
     case "cancel":
       return await runCancel(argv, environment);
     case "artifacts":
@@ -723,6 +725,51 @@ async function runDecision(
 
   const result =
     command === "approve" ? await services.approve(request) : await services.reject(request);
+  return emit(result, options, environment, renderGateDecision);
+}
+
+/**
+ * `waive <gate> --reason <why>` — record that a check was **bypassed**, not passed (§13).
+ *
+ * A separate verb rather than a flag on `approve`, because the two record different facts and the
+ * approvals log is read by people deciding whether to trust what came before. An operator who
+ * cannot honestly approve a gate previously had two shapes available — widen the gate's permitted
+ * actors, or approve something they did not judge — and both write a decision that misdescribes
+ * what happened.
+ *
+ * `--reason` is required here as well as in the engine. The engine's refusal is the rule; this one
+ * is so the operator finds out before composing a workspace rather than after.
+ *
+ * There is deliberately no `--expires-on-change`: a waiver's is forced true and the engine refuses
+ * an override. A non-expiring waiver is a disabled gate wearing a decision's clothes.
+ */
+async function runWaive(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
+  const { options, values, positionals } = parseCommon(argv, environment, {
+    reason: { type: "string" },
+  });
+  const gateId = positionals[0];
+  if (gateId === undefined) {
+    throw new AldusError("ALDUS_INVALID_REQUEST", '"waive" needs a gate id.', {
+      category: "validation",
+    });
+  }
+  const reason = values["reason"];
+  if (typeof reason !== "string" || reason.trim() === "") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      '"waive" needs --reason. A waiver records that a check was bypassed rather than passed, ' +
+        "and without a reason the approvals log carries a blank with a timestamp.",
+      { category: "validation" },
+    );
+  }
+
+  const services = servicesFor(options, environment);
+  const result = await services.waive({
+    runId: requireRunId(options, "waive"),
+    gateId,
+    reason,
+    ...(options.actor !== undefined ? { actor: options.actor } : {}),
+  });
   return emit(result, options, environment, renderGateDecision);
 }
 

@@ -12,6 +12,39 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.29 — 2026-08-25
+
+### Features
+
+**`aldus waive <gate> --reason <why>`** — record that a check was **bypassed**, not passed.
+
+`waived` has been a first-class decision since §13 was written: attributable, dated,
+subject-binding, and voided when its subjects drift. It had no door. An operator who could not
+honestly approve a gate had two shapes available — widen the gate's `permittedActorKinds`, or
+approve something they did not judge — and both record a decision that misdescribes what happened.
+The first adopter chose to be blocked rather than use either.
+
+A separate verb rather than a flag on `approve`, because the approvals log is read by people
+deciding whether to trust what came before.
+
+**Two rules make it safe, and both are enforced in the engine rather than the CLI**, so every
+caller inherits them:
+
+**A waiver always expires when its subjects change, and a caller asking otherwise is refused.**
+`expiresOnChange` is a legitimate per-decision override for an _approval_ whose subject cannot
+drift. On a waiver it says the check stays bypassed whatever the content becomes — a disabled gate
+reached through the decision API instead of the config file.
+
+This is also what makes the rest safe. **Every gate is waivable, `release.public` included**, and
+that is defensible _only_ because a waiver cannot outlive the content it was granted against. Leave
+the override open and every gate needs a non-waivable declaration; close it and none does.
+
+**A waiver needs a reason**, and a blank one is refused as the same absence wearing a string. The
+one thing a reader of the log needs from a waiver is the part that would otherwise be missing.
+
+Both refusals raise `ALDUS_GATE_WAIVER_INVALID`. `permittedActorKinds` is unchanged and still
+checked on recording, so an agent still cannot waive a `human_oracle` gate.
+
 ## 0.2.0-next.28 — 2026-08-25
 
 ### Behaviour changes
