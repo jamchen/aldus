@@ -41,6 +41,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { parseWaivers, selectSection, uncoveredFindings } from "./breaking-coverage.mjs";
+
 const baseRef = process.argv[2];
 if (baseRef === undefined) {
   console.error("usage: check-breaking-notes.mjs <base-ref>");
@@ -141,23 +143,64 @@ if (breaking.length === 0) {
   process.exit(0);
 }
 
-// A `BREAKING` heading anywhere in the CHANGELOG's unreleased-or-newest section counts. The check
-// is that someone wrote one, not that they wrote a particular sentence.
+// The admission rule lives in `breaking-coverage.mjs` as pure functions, so its false-green paths
+// are tested without a worktree and a build. See `packages/aldus-e2e/test/breaking-coverage.test.ts`.
+const version = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version;
 const changelog = readFileSync(join(repoRoot, "CHANGELOG.md"), "utf8");
-const newest = changelog.split(/^## /m).slice(1, 3).join("\n");
-if (/BREAKING/.test(newest)) {
-  console.log(
-    `${breaking.length} breaking surface change(s), and the notes carry a BREAKING entry.`,
-  );
-  for (const item of breaking) console.log(`  ${item}`);
-  process.exit(0);
+const { heading, body } = selectSection(changelog, version);
+
+if (heading === undefined) {
+  console.error(`${breaking.length} breaking surface change(s), and CHANGELOG.md has no section`);
+  console.error(`for ${version} and no Unreleased section to hold them.`);
+  process.exit(1);
 }
 
-console.error(`${breaking.length} breaking surface change(s) against ${baseRef}, and no BREAKING`);
-console.error("entry in the CHANGELOG's newest section:\n");
-for (const item of breaking) console.error(`  ${item}`);
-console.error(
-  "\nAn adopter pinned exactly finds these by compiling, and is the last party to know. Add a " +
-    "BREAKING section with the migration for each, or explain why one of these is not breaking.",
+const { waived, malformed } = parseWaivers(body);
+if (malformed.length > 0) {
+  console.error(`${malformed.length} malformed waiver(s) in the ${heading} section:\n`);
+  for (const item of malformed) console.error(`  <!-- breaking-waiver: ${item} -->`);
+  console.error(
+    "\nA waiver states a symbol and a reason:\n" +
+      "  <!-- breaking-waiver: pkg:Symbol.member — why this is not breaking -->\n" +
+      "One without a reason is malformed, not lenient.",
+  );
+  process.exit(1);
+}
+
+const uncovered = uncoveredFindings(breaking, body, waived);
+
+if (!/BREAKING/.test(body)) {
+  console.error(`${breaking.length} breaking surface change(s) against ${baseRef}, and the`);
+  console.error(`CHANGELOG section for ${heading} carries no BREAKING entry:\n`);
+  for (const item of breaking) console.error(`  ${item}`);
+  console.error(
+    "\nAn adopter pinned exactly finds these by compiling, and is the last party to know. Add a " +
+      "BREAKING section with the migration for each, and mark each one:\n" +
+      "  <!-- breaking: pkg:Symbol.member -->",
+  );
+  process.exit(1);
+}
+
+if (uncovered.length > 0) {
+  console.error(`${uncovered.length} of ${breaking.length} breaking change(s) are not marked in`);
+  console.error(`the ${heading} section:\n`);
+  for (const item of uncovered) console.error(`  ${item}`);
+  console.error(
+    "\nA heading is not coverage, and prose is not a match — a type name and a member name in " +
+      "unrelated sentences would satisfy a text search. Mark each finding explicitly:\n" +
+      "  <!-- breaking: pkg:Symbol.member -->\n" +
+      "or waive it with a reason:\n" +
+      "  <!-- breaking-waiver: pkg:Symbol.member — why this is not breaking -->",
+  );
+  process.exit(1);
+}
+
+console.log(
+  `${breaking.length} breaking surface change(s), each marked in the ${heading} section.`,
 );
-process.exit(1);
+for (const item of breaking) console.log(`  ${item}`);
+if (waived.size > 0) {
+  console.log(`\n${waived.size} waiver(s) in this section:`);
+  for (const [symbol, reason] of waived) console.log(`  ${symbol} — ${reason}`);
+}
+process.exit(0);
