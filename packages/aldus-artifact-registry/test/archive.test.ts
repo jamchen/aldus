@@ -184,6 +184,8 @@ describe("LocalDirectoryArchive specifics", () => {
   });
 
   it("uses a caller-supplied archive id", () => {
-    expect(new LocalDirectoryArchive(root, { archiveId: "archive-b" }).archiveId).toBe("archive-b");
+    expect(
+      new LocalDirectoryArchive(root, { archiveId: "archive-b", probeRequiredField: "" }).archiveId,
+    ).toBe("archive-b");
   });
 });
