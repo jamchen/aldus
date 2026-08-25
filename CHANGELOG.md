@@ -10,48 +10,35 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 ## Unreleased
 
-Nothing yet.
+### Features
 
-## 0.2.0-next.23 — 2026-08-25
+**`ArtifactRef` gains an optional `producers` list** — what produced the bytes, alongside the
+inputs provenance already pinned (ADR-0052). Each entry is `{ id, version, versionEvidence }`, all
+opaque to Core.
 
-### Documentation on the money path
+Provenance recorded every input a stage read and nothing about what produced them beyond
+`producerStageId`. So the same inputs through a later model, renderer or Worker binary yield
+different bytes and no field distinguishes the two records — which for a `source` artifact is
+unrecoverable, because those bytes cannot be regenerated and compared.
 
-No behaviour changes. Three semantics that were already true of the shipped runtime and that
-nothing said out loud, all from the first adopter migration through `#155` and ADR-0044.
+**It is a list because one execution can have several producers.** Measured by an adopter: an agent
+CLI reports usage as a map keyed by model, and a delegating execution reports more than one. A
+single producer would force a caller to pick, invisibly.
 
-What makes them worth a release note is the shape of getting them wrong. **The natural misuse of
-each one compiles cleanly and then refuses or overspends at runtime** — a wrong `effectKey` grain
-type-checks and is refused only after the first effect has been paid for; an unset `maxPerRequest`
-type-checks and refuses every unestimated dispatch; a `maxTotal` sized as a lifetime pool
-type-checks and simply provisions the wrong amount. Nothing before runtime says so, which is worse
-than a change that fails to compile.
+**`versionEvidence` distinguishes `"reported"` from `"requested"`**, because those are different
+strings: `--model haiku` in, `claude-haiku-4-5-20251001` out. Recording the request as though it
+were the executed version would be the same failure the field exists to fix, one level down.
 
-**`effectKey`: one attempt is not necessarily one effect.** A stage dispatching twice within a
-single attempt — a writer and then a reviewer, a segment loop — has two independently billed
-effects, and keying both on the attempt gives them one key. The second reserve is refused at
-runtime, correctly, _after the first has been paid for_: a stage dying mid-attempt having spent
-money. Derive the key from what makes an effect the same effect if repeated, and distinguish
-effects within an attempt — `${attemptId}:${purpose}`, not `attemptId`. The dispatcher's identity
-and version are prepended by the runtime; adding them yourself double-versions the key and defeats
-the idempotency it exists for.
+**`producerProvenanceGap(artifact)`** reports the absence and separates a `source` artifact, where
+the gap cannot be recovered, from a `reproducible` one, where it can be closed by regenerating. An
+optional field nobody fills is decoration; this makes the hole queryable.
 
-**`maxPerRequest` changed meaning without changing type.** It was a statement about what a
-_backend_ enforces, so leaving it unset where the backend enforced nothing was the honest choice.
-Under ADR-0044 it is what the _runtime reserves_. Still optional, still compiles, and under
-`unestimatedExecution: "reserve_max_per_request"` an unset ceiling makes every unestimated dispatch
-refuse.
+Optional and non-empty when present, so no stored record becomes invalid and an empty list cannot
+assert that nothing produced the bytes. `SCHEMA_VERSION` **1.12 → 1.13** (MINOR, ADR-0003).
 
-**`maxTotal` is consumed by two different things**, and reading it as one mis-sizes a grant in
-either direction. Settled charges consume it permanently at their actual amount; active and
-unresolved reservations consume it at their _reserved_ amount until they settle, at which point
-unused headroom returns. So `maxTotal ÷ maxPerRequest` bounds how many unestimated dispatches can
-be **outstanding at once**, not how many a run may make — nine dispatches settling cheaply against
-a $25 / $3 grant leave $23.20 available. Read as a lifetime pool it ignores that eight worst-case
-reservations can be outstanding before any settles; read as a concurrency bound alone it
-over-provisions a run whose charges are small.
-
-`packages/aldus-gate-engine/test/settlement-headroom.test.ts` holds that behaviour to the protocol,
-so the prose fails when it drifts again.
+Not on `CostRecord`: a free execution writes no cost record, so an artifact produced by a free run
+would have no producer identity — and a `source` artifact is exactly as irreproducible whether or
+not anyone was billed.
 
 ## 0.2.0-next.21 — 2026-08-25
 

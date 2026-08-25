@@ -60,6 +60,16 @@ export interface StageArtifactRequest {
   producerRunId: string;
   /** Stage that produced it, supplied by the runner (contract §8.1). */
   producerStageId: string;
+  /**
+   * What produced the bytes — an agent backend and its model, a renderer and its version.
+   *
+   * Optional here because requiring it would break every existing caller, and a stage that has
+   * nothing truthful to say should not be forced to invent something. **Absent means unrecorded,
+   * not absent-producer** — `producerProvenanceGap` reports it.
+   *
+   * @see ArtifactRef.producers
+   */
+  producers?: ArtifactRef["producers"];
   /** Revision of the runtime code, from the Run manifest (contract §8.1, §20). */
   codeRevision?: string;
   /** Digest of the configuration the attempt ran under (contract §11, §20). */
@@ -112,6 +122,7 @@ export function stageArtifactRecorder(registry: ArtifactRegistry): StageArtifact
         reconstructability: request.reconstructability,
         producerRunId: request.producerRunId,
         producerStageId: request.producerStageId,
+        ...(request.producers === undefined ? {} : { producers: request.producers }),
         ...(request.inputHashes === undefined ? {} : { inputHashes: [...request.inputHashes] }),
         ...(request.artifactId === undefined ? {} : { artifactId: request.artifactId }),
         ...(request.uri === undefined ? {} : { uri: request.uri }),

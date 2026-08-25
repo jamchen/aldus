@@ -81,6 +81,20 @@ function parseContractInterfaces(markdown: string): Map<string, ContractField[]>
  * the entry belongs here.
  */
 const SANCTIONED_ADDITIONS: Partial<Record<SchemaName, readonly string[]>> = {
+  // ADR-0052, added at SCHEMA_VERSION 1.13. §8.1's provenance pins every *input* — the digests a
+  // stage read, the knowledge pack versions — and records nothing about what produced them beyond
+  // `producerStageId`. So the same inputs through a later model or renderer yield different bytes
+  // and no field distinguishes the two records, which for a `source` artifact is unrecoverable.
+  //
+  // The Runtime had already decided this evidence is worth keeping, for money rather than for
+  // artifacts: `AgentBackend.version` is required so a reservation records which version was
+  // dispatched. The same argument, the same evidence, kept on the reservation and dropped on the
+  // bytes.
+  //
+  // A list rather than a value, because an adopter measured one agent execution reporting several
+  // models. Optional, so no stored record becomes invalid; non-empty when present, because an
+  // empty list would assert that nothing produced the artifact.
+  ArtifactRef: ["producers"],
   // ADR-0003: persisted as a standalone document, so it carries its own version.
   // `decisionId`: §6 shows ProductionRun 1→many GateDecision; without an ID two decisions on
   // one gate are indistinguishable.
