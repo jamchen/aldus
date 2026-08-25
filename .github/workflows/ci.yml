@@ -98,6 +98,39 @@ jobs:
       - name: Shipped changes carry a version bump
         run: node scripts/check-version-bump.mjs "origin/${{ github.base_ref }}"
 
+  breaking-notes:
+    name: breaking notes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The base is built in a worktree to compare compiler output against compiler output, so
+          # its history must be present. A shallow clone once turned a release check into one that
+          # passed and could not have failed (#175).
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm ci
+
+      # The surface has to come from the compiler, so HEAD is built before it is read. Comparing
+      # source would answer a different question, and the script declines rather than reporting a
+      # clean surface if either side fails to build.
+      - name: Build
+        run: npm run build
+
+      # `0.2.0-next.21` shipped eight breaking signature changes with notes describing one. The
+      # adopter asked in advance what the release contained, got no answer in time, bumped on a
+      # summary, and found the rest by compiling. Three humans in the loop failed to surface it and
+      # the compiler was the only mechanism that did — and a pinned adopter is, by construction,
+      # the last party to know and cannot volunteer the information. So the detection moves here.
+      - name: A breaking surface change carries a BREAKING entry
+        run: node scripts/check-breaking-notes.mjs "origin/${{ github.base_ref }}"
+
   boundary:
     name: core boundary
     runs-on: ubuntu-latest

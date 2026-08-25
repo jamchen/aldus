@@ -323,8 +323,29 @@ checkable by nobody.
 | `check-resolution-surface.mjs` | a merge's diff is a subset of the union of its parents' diffs                                 |
 | `check-claim-scope.mjs`        | `docs-only` / `no-shipped-change` is true rather than asserted                                |
 | `check-build-topology.mjs`     | every package compiles `src` to `dist`, which the rebuild predicate assumes                   |
+| `check-breaking-notes.mjs`     | a breaking change to the built export surface carries a `BREAKING` CHANGELOG entry            |
 | `evidence.mjs`                 | emits the review block, measured; `--check` validates a filled one                            |
 | `run-mutants.mjs`              | runs the cases in `mutants.mjs` and asserts each one's own result                             |
+
+`check-breaking-notes.mjs` compares **built `.d.ts` against built `.d.ts`**, never source, because a
+blast radius is a question about the export surface. It finds a removed export and a newly required
+member; it does **not** find a semantic break. The two most dangerous changes in the release it was
+built for — `effectKey` namespacing and `unestimatedExecution` defaulting to refuse — compile
+cleanly and behave wrongly, and are invisible to it.
+
+It exists because of who could otherwise catch such a change. `0.2.0-next.21` shipped eight breaking
+signature changes with notes describing one. The adopter asked in advance and in writing what the
+release contained, got no answer in time, bumped on a summary, and found the rest by compiling.
+**Three humans in the loop failed to surface it and the compiler was the only mechanism that did** —
+and a pinned adopter is, by construction, the last party to know and has no way to volunteer the
+information. A detection that only the last party can perform has to move to the other side of the
+line.
+
+Its own first run produced two false positives, both fixed and both recorded in the source: a
+one-line `type` alias whose body was taken from the _following_ declaration, and Zod-inferred types
+where optionality lives in `z.ZodOptional<…>` rather than in a `?`, so every optional schema field
+read as newly required. Validated against the release it was built for — eight findings, zero false
+positives, and it passes on the same surface once the notes exist.
 
 `check-resolution-surface.mjs` does **not** establish that a resolution chose correctly — keeping
 one caller's shape and dropping the other's argument is a correct-surface, wrong-content failure,
