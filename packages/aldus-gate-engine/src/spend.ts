@@ -88,9 +88,37 @@ export interface SpendGrant {
    * Absent reads as `"refuse"`.
    */
   unestimatedExecution?: "refuse" | "reserve_max_per_request";
-  /** Maximum total spend authorized across the Run (§13.2 "maximum authorized cost"). */
+  /**
+   * Maximum total spend authorized across the Run (§13.2 "maximum authorized cost").
+   *
+   * **Read together with `maxPerRequest` when `unestimatedExecution` is
+   * `"reserve_max_per_request"`.** Each unestimated dispatch reserves the *whole* per-request
+   * ceiling, so `maxTotal ÷ maxPerRequest` is a **count of dispatches**, not a pool of money that
+   * partly-used requests return to. A grant of $25 total and $3 per request authorizes eight
+   * unestimated dispatches whatever they actually cost.
+   *
+   * That is the correct behaviour — an unestimated effect has no smaller truthful number to
+   * reserve — but it is not what "total budget $25" reads as, and an operator picking the two
+   * numbers independently will pick them wrongly. Measured by an adopter: a $3/$3 grant permitted
+   * exactly one dispatch and refused the second with the budget almost untouched.
+   */
   maxTotal: Money;
-  /** Maximum spend authorized for any single request (§19.3 "per-request ... limits"). */
+  /**
+   * Maximum spend authorized for any single request (§19.3 "per-request ... limits").
+   *
+   * **What this means changed with ADR-0044 while its type did not.** It was a statement about
+   * what a *backend* enforces, so leaving it unset where the backend enforces nothing was the
+   * honest choice — binding a ceiling would have recorded a protection that did not exist.
+   *
+   * It is now what the *runtime reserves* before dispatch. Unset is still valid and still
+   * compiles, and under `unestimatedExecution: "reserve_max_per_request"` it makes every
+   * unestimated dispatch refuse, because there is no truthful amount to reserve
+   * (see {@link unestimatedPolicyIsSatisfiable}).
+   *
+   * Called out because the type system has nothing to say about a field whose meaning moved: an
+   * adopter migrating hit exactly this, and the comment in their own file argued for the choice
+   * that is now wrong.
+   */
   maxPerRequest?: Money;
 }
 
