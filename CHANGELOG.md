@@ -12,6 +12,33 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.30 — 2026-08-26
+
+### Behaviour changes
+
+**`aldus waive` no longer validates `--reason` ahead of the engine**, so an actor who may not
+decide a gate is told _that_ rather than told to write a better reason.
+
+`next.29` put the waiver rules in the engine so every caller inherits them, and then kept a copy of
+the reason check in the CLI "so the operator finds out sooner". A check in front of the engine's is
+not a friendlier copy of it — **it is a second rule, and it fires first.**
+
+Measured by an adopter through the CLI, which is the only door anyone uses:
+
+```
+$ ALDUS_ACTOR=agent:… aldus waive <gate> --reason "" --run <run>
+ALDUS_INVALID_REQUEST: "waive" needs --reason.        ← before
+ALDUS_GATE_ACTOR_NOT_PERMITTED                        ← after
+```
+
+An `agent:` actor waiving a `human_oracle` gate learned it needed a better reason, when the truth
+is that it may not decide that gate at all. The engine's ordering was correct and unreachable; the
+argument for putting the rules there is the same argument against keeping a copy outside.
+
+The rule itself is unchanged — a waiver still needs a reason, and a blank one is still refused with
+`ALDUS_GATE_WAIVER_INVALID`. Only the place that refuses it has moved to the one that knows both
+rules and the order they belong in.
+
 ## 0.2.0-next.29 — 2026-08-25
 
 ### Features
