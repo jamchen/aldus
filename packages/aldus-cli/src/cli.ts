@@ -737,8 +737,9 @@ async function runDecision(
  * actors, or approve something they did not judge — and both write a decision that misdescribes
  * what happened.
  *
- * `--reason` is required here as well as in the engine. The engine's refusal is the rule; this one
- * is so the operator finds out before composing a workspace rather than after.
+ * `--reason` is required by the **engine**, and deliberately not re-checked here. See the note in
+ * the body: a second copy of the rule out here fired ahead of the actor check and told an agent it
+ * needed a better reason when it may not decide the gate at all.
  *
  * There is deliberately no `--expires-on-change`: a waiver's is forced true and the engine refuses
  * an override. A non-expiring waiver is a disabled gate wearing a decision's clothes.
@@ -753,21 +754,25 @@ async function runWaive(argv: readonly string[], environment: CliEnvironment): P
       category: "validation",
     });
   }
+  // **The reason is not validated here**, deliberately, and the first version of this command got
+  // it wrong. A check in front of the engine's is not a friendlier copy of it — it is a second
+  // rule, and it fires first.
+  //
+  // Measured by an adopter through this door: an `agent:` actor waiving a `human_oracle` gate with
+  // an empty reason got "needs --reason" rather than "not permitted", because this ran before the
+  // engine saw the call. So an agent that may not decide the gate at all learned that it needed a
+  // better reason. The ordering argument that justified putting the rules in the engine is the
+  // same argument against keeping a copy out here.
+  //
+  // An absent `--reason` is passed through as empty and refused by the engine, which is the only
+  // place that knows both rules and the order they belong in.
   const reason = values["reason"];
-  if (typeof reason !== "string" || reason.trim() === "") {
-    throw new AldusError(
-      "ALDUS_INVALID_REQUEST",
-      '"waive" needs --reason. A waiver records that a check was bypassed rather than passed, ' +
-        "and without a reason the approvals log carries a blank with a timestamp.",
-      { category: "validation" },
-    );
-  }
 
   const services = servicesFor(options, environment);
   const result = await services.waive({
     runId: requireRunId(options, "waive"),
     gateId,
-    reason,
+    reason: typeof reason === "string" ? reason : "",
     ...(options.actor !== undefined ? { actor: options.actor } : {}),
   });
   return emit(result, options, environment, renderGateDecision);
