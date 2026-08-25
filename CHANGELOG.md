@@ -12,6 +12,34 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.27 — 2026-08-25
+
+### Behaviour changes
+
+**`aldus status` no longer calls a satisfied blocking gate "advisory".**
+
+A gate's **class** — `blocking` or `advisory` — and whether it is stopping work **right now** are
+different facts, and the renderer derived both from the second one. So a blocking gate that was
+satisfied printed `(advisory)`, which is false about its class and the opposite of what the gate
+exists for. Measured by an adopter driving a real run: every passing gate in their repository was
+reported advisory, and **not one of their twelve gates is advisory**.
+
+The gates it misdescribed were exactly the ones that had already done their job, because being
+satisfied is what makes the state fact false. The reward for a gate working was being described as
+though it could not have worked.
+
+`status` now prints the class from `enforcement`, and says separately when a gate is stopping work:
+
+```
+  script.freeze   satisfied  (blocking)
+  outline.freeze  pending    (blocking) — stops work
+  lint.report     pending    (advisory)
+```
+
+The engine is unchanged. `GateStatus.blocking` already meant "whether this state stops work", its
+docstring already said so, and the row already carried `enforcement` — the renderer simply used one
+field to answer both questions.
+
 ## 0.2.0-next.26 — 2026-08-25
 
 ### BREAKING — an exported schema now refuses a foreign major
