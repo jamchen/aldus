@@ -141,23 +141,81 @@ if (breaking.length === 0) {
   process.exit(0);
 }
 
-// A `BREAKING` heading anywhere in the CHANGELOG's unreleased-or-newest section counts. The check
-// is that someone wrote one, not that they wrote a particular sentence.
+// The section is bound to **this tree's version**, and every finding must appear in it.
+//
+// The first version of this check accepted any `BREAKING` string in the newest two sections. Three
+// ways that passes while the notes are wrong, all found by review rather than by use: a heading
+// left over from the *previous* release covers a new one that documents nothing; one documented
+// finding passes for all of them; and a heading can exist while naming none of the symbols listed
+// below it.
+//
+// That made the pass condition weaker than the tool's own failure message, which says "the
+// migration for each" — a check whose green is easier to earn than its red text describes is the
+// first failure category living inside the tool built for the third. So the message is now the
+// rule.
+const version = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version;
 const changelog = readFileSync(join(repoRoot, "CHANGELOG.md"), "utf8");
-const newest = changelog.split(/^## /m).slice(1, 3).join("\n");
-if (/BREAKING/.test(newest)) {
-  console.log(
-    `${breaking.length} breaking surface change(s), and the notes carry a BREAKING entry.`,
-  );
-  for (const item of breaking) console.log(`  ${item}`);
-  process.exit(0);
+
+// The notes for a bump land either under a heading naming the new version, or under `Unreleased`
+// before the bump commit. Both are legitimate; a *previous* version's heading is not.
+const sections = new Map();
+for (const part of changelog.split(/^## /m).slice(1)) {
+  sections.set(part.split("\n")[0].trim(), part);
+}
+const heading = [...sections.keys()].find((key) => key.startsWith(version));
+const section = sections.get(heading ?? "") ?? sections.get("Unreleased") ?? "";
+
+if (section === "") {
+  console.error(`${breaking.length} breaking surface change(s), and CHANGELOG.md has no section`);
+  console.error(`for ${version} and no Unreleased section to hold them.`);
+  process.exit(1);
 }
 
-console.error(`${breaking.length} breaking surface change(s) against ${baseRef}, and no BREAKING`);
-console.error("entry in the CHANGELOG's newest section:\n");
-for (const item of breaking) console.error(`  ${item}`);
-console.error(
-  "\nAn adopter pinned exactly finds these by compiling, and is the last party to know. Add a " +
-    "BREAKING section with the migration for each, or explain why one of these is not breaking.",
+// A waiver is explicit, per symbol, and carries a reason — so declining to document a finding is
+// a thing someone wrote down rather than a thing nobody noticed.
+//   <!-- breaking-waiver: pkg:Symbol.member — why this is not breaking -->
+const waived = new Set(
+  [...changelog.matchAll(/<!--\s*breaking-waiver:\s*([^\s—-]+)/g)].map((match) => match[1]),
 );
-process.exit(1);
+
+const undocumented = breaking.filter((item) => {
+  const symbol = item.replace(/^(removed export|newly required member): /, "");
+  if (waived.has(symbol)) return false;
+  // The section must name the symbol itself, not merely carry the word BREAKING. Matched on the
+  // bare name so `SpendGrant.scope` is satisfied by prose naming `SpendGrant` and `scope`.
+  return !symbol
+    .split(":")[1]
+    .split(".")
+    .every((part) => section.includes(part));
+});
+
+if (!/BREAKING/.test(section)) {
+  console.error(`${breaking.length} breaking surface change(s) against ${baseRef}, and the`);
+  console.error(`CHANGELOG section for ${heading ?? "Unreleased"} carries no BREAKING entry:\n`);
+  for (const item of breaking) console.error(`  ${item}`);
+  console.error(
+    "\nAn adopter pinned exactly finds these by compiling, and is the last party to know. Add a " +
+      "BREAKING section with the migration for each.",
+  );
+  process.exit(1);
+}
+
+if (undocumented.length > 0) {
+  console.error(`${undocumented.length} of ${breaking.length} breaking change(s) are not named in`);
+  console.error(`the ${heading ?? "Unreleased"} section, which carries a BREAKING entry that does`);
+  console.error("not cover them:\n");
+  for (const item of undocumented) console.error(`  ${item}`);
+  console.error(
+    "\nA heading is not coverage. Name each symbol with its migration, or waive it explicitly:\n" +
+      "  <!-- breaking-waiver: pkg:Symbol.member — why this is not breaking -->",
+  );
+  process.exit(1);
+}
+
+console.log(
+  `${breaking.length} breaking surface change(s), each named in the ${heading ?? "Unreleased"} ` +
+    "section.",
+);
+for (const item of breaking) console.log(`  ${item}`);
+if (waived.size > 0) console.log(`\n${waived.size} waiver(s) present in CHANGELOG.md.`);
+process.exit(0);
