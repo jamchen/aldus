@@ -27,7 +27,7 @@ export type ReleaseStatus = (typeof RELEASE_STATUSES)[number];
  * Field list is transcribed verbatim from contract §17, plus `schemaVersion` and `runId` per
  * GitHub issue #1.
  */
-export const releaseReceiptSchema = z
+export const releaseReceiptSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -116,4 +116,4 @@ export const releaseReceiptSchema = z
   });
 
 /** @see releaseReceiptSchema */
-export type ReleaseReceipt = z.infer<typeof releaseReceiptSchema>;
+export type ReleaseReceipt = z.infer<typeof releaseReceiptSchemaBase>;

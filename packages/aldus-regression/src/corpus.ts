@@ -19,7 +19,7 @@
  * Zod is the single source of truth; TypeScript types are inferred (ADR-0002).
  */
 
-import { actorRefSchema, SCHEMA_VERSION } from "@aldus-runtime/core";
+import { actorRefSchema, schemaVersionString, SCHEMA_VERSION } from "@aldus-runtime/core";
 import { z } from "zod";
 
 import { RegressionErrorCodes, regressionError } from "./errors.js";
@@ -148,7 +148,7 @@ export type DefectCase = z.infer<typeof defectCaseSchema>;
 export const defectCorpusSchema = z
   .object({
     /** Schema version of this record (ADR-0003). */
-    schemaVersion: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)$/),
+    schemaVersion: schemaVersionString,
     /** Identity of this corpus. */
     corpusId: identifier,
     /** Human-readable purpose. */
@@ -250,7 +250,7 @@ export type EvaluatorOutcome = z.infer<typeof evaluatorOutcomeSchema>;
 export const evaluatorRunSchema = z
   .object({
     /** Schema version of this record (ADR-0003). */
-    schemaVersion: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)$/),
+    schemaVersion: schemaVersionString,
     /** Which evaluator produced these outcomes. */
     evaluatorId: identifier,
     /** Version of the evaluator. Metrics from different versions are not comparable. */

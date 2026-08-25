@@ -16,7 +16,7 @@
 export { KnowledgeErrorCodes, type KnowledgeErrorCode } from "./errors.js";
 
 export {
-  knowledgePackManifestSchema,
+  knowledgePackManifestSchemaBase,
   packDependencySchema,
   packResourcePath,
   type KnowledgePackManifest,

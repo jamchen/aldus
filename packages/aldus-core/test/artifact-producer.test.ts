@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { SCHEMA_VERSION } from "../src/index.js";
-import { artifactRefSchema, producerProvenanceGap } from "../src/schema/artifact.js";
+import { producerProvenanceGap } from "../src/schema/artifact.js";
+import { artifactRefSchema } from "../src/index.js";
 import type { ArtifactRef } from "../src/schema/artifact.js";
 
 /**

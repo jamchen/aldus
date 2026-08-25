@@ -23,7 +23,7 @@ import { actorRefSchema, iso8601, nonEmptyString, schemaVersionString } from "./
  * timestamp, Episode and Run IDs, actor and backend, action, previous and resulting state,
  * input and output references, idempotency key, and safe error detail.
  */
-export const aldusEventSchema = z
+export const aldusEventSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -124,4 +124,4 @@ export const aldusEventSchema = z
   });
 
 /** @see aldusEventSchema */
-export type AldusEvent = z.infer<typeof aldusEventSchema>;
+export type AldusEvent = z.infer<typeof aldusEventSchemaBase>;

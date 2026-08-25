@@ -69,3 +69,4 @@ Rules:
 | [0050](0050-the-next-line-publishes-unattended.md)                                          | The `next` line publishes unattended; `latest` keeps its reviewer                          | Accepted | #173              |
 | [0051](0051-strictness-needs-a-declared-extension-point.md)                                 | Strictness needs a declared extension point                                                | Accepted | #186              |
 | [0052](0052-provenance-records-what-produced-the-bytes.md)                                  | Provenance records what produced the bytes                                                 | Accepted | #196              |
+| [0053](0053-an-exported-schema-carries-the-rule.md)                                         | An exported schema carries the rule                                                        | Accepted | #199              |

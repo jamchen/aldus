@@ -83,7 +83,7 @@ export type ExecutionCeilingEvidence = z.infer<typeof executionCeilingEvidenceSc
  * performing N billed operations commits authorization N times. Reusing one reservation across
  * several effects is the same defect one field over.
  */
-export const spendReservationSchema = z
+export const spendReservationSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -176,7 +176,7 @@ export const spendReservationSchema = z
   });
 
 /** @see spendReservationSchema */
-export type SpendReservation = z.infer<typeof spendReservationSchema>;
+export type SpendReservation = z.infer<typeof spendReservationSchemaBase>;
 
 /**
  * Whether a reservation still commits authorization (ADR-0044).
@@ -252,7 +252,7 @@ export type SpendTransitionKind = (typeof SPEND_TRANSITION_KINDS)[number];
  * is the same fact and appending it again is a no-op; the same id with different contents is two
  * different facts wearing one name, and is refused.
  */
-export const spendReservationTransitionSchema = z
+export const spendReservationTransitionSchemaBase = z
   .object({
     schemaVersion: schemaVersionString,
     /** Stable across retries of the operation that produced it. */
@@ -274,7 +274,7 @@ export const spendReservationTransitionSchema = z
   });
 
 /** @see spendReservationTransitionSchema */
-export type SpendReservationTransition = z.infer<typeof spendReservationTransitionSchema>;
+export type SpendReservationTransition = z.infer<typeof spendReservationTransitionSchemaBase>;
 
 /** Which kinds may follow which. Terminal states have no successors (ADR-0044). */
 const ALLOWED_AFTER: Record<string, readonly SpendTransitionKind[]> = {

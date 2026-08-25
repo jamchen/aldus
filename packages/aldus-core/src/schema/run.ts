@@ -11,7 +11,7 @@ import {
   nonEmptyString,
   schemaVersionString,
 } from "./common.js";
-import { episodeRefSchema } from "./episode.js";
+import { episodeRefSchemaBase } from "./episode.js";
 
 /**
  * Lifecycle states of a Run (contract §6.2).
@@ -37,7 +37,7 @@ export type RunStatus = (typeof RUN_STATUSES)[number];
  *
  * Field list is transcribed verbatim from contract §6.2.
  */
-export const runManifestSchema = z
+export const runManifestSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -50,7 +50,7 @@ export const runManifestSchema = z
      * execution state, and a Run manifest must remain interpretable on its own when read from
      * an archive whose Episode record has since moved or changed.
      */
-    episode: episodeRefSchema,
+    episode: episodeRefSchemaBase,
     /**
      * Identity of the workflow being executed.
      *
@@ -162,4 +162,4 @@ export const runManifestSchema = z
   });
 
 /** @see runManifestSchema */
-export type RunManifest = z.infer<typeof runManifestSchema>;
+export type RunManifest = z.infer<typeof runManifestSchemaBase>;

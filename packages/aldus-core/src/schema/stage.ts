@@ -5,7 +5,7 @@
 import { z } from "zod";
 import { structuredErrorSchema } from "../errors.js";
 import { actorRefSchema, iso8601, nonEmptyString, schemaVersionString } from "./common.js";
-import { artifactRefSchema } from "./artifact.js";
+import { artifactRefSchemaBase } from "./artifact.js";
 
 /**
  * Lifecycle states of a stage attempt (contract §6.3).
@@ -58,9 +58,9 @@ export const stageAttemptSchema = z
      * Recorded by value so the attempt states exactly which input *versions* it saw — the basis
      * for the hash-bound approval invalidation of contract §13.
      */
-    inputArtifacts: z.array(artifactRefSchema).max(4096),
+    inputArtifacts: z.array(artifactRefSchemaBase).max(4096),
     /** Artifacts produced (contract §11 "produce declared outputs or a structured failure"). */
-    outputArtifacts: z.array(artifactRefSchema).max(4096),
+    outputArtifacts: z.array(artifactRefSchemaBase).max(4096),
     /**
      * What the runner expected this attempt to register, resolved before it ran (ADR-0040).
      *
@@ -119,7 +119,7 @@ export type StageAttempt = z.infer<typeof stageAttemptSchema>;
  * The contract does not give a field list for this type; the shape below is decided in GitHub
  * issue #1 as the smallest option that supports contract §19.1 retry and resume semantics.
  */
-export const stageExecutionSchema = z
+export const stageExecutionSchemaBase = z
   .object({
     /** Schema version of this record (ADR-0003). */
     schemaVersion: schemaVersionString,
@@ -177,4 +177,4 @@ export const stageExecutionSchema = z
   });
 
 /** @see stageExecutionSchema */
-export type StageExecution = z.infer<typeof stageExecutionSchema>;
+export type StageExecution = z.infer<typeof stageExecutionSchemaBase>;

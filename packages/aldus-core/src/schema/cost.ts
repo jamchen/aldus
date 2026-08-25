@@ -192,7 +192,7 @@ const BILLING_EVIDENCE_MESSAGE =
   "contract §19.3). Do not substitute a zero — zero is a numerical assertion and an unknown " +
   "amount is an uncertainty state, and they are not interchangeable.";
 
-export const costRecordSchema = costFields
+export const costRecordSchemaBase = costFields
   .refine(hasBillingEvidence, { message: BILLING_EVIDENCE_MESSAGE, path: ["actual"] })
   .meta({
     id: "CostRecord",
@@ -209,7 +209,7 @@ export const costRecordSchema = costFields
   });
 
 /** @see costRecordSchema */
-export type CostRecord = z.infer<typeof costRecordSchema>;
+export type CostRecord = z.infer<typeof costRecordSchemaBase>;
 
 /**
  * What a backend or Worker knows it was charged (contract §19.3; #107).

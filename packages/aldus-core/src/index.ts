@@ -153,7 +153,6 @@ export {
   isResolutionClean,
   isResolvable,
   KnowledgeErrorCodes,
-  knowledgePackManifestSchema,
   normalizeManifestDocument,
   packApplies,
   packDependencySchema,

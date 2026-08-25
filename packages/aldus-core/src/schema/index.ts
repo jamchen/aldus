@@ -9,16 +9,18 @@
 import type { z } from "zod";
 
 import { structuredErrorSchema } from "../errors.js";
+import { withForeignMajorRefused } from "./guard.js";
+import { spendReservationSchemaBase, spendReservationTransitionSchemaBase } from "./reservation.js";
 import { actorRefSchema, knowledgePackRefSchema } from "./common.js";
-import { artifactRefSchema } from "./artifact.js";
-import { costRecordSchema } from "./cost.js";
-import { aldusEventSchema } from "./event.js";
-import { episodeRefSchema } from "./episode.js";
-import { gateDecisionSchema } from "./gate.js";
-import { knowledgePackManifestSchema } from "../knowledge/manifest.js";
-import { releaseReceiptSchema } from "./release.js";
-import { runManifestSchema } from "./run.js";
-import { stageExecutionSchema, stageAttemptSchema } from "./stage.js";
+import { artifactRefSchemaBase } from "./artifact.js";
+import { costRecordSchemaBase } from "./cost.js";
+import { aldusEventSchemaBase } from "./event.js";
+import { episodeRefSchemaBase } from "./episode.js";
+import { gateDecisionSchemaBase } from "./gate.js";
+import { knowledgePackManifestSchemaBase } from "../knowledge/manifest.js";
+import { releaseReceiptSchemaBase } from "./release.js";
+import { runManifestSchemaBase } from "./run.js";
+import { stageAttemptSchema, stageExecutionSchemaBase } from "./stage.js";
 
 export * from "./common.js";
 export * from "./artifact.js";
@@ -37,20 +39,46 @@ export * from "./stage.js";
  * Order is the contract's own narrative order — identity, then execution, then artifacts, then
  * decisions, then accounting — so generated documentation reads top-down.
  */
+
+// --- The exported schemas carry the same-major rule (#199, ADR-0053) -------------------------
+//
+// One combinator applied in one place, so the nine guards cannot drift apart. The registry below
+// holds the **unguarded** bases, because `validateRecord(name, data, supported)` takes the
+// supported version as a parameter and a baked-in constant would break that path.
+//
+// `packages/aldus-core/test/exported-schemas-carry-the-rule.test.ts` enumerates the exports
+// dynamically rather than listing them, so a schema added without a guard fails rather than being
+// forgotten by both the code and the list.
+export const episodeRefSchema = withForeignMajorRefused(episodeRefSchemaBase);
+export const runManifestSchema = withForeignMajorRefused(runManifestSchemaBase);
+export const stageExecutionSchema = withForeignMajorRefused(stageExecutionSchemaBase);
+export const artifactRefSchema = withForeignMajorRefused(artifactRefSchemaBase);
+export const gateDecisionSchema = withForeignMajorRefused(gateDecisionSchemaBase);
+export const costRecordSchema = withForeignMajorRefused(costRecordSchemaBase);
+export const releaseReceiptSchema = withForeignMajorRefused(releaseReceiptSchemaBase);
+export const aldusEventSchema = withForeignMajorRefused(aldusEventSchemaBase);
+export const knowledgePackManifestSchema = withForeignMajorRefused(knowledgePackManifestSchemaBase);
+// Found by the conformance test, not by the list: these carry `schemaVersion` and are exported,
+// and they are not in `coreSchemas` — so a hand-written list would have missed both doors.
+export const spendReservationSchema = withForeignMajorRefused(spendReservationSchemaBase);
+export const spendReservationTransitionSchema = withForeignMajorRefused(
+  spendReservationTransitionSchemaBase,
+);
+
 export const coreSchemas = {
-  EpisodeRef: episodeRefSchema,
-  RunManifest: runManifestSchema,
-  StageExecution: stageExecutionSchema,
+  EpisodeRef: episodeRefSchemaBase,
+  RunManifest: runManifestSchemaBase,
+  StageExecution: stageExecutionSchemaBase,
   StageAttempt: stageAttemptSchema,
-  ArtifactRef: artifactRefSchema,
-  GateDecision: gateDecisionSchema,
-  CostRecord: costRecordSchema,
-  ReleaseReceipt: releaseReceiptSchema,
+  ArtifactRef: artifactRefSchemaBase,
+  GateDecision: gateDecisionSchemaBase,
+  CostRecord: costRecordSchemaBase,
+  ReleaseReceipt: releaseReceiptSchemaBase,
   KnowledgePackRef: knowledgePackRefSchema,
   ActorRef: actorRefSchema,
   StructuredError: structuredErrorSchema,
-  AldusEvent: aldusEventSchema,
-  KnowledgePackManifest: knowledgePackManifestSchema,
+  AldusEvent: aldusEventSchemaBase,
+  KnowledgePackManifest: knowledgePackManifestSchemaBase,
 } as const;
 
 /** Name of a registered core schema. */

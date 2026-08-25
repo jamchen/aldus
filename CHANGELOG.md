@@ -10,35 +10,56 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.2.0-next.26 — 2026-08-25
+
+### BREAKING — an exported schema now refuses a foreign major
+
+**What starts throwing:** parsing a record whose `schemaVersion` has a **different major** than this
+build implements, through an **exported schema object** — `artifactRefSchema.safeParse`,
+`costRecordSchema.parse`, and the nine others. It previously returned success and handed you a value
+this build cannot interpret.
+
+`validateRecord` and `assertValidRecord` already refused such a record, so **which guarantee you got
+depended on which door you came through** (ADR-0053). The exported object is the obvious door and it
+carried no rule.
+
+<!-- A semantic break: no export removed, no member newly required, so check-breaking-notes.mjs
+     reports nothing to mark and this entry exists because a person wrote it. -->
+
+**Migration.** If you relied on an exported schema accepting a foreign-major record, you relied on a
+bypass — the value it returned could not be interpreted by this build. Where you genuinely need to
+validate against a _different_ supported version, use `validateRecord(name, data, supported)`, which
+takes it as a parameter, or the unguarded `*SchemaBase` exports the registry itself uses.
+
+A newer **minor** still parses, deliberately. Refusing one would make every additive schema change
+breaking for older readers, and `assertValidRecord` reports such a record as
+`compatibility: "forward"`.
+
+**Composition is unaffected.** `.shape`, `.extend`, `.pick` and `.safeExtend` all still work.
+
+### A CHANGELOG defect, fixed here and disclosed rather than quietly repaired
+
+**`0.2.0-next.22` and `0.2.0-next.23` published with no release notes at all, and `next.24`'s notes
+sat under `Unreleased` after it shipped.** All three are restored in this release; `next.22`'s are
+reconstructed from ADR-0051 and say so at the top of that section.
+
+The mechanism was mine and it is worth naming, because it is the third instance of one failure.
+`next.21` shipped eight undocumented breaking changes and an adopter found them by compiling. The
+remedy then was to write the notes. What actually kept happening is that **each branch edited the
+`## Unreleased` heading by text replacement, and branches that did not share history overwrote one
+another's entries** — so the notes were written each time and silently lost on the way in. Writing
+them more carefully would not have helped; only looking at the merged file does.
+
+Nothing in CI catches it: `check-breaking-notes.mjs` only asks whether the _current_ version's
+section documents the _current_ diff, so a previous release having no section at all passes.
+
 ### Features
 
-**`ArtifactRef` gains an optional `producers` list** — what produced the bytes, alongside the
-inputs provenance already pinned (ADR-0052). Each entry is `{ id, version, versionEvidence }`, all
-opaque to Core.
-
-Provenance recorded every input a stage read and nothing about what produced them beyond
-`producerStageId`. So the same inputs through a later model, renderer or Worker binary yield
-different bytes and no field distinguishes the two records — which for a `source` artifact is
-unrecoverable, because those bytes cannot be regenerated and compared.
-
-**It is a list because one execution can have several producers.** Measured by an adopter: an agent
-CLI reports usage as a map keyed by model, and a delegating execution reports more than one. A
-single producer would force a caller to pick, invisibly.
-
-**`versionEvidence` distinguishes `"reported"` from `"requested"`**, because those are different
-strings: `--model haiku` in, `claude-haiku-4-5-20251001` out. Recording the request as though it
-were the executed version would be the same failure the field exists to fix, one level down.
-
-**`producerProvenanceGap(artifact)`** reports the absence and separates a `source` artifact, where
-the gap cannot be recovered, from a `reproducible` one, where it can be closed by regenerating. An
-optional field nobody fills is decoration; this makes the hole queryable.
-
-Optional and non-empty when present, so no stored record becomes invalid and an empty list cannot
-assert that nothing produced the bytes. `SCHEMA_VERSION` **1.12 → 1.13** (MINOR, ADR-0003).
-
-Not on `CostRecord`: a free execution writes no cost record, so an artifact produced by a free run
-would have no producer identity — and a `source` artifact is exactly as irreproducible whether or
-not anyone was billed.
+**`@aldus-runtime/regression` record schemas now use Core's `schemaVersionString`** instead of a
+private copy of the same regex — two definitions of one format that could drift, and the reason a
+Core-side change would not have reached regression at all.
 
 ## 0.2.0-next.25 — 2026-08-25
 
@@ -85,6 +106,103 @@ above exists to stop a _declaration_ arriving as silence.
 This is the third instance of one rule reaching one entry point and not another: the spend service
 already records that _"truthfully reported `billingStatus: \"free\"` was recorded as an
 unauthorized charge"_, fixed there and not inherited here.
+
+## 0.2.0-next.24 — 2026-08-25
+
+### Features
+
+**`ArtifactRef` gains an optional `producers` list** — what produced the bytes, alongside the
+inputs provenance already pinned (ADR-0052). Each entry is `{ id, version, versionEvidence }`, all
+opaque to Core.
+
+Provenance recorded every input a stage read and nothing about what produced them beyond
+`producerStageId`. So the same inputs through a later model, renderer or Worker binary yield
+different bytes and no field distinguishes the two records — which for a `source` artifact is
+unrecoverable, because those bytes cannot be regenerated and compared.
+
+**It is a list because one execution can have several producers.** Measured by an adopter: an agent
+CLI reports usage as a map keyed by model, and a delegating execution reports more than one. A
+single producer would force a caller to pick, invisibly.
+
+**`versionEvidence` distinguishes `"reported"` from `"requested"`**, because those are different
+strings: `--model haiku` in, `claude-haiku-4-5-20251001` out. Recording the request as though it
+were the executed version would be the same failure the field exists to fix, one level down.
+
+**`producerProvenanceGap(artifact)`** reports the absence and separates a `source` artifact, where
+the gap cannot be recovered, from a `reproducible` one, where it can be closed by regenerating. An
+optional field nobody fills is decoration; this makes the hole queryable.
+
+Optional and non-empty when present, so no stored record becomes invalid and an empty list cannot
+assert that nothing produced the bytes. `SCHEMA_VERSION` **1.12 → 1.13** (MINOR, ADR-0003).
+
+Not on `CostRecord`: a free execution writes no cost record, so an artifact produced by a free run
+would have no producer identity — and a `source` artifact is exactly as irreproducible whether or
+not anyone was billed.
+
+## 0.2.0-next.23 — 2026-08-25
+
+### Documentation on the money path
+
+No behaviour changes. Three semantics that were already true of the shipped runtime and that
+nothing said out loud, all from the first adopter migration through `#155` and ADR-0044.
+
+What makes them worth a release note is the shape of getting them wrong. **The natural misuse of
+each one compiles cleanly and then refuses or overspends at runtime** — a wrong `effectKey` grain
+type-checks and is refused only after the first effect has been paid for; an unset `maxPerRequest`
+type-checks and refuses every unestimated dispatch; a `maxTotal` sized as a lifetime pool
+type-checks and simply provisions the wrong amount. Nothing before runtime says so, which is worse
+than a change that fails to compile.
+
+**`effectKey`: one attempt is not necessarily one effect.** A stage dispatching twice within a
+single attempt — a writer and then a reviewer, a segment loop — has two independently billed
+effects, and keying both on the attempt gives them one key. The second reserve is refused at
+runtime, correctly, _after the first has been paid for_: a stage dying mid-attempt having spent
+money. Derive the key from what makes an effect the same effect if repeated, and distinguish
+effects within an attempt — `${attemptId}:${purpose}`, not `attemptId`. The dispatcher's identity
+and version are prepended by the runtime; adding them yourself double-versions the key and defeats
+the idempotency it exists for.
+
+**`maxPerRequest` changed meaning without changing type.** It was a statement about what a
+_backend_ enforces, so leaving it unset where the backend enforced nothing was the honest choice.
+Under ADR-0044 it is what the _runtime reserves_. Still optional, still compiles, and under
+`unestimatedExecution: "reserve_max_per_request"` an unset ceiling makes every unestimated dispatch
+refuse.
+
+**`maxTotal` is consumed by two different things**, and reading it as one mis-sizes a grant in
+either direction. Settled charges consume it permanently at their actual amount; active and
+unresolved reservations consume it at their _reserved_ amount until they settle, at which point
+unused headroom returns. So `maxTotal ÷ maxPerRequest` bounds how many unestimated dispatches can
+be **outstanding at once**, not how many a run may make — nine dispatches settling cheaply against
+a $25 / $3 grant leave $23.20 available. Read as a lifetime pool it ignores that eight worst-case
+reservations can be outstanding before any settles; read as a concurrency bound alone it
+over-provisions a run whose charges are small.
+
+`packages/aldus-gate-engine/test/settlement-headroom.test.ts` holds that behaviour to the protocol,
+so the prose fails when it drifts again.
+
+## 0.2.0-next.22 — 2026-08-25
+
+> **These notes were reconstructed from ADR-0051 after the release.** The originals were lost in
+> the CHANGELOG defect described under `0.2.0-next.25`; the ADR is authoritative and this is a
+> faithful summary of it, not a recovered copy.
+
+### Features
+
+**`@aldus-runtime/regression` record schemas gain an optional `metadata: Record<string, unknown>`**
+on both `DefectCorpus` and `EvaluatorRun` (ADR-0051). Core never interprets it.
+
+`0.2.0-next.21` made both schemas strict, which was right for the case it was aimed at — a record
+from a later runtime parsing while its added fields are silently discarded — and wrong for the case
+it also caught: **adopter-owned data**, which the first adopter to bump was carrying deliberately
+and documenting as stripped.
+
+Strictness stays. The two cases are separated: an **undeclared** key is still refused, because it
+may be a later runtime's field; a **declared** extension point is preserved through the parse. That
+is better than what it replaces — a sibling key survived only because readers went around the
+parser to the raw JSON, and `metadata` is readable through it.
+
+Migrating from a sibling key: move it under `metadata`, then read it through the parser instead of
+the raw file. Additive and optional, so `SCHEMA_VERSION` moved **1.11 → 1.12** (MINOR, ADR-0003).
 
 ## 0.2.0-next.21 — 2026-08-25
 
