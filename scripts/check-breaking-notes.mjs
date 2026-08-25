@@ -1,0 +1,163 @@
+#!/usr/bin/env node
+/**
+ * A breaking change to a public signature must carry a `BREAKING` entry in the CHANGELOG.
+ *
+ * `0.2.0-next.21` shipped seven undocumented signature changes on the paid-spend and
+ * agent-execution path — six required fields appearing and one export removed. The notes described
+ * one change. The adopter found the rest by compiling: 8 errors across 6 files.
+ *
+ * What makes that worth a check rather than a habit is who could have caught it. The adopter asked
+ * in advance and in writing what the release contained, got no answer in time, and bumped on a
+ * summary that described one change. **Three humans in the loop failed to surface it and the
+ * compiler was the only mechanism that did** — and a pinned adopter is, by construction, the last
+ * party to know and has no way to volunteer the information. The detection has to move to this
+ * side of the line.
+ *
+ * ## What it compares
+ *
+ * The **built `.d.ts` export surface**, not source files and not paths. Contract §4.3 and this
+ * project's own catalogue both say the same thing: a change's blast radius is a question about the
+ * export surface, and describing it from file paths is how "test-only" gets said of a symbol
+ * exported from a package index.
+ *
+ * Breaking, for this check:
+ *
+ * - an exported symbol present on the base and absent on the head — a removal;
+ * - a required member appearing on an exported type that did not have it.
+ *
+ * ## What it deliberately does not do
+ *
+ * It does **not** decide whether a change is *semantically* breaking. A field whose meaning
+ * changed while its type did not is invisible here, and the two most dangerous changes in that
+ * release were exactly that shape — `effectKey` namespacing and `unestimatedExecution` defaulting
+ * to refuse both compile cleanly and behave wrongly. This check finds what fails to compile, which
+ * is the easier half. Stated here because a check implying otherwise would be the first failure
+ * category living inside the tool built for it.
+ *
+ * Usage: node scripts/check-breaking-notes.mjs <base-ref>
+ */
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const baseRef = process.argv[2];
+if (baseRef === undefined) {
+  console.error("usage: check-breaking-notes.mjs <base-ref>");
+  process.exit(2);
+}
+
+const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: "utf8", ...opts }).trim();
+
+/** Every exported symbol, and the required members of each exported type, from built `.d.ts`. */
+function surfaceOf(root) {
+  const surface = new Map();
+  const pkgDir = join(root, "packages");
+  if (!existsSync(pkgDir)) return surface;
+  const dts = sh("bash", [
+    "-c",
+    `find ${JSON.stringify(pkgDir)} -path '*/dist/*.d.ts' -not -path '*/node_modules/*' | sort`,
+  ]);
+  for (const file of dts.split("\n").filter(Boolean)) {
+    const pkg = file.slice(pkgDir.length + 1).split("/")[0];
+    const text = readFileSync(file, "utf8");
+    for (const match of text.matchAll(
+      /^export (?:declare )?(?:abstract )?(class|interface|type|function|const|enum) ([A-Za-z_$][\w$]*)/gm,
+    )) {
+      surface.set(`${pkg}:${match[2]}`, new Set());
+    }
+    // Required members of exported **interfaces**. Two restrictions, each from a measured false
+    // positive on the run that validated this check against the release it was built for:
+    //
+    // `interface` only, and the brace must open on the declaration line. A one-line
+    // `export type BillingStatus = (typeof BILLING_STATUSES)[number];` has no body, and a pattern
+    // that skips ahead to the next `{` attributes the *following* declaration's members to it —
+    // which reported `BillingStatus.kind`, a member of `CostExpectation`.
+    //
+    // And Zod-inferred bodies are skipped: optionality there lives in `z.ZodOptional<…>`, not in a
+    // `?`, so every optional field on a schema type reads as newly required. `TakeDelivery.costIds`
+    // is declared `z.ZodOptional<z.ZodArray<…>>` and was reported as a break.
+    for (const block of text.matchAll(
+      /^export (?:declare )?interface ([A-Za-z_$][\w$]*)[^{\n]*\{$([\s\S]*?)^\}/gm,
+    )) {
+      if (/z\.Zod/.test(block[2])) continue;
+      const key = `${pkg}:${block[1]}`;
+      const members = surface.get(key) ?? new Set();
+      for (const member of block[2].matchAll(/^\s{4}(?:readonly )?([A-Za-z_$][\w$]*)(\??):/gm)) {
+        if (member[2] !== "?") members.add(member[1]);
+      }
+      surface.set(key, members);
+    }
+  }
+  return surface;
+}
+
+const repoRoot = sh("git", ["rev-parse", "--show-toplevel"]);
+const head = surfaceOf(repoRoot);
+if (head.size === 0) {
+  console.error("DECLINED: no built .d.ts found at HEAD — run `npm run build` first.");
+  console.error("A missing build is not the same answer as a clean surface.");
+  process.exit(2);
+}
+
+// The base is built in a throwaway worktree, because the surface has to come from the base's own
+// compiler output. Reading the base's *source* would answer a different question.
+const work = mkdtempSync(join(tmpdir(), "aldus-breaking-"));
+let base;
+try {
+  sh("git", ["worktree", "add", "--detach", work, baseRef]);
+  const install = spawnSync("npm", ["ci", "--ignore-scripts"], { cwd: work, encoding: "utf8" });
+  const built = spawnSync("npx", ["tsc", "-b"], { cwd: work, encoding: "utf8" });
+  base = surfaceOf(work);
+  if (base.size === 0) {
+    console.error(`DECLINED: could not build the base (${baseRef}) to compare against.`);
+    console.error(`  npm ci  exit=${install.status}\n  tsc -b  exit=${built.status}`);
+    console.error("A base that would not build is not evidence that nothing broke.");
+    process.exit(2);
+  }
+} finally {
+  sh("git", ["worktree", "remove", "--force", work]).toString?.();
+  rmSync(work, { recursive: true, force: true });
+}
+
+const breaking = [];
+for (const [key, members] of base) {
+  if (!head.has(key)) {
+    breaking.push(`removed export: ${key}`);
+    continue;
+  }
+  const now = head.get(key) ?? new Set();
+  for (const member of now) {
+    if (!members.has(member)) breaking.push(`newly required member: ${key}.${member}`);
+  }
+}
+
+if (breaking.length === 0) {
+  console.log(`No breaking surface change against ${baseRef}.`);
+  console.log(
+    "Not checked: whether a change is semantically breaking. A field whose meaning changed " +
+      "while its type did not is invisible here.",
+  );
+  process.exit(0);
+}
+
+// A `BREAKING` heading anywhere in the CHANGELOG's unreleased-or-newest section counts. The check
+// is that someone wrote one, not that they wrote a particular sentence.
+const changelog = readFileSync(join(repoRoot, "CHANGELOG.md"), "utf8");
+const newest = changelog.split(/^## /m).slice(1, 3).join("\n");
+if (/BREAKING/.test(newest)) {
+  console.log(
+    `${breaking.length} breaking surface change(s), and the notes carry a BREAKING entry.`,
+  );
+  for (const item of breaking) console.log(`  ${item}`);
+  process.exit(0);
+}
+
+console.error(`${breaking.length} breaking surface change(s) against ${baseRef}, and no BREAKING`);
+console.error("entry in the CHANGELOG's newest section:\n");
+for (const item of breaking) console.error(`  ${item}`);
+console.error(
+  "\nAn adopter pinned exactly finds these by compiling, and is the last party to know. Add a " +
+    "BREAKING section with the migration for each, or explain why one of these is not breaking.",
+);
+process.exit(1);
