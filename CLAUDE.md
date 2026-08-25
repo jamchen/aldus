@@ -329,7 +329,19 @@ checkable by nobody.
 
 `check-breaking-notes.mjs` compares **built `.d.ts` against built `.d.ts`**, never source, because a
 blast radius is a question about the export surface. It finds a removed export and a newly required
-member; it does **not** find a semantic break. The two most dangerous changes in the release it was
+member; it does **not** find a semantic break.
+
+The shape it cannot see, named by the first adopter to migrate through one: **an optional field
+whose meaning changed.** The type system has nothing to say, the change compiles, and the prose
+around the field at the call site is _actively wrong_ — a reader fixing the resulting failure finds
+a comment arguing for the choice that is now the wrong one. `maxPerRequest` was exactly this: a
+statement about what a backend enforces became what the runtime reserves, and leaving it unset went
+from the honest choice to the one that refuses every dispatch. Its cousin is a **required** field
+whose correct _value_ changed grain — `effectKey` keyed per attempt was right for six stages of
+seven, and on the seventh it compiles and spends money before refusing.
+
+Neither is detectable here. What answers them is a migration report from someone who compiled
+against the change, which is why one is worth more than a clean run. The two most dangerous changes in the release it was
 built for — `effectKey` namespacing and `unestimatedExecution` defaulting to refuse — compile
 cleanly and behave wrongly, and are invisible to it.
 

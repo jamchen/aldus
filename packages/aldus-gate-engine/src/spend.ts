@@ -88,9 +88,48 @@ export interface SpendGrant {
    * Absent reads as `"refuse"`.
    */
   unestimatedExecution?: "refuse" | "reserve_max_per_request";
-  /** Maximum total spend authorized across the Run (§13.2 "maximum authorized cost"). */
+  /**
+   * Maximum total spend authorized across the Run (§13.2 "maximum authorized cost").
+   *
+   * **Two different things consume it**, and confusing them mis-sizes a grant in either direction:
+   *
+   * - **settled charges**, permanently — the actual `CostRecord` amounts;
+   * - **active and unresolved reservations**, at their *reserved* amount until they settle.
+   *
+   * `availableAuthorization` is `maxTotal − settled − active`, and on settlement a reservation
+   * stops being counted at what it reserved and starts being counted at what it actually cost —
+   * so **unused headroom returns**.
+   *
+   * That matters under `unestimatedExecution: "reserve_max_per_request"`, where each unestimated
+   * dispatch reserves the *whole* per-request ceiling because there is no smaller truthful number.
+   * `maxTotal ÷ maxPerRequest` bounds how many such dispatches can be **outstanding at once** — in
+   * flight, or with billing still unresolved. It does **not** bound the run: once they settle
+   * below the ceiling the difference is available again, and a $25 / $3 grant can authorize far
+   * more than eight sequential dispatches when each settles cheaply.
+   *
+   * Both readings mis-size a grant. Read as a lifetime pool it ignores that eight worst-case
+   * reservations can be outstanding before any of them settles; read as a concurrency bound alone
+   * it over-provisions a run whose charges are small. Measured by an adopter: a $3 / $3 grant
+   * permitted one dispatch and refused a case dispatching twice, with the budget almost untouched
+   * — because the first had not settled yet.
+   */
   maxTotal: Money;
-  /** Maximum spend authorized for any single request (§19.3 "per-request ... limits"). */
+  /**
+   * Maximum spend authorized for any single request (§19.3 "per-request ... limits").
+   *
+   * **What this means changed with ADR-0044 while its type did not.** It was a statement about
+   * what a *backend* enforces, so leaving it unset where the backend enforces nothing was the
+   * honest choice — binding a ceiling would have recorded a protection that did not exist.
+   *
+   * It is now what the *runtime reserves* before dispatch. Unset is still valid and still
+   * compiles, and under `unestimatedExecution: "reserve_max_per_request"` it makes every
+   * unestimated dispatch refuse, because there is no truthful amount to reserve
+   * (see {@link unestimatedPolicyIsSatisfiable}).
+   *
+   * Called out because the type system has nothing to say about a field whose meaning moved: an
+   * adopter migrating hit exactly this, and the comment in their own file argued for the choice
+   * that is now wrong.
+   */
   maxPerRequest?: Money;
 }
 
