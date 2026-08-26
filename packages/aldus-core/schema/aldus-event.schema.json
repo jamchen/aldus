@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.14:AldusEvent",
+  "$id": "urn:aldus:schema:1.15:AldusEvent",
   "type": "object",
   "properties": {
     "schemaVersion": {
