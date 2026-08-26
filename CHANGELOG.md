@@ -24,8 +24,10 @@ Now only `ENOENT` means empty — a workspace that has reserved nothing has no r
 ordinary empty answer. Every other error (a permission failure, a file where the directory belongs,
 a root pointed at another composition's idea of the layout) propagates.
 
-<!-- breaking: file-store:FileSpendReservationStore.listByRun -->
-<!-- breaking: file-store:FileSpendReservationStore.get -->
+<!-- No machine marker: check-breaking-notes reports no surface finding, because the signature is
+     unchanged — `listByRun` still returns the same type. The break is semantic: a call that used
+     to resolve to `[]` now rejects. That is the same blind spot the next.35 gate entry names, and
+     this note is written by hand for the same reason. -->
 
 **What changes for an adopter:** a composition whose spend store is rooted at a path that is not a
 readable directory now fails loudly at the first `costs` or `settle` instead of silently reporting
