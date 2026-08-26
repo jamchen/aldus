@@ -158,7 +158,15 @@ for (const testCase of cases) {
     }
   }
 
-  const [command, ...args] = testCase.command;
+  // `{{BASE}}` is this branch's tip **before** any mutation, not `origin/main`.
+  //
+  // Cases hard-coded `origin/main`, which made every diff-comparing case measure the branch's own
+  // work alongside the mutation. On a branch that touches `packages/*/src` — which is most of them
+  // — four cases failed for a reason that had nothing to do with what they test, and the suite was
+  // usable only on script-only branches. That is a second way for an instrument to stop being
+  // asked: not silent, but wrong often enough that its red means nothing.
+  const [command, ...rest] = testCase.command;
+  const args = rest.map((arg) => (arg === "{{BASE}}" ? base : arg));
   const run = spawnSync(command, args, { encoding: "utf8" });
   const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
   const status = run.status;

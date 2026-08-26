@@ -37,6 +37,7 @@
  * Usage: node scripts/check-breaking-notes.mjs <base-ref>
  */
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,6 +55,8 @@ const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: "utf8",
 /** Every exported symbol, and the required members of each exported type, from built `.d.ts`. */
 function surfaceOf(root) {
   const surface = new Map();
+  // Exported interfaces whose bodies are Zod-inferred: present, and deliberately unclassifiable.
+  const opaque = new Map();
   const pkgDir = join(root, "packages");
   if (!existsSync(pkgDir)) return surface;
   const dts = sh("bash", [
@@ -79,10 +82,35 @@ function surfaceOf(root) {
     // And Zod-inferred bodies are skipped: optionality there lives in `z.ZodOptional<…>`, not in a
     // `?`, so every optional field on a schema type reads as newly required. `TakeDelivery.costIds`
     // is declared `z.ZodOptional<z.ZodArray<…>>` and was reported as a break.
+    // Zod-inferred **type aliases**, which the interface scan below never reaches at all.
+    //
+    // `export type ReworkPolicy = z.infer<typeof reworkPolicySchemaBase>` has no body, so no member
+    // of it was ever classifiable — and that is exactly what was missed one release ago, when
+    // `ReworkPolicy.automaticCorrectionHarm` became required and this check reported one finding
+    // out of two. The alias carries no shape; the `declare const` it points at does, so that is
+    // what gets digested.
+    for (const alias of text.matchAll(
+      /^export type ([A-Za-z_$][\w$]*) = z\.infer<typeof ([A-Za-z_$][\w$]*)>/gm,
+    )) {
+      const schema = text.match(
+        new RegExp(`^export declare const ${alias[2]}:([\\s\\S]*?)^(?=export |declare |$)`, "m"),
+      );
+      if (schema !== null) {
+        opaque.set(`${pkg}:${alias[1]}`, createHash("sha256").update(schema[1]).digest("hex"));
+      }
+    }
     for (const block of text.matchAll(
       /^export (?:declare )?interface ([A-Za-z_$][\w$]*)[^{\n]*\{$([\s\S]*?)^\}/gm,
     )) {
-      if (/z\.Zod/.test(block[2])) continue;
+      if (/z\.Zod/.test(block[2])) {
+        // Not silently. Skipping is correct — optionality here lives in `z.ZodOptional<…>` and
+        // every optional field would read as newly required — but a skip nobody is told about is
+        // the tool having a blind spot rather than *knowing* it has one, and the difference is
+        // whether a reader can go look. Recorded with a digest of the body so the report can name
+        // the ones that actually changed.
+        opaque.set(`${pkg}:${block[1]}`, createHash("sha256").update(block[2]).digest("hex"));
+        continue;
+      }
       const key = `${pkg}:${block[1]}`;
       const members = surface.get(key) ?? new Set();
       for (const member of block[2].matchAll(/^\s{4}(?:readonly )?([A-Za-z_$][\w$]*)(\??):/gm)) {
@@ -91,11 +119,11 @@ function surfaceOf(root) {
       surface.set(key, members);
     }
   }
-  return surface;
+  return { surface, opaque };
 }
 
 const repoRoot = sh("git", ["rev-parse", "--show-toplevel"]);
-const head = surfaceOf(repoRoot);
+const { surface: head, opaque: headOpaque } = surfaceOf(repoRoot);
 if (head.size === 0) {
   console.error("DECLINED: no built .d.ts found at HEAD — run `npm run build` first.");
   console.error("A missing build is not the same answer as a clean surface.");
@@ -106,11 +134,12 @@ if (head.size === 0) {
 // compiler output. Reading the base's *source* would answer a different question.
 const work = mkdtempSync(join(tmpdir(), "aldus-breaking-"));
 let base;
+let baseOpaque = new Map();
 try {
   sh("git", ["worktree", "add", "--detach", work, baseRef]);
   const install = spawnSync("npm", ["ci", "--ignore-scripts"], { cwd: work, encoding: "utf8" });
   const built = spawnSync("npx", ["tsc", "-b"], { cwd: work, encoding: "utf8" });
-  base = surfaceOf(work);
+  ({ surface: base, opaque: baseOpaque } = surfaceOf(work));
   if (base.size === 0) {
     console.error(`DECLINED: could not build the base (${baseRef}) to compare against.`);
     console.error(`  npm ci  exit=${install.status}\n  tsc -b  exit=${built.status}`);
@@ -134,12 +163,41 @@ for (const [key, members] of base) {
   }
 }
 
+// The blind spot, named rather than left implicit. These are exported interfaces whose bodies are
+// Zod-inferred, so a newly required member reads identically to an existing one and the check above
+// cannot classify them. Listing the ones whose body actually changed turns "the tool cannot see
+// this" into "the tool knows what it cannot see", which is the difference between a reader who can
+// go and look and one who has no reason to.
+//
+// Surfaced, never refused. Refusing would fire on every additive schema change — which is most of
+// them — and a red that is usually wrong is a red people learn to clear rather than read. Same split
+// as `evidence.mjs`: refuse the mechanical half, surface the judgement half.
+const opaqueChanged = [];
+for (const [key, digest] of headOpaque) {
+  const before = baseOpaque.get(key);
+  if (before !== undefined && before !== digest) opaqueChanged.push(key);
+}
+function reportOpaque() {
+  if (opaqueChanged.length === 0) return;
+  console.log(
+    `\nNot classifiable (${opaqueChanged.length}): Zod-inferred exported type(s) whose shape ` +
+      "changed.",
+  );
+  for (const key of opaqueChanged) console.log(`  ${key}`);
+  console.log(
+    "Optionality here lives in `z.ZodOptional<…>` rather than in a `?`, so a newly required " +
+      "member\nis invisible to this check. If one of these gained a required member, that is a " +
+      "break and\nneeds a CHANGELOG entry nothing here will demand.",
+  );
+}
+
 if (breaking.length === 0) {
   console.log(`No breaking surface change against ${baseRef}.`);
   console.log(
     "Not checked: whether a change is semantically breaking. A field whose meaning changed " +
       "while its type did not is invisible here.",
   );
+  reportOpaque();
   process.exit(0);
 }
 
@@ -199,6 +257,7 @@ console.log(
   `${breaking.length} breaking surface change(s), each marked in the ${heading} section.`,
 );
 for (const item of breaking) console.log(`  ${item}`);
+reportOpaque();
 if (waived.size > 0) {
   console.log(`\n${waived.size} waiver(s) in this section:`);
   for (const [symbol, reason] of waived) console.log(`  ${symbol} — ${reason}`);
