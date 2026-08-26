@@ -1,6 +1,6 @@
 {
   "name": "@aldus-runtime/core",
-  "version": "0.2.0-next.36",
+  "version": "0.2.0-next.37",
   "type": "module",
   "description": "Aldus Core — domain types, JSON schemas, validation, IDs, and redaction. Generic runtime contracts only.",
   "license": "Apache-2.0",

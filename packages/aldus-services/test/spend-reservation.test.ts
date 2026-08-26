@@ -12,14 +12,14 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ActorRef, CostRecord } from "@aldus-runtime/core";
+import { reservationIsActive, type ActorRef, type CostRecord } from "@aldus-runtime/core";
 import { FileSpendReservationStore } from "@aldus-runtime/file-store";
 import { grantTermsDigest, type SpendGrant } from "@aldus-runtime/gate-engine";
 import type { AgentBackend } from "@aldus-runtime/stage-runner";
 
 import { AgentExecutionService } from "../src/agent-execution.js";
 import type { CostRecordStore } from "../src/cost-store.js";
-import { SpendService } from "../src/spend-service.js";
+import { openOperatorConsole, SpendService } from "../src/spend-service.js";
 
 const ACTOR: ActorRef = { kind: "agent", id: "claude" };
 const RUN = "run-a";
@@ -668,5 +668,119 @@ describe("a reservation whose dispatch was prepared is still findable", () => {
     expect(found?.status).toBe("reserved");
     expect(found?.requiresReconciliation).toBe(false);
     expect(found?.execution).toBeDefined();
+  });
+});
+
+describe("a dispatch that never came back has a verb (#226)", () => {
+  // The first adopter's sequence exactly: reserve $12.00, prepare the dispatch, and the process is
+  // killed before any billing outcome. The reservation is `reserved` — never `billing_unknown`,
+  // because nothing survived to classify it — and `costs settle` accepts only `billing_unknown`.
+  // So `aldus costs` listed the reservation and named `settle` as the resolution, and `settle`
+  // refused it. The one place that tells an operator what to do named the one command that would
+  // refuse them.
+  const HUMAN: ActorRef = { kind: "human", id: "operator-a" };
+
+  async function stranded() {
+    const { spend, costs } = services();
+    const outcome = await spend.reserve({
+      ...reserveInput,
+      grant: grant(),
+      expectation: { kind: "estimated", amount: { amount: "2.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+    // Nothing else happens. The process died here.
+    return { spend, costs, reservation: prepared };
+  }
+
+  it("refuses to reconcile it, and says something true about why", async () => {
+    // The state guard is correct and its message was not: `reserved` is not terminal, it is stuck,
+    // and "a terminal reservation never resumes" was false about the reservation it was printed on.
+    const { spend, reservation } = await stranded();
+    const console = openOperatorConsole({ spend, actor: HUMAN });
+
+    await expect(
+      console.reconcile(reservation, {
+        evidenceRef: "probe",
+        resolution: { kind: "investigation_ended" },
+        decisionId: "d-1",
+      }),
+    ).rejects.toThrow(/not terminal: it is still reserved/);
+  });
+
+  it("names a verb the state can actually accept", async () => {
+    const { spend, reservation } = await stranded();
+    const console = openOperatorConsole({ spend, actor: HUMAN });
+
+    await expect(
+      console.reconcile(reservation, {
+        evidenceRef: "probe",
+        resolution: { kind: "investigation_ended" },
+        decisionId: "d-1",
+      }),
+    ).rejects.toThrow(/costs abandon/);
+  });
+
+  it("abandoning it makes it reconcilable, without deciding what it cost", async () => {
+    const { spend, reservation } = await stranded();
+    const console = openOperatorConsole({ spend, actor: HUMAN });
+
+    const marked = await console.abandonDispatch(reservation, {
+      reason: "the process was killed mid-dispatch and is not coming back",
+    });
+
+    // Unknown, not zero. The execution may have run for minutes before it was killed, so the
+    // reservation keeps consuming its full authorization until a reconciliation resolves it.
+    expect(marked.status).toBe("billing_unknown");
+    expect(reservationIsActive(marked)).toBe(true);
+
+    // And now the door the adopter was pointed at actually opens.
+    const settled = await console.reconcile(marked, {
+      evidenceRef: "provider console shows no charge for this request id",
+      resolution: { kind: "released_as_uncharged" },
+      decisionId: "d-1",
+    });
+    expect(settled.reservation.status).toBe("released");
+  });
+
+  it("records who decided it is not coming back, because the runtime cannot know that", async () => {
+    // An ordinary `billing_unknown` is the runtime's own classification of a dispatch that
+    // returned without an amount. This one is a person's judgement about a process that returned
+    // nothing at all, and a record that could not tell them apart would let the second be read as
+    // the first.
+    const { spend, reservation } = await stranded();
+    await openOperatorConsole({ spend, actor: HUMAN }).abandonDispatch(reservation, {
+      reason: "killed mid-dispatch",
+    });
+
+    const stream = await new FileSpendReservationStore({ root }).readGrant(reservation.grantId);
+    const transition = stream.transitions.find(
+      (entry) =>
+        entry.reservationId === reservation.reservationId &&
+        entry.kind === "reservation.billing_unknown",
+    );
+
+    expect(transition?.detail["decidedBy"]).toEqual(HUMAN);
+    expect(transition?.detail["reason"]).toBe("killed mid-dispatch");
+  });
+
+  it("leaves an ordinary runtime-classified unknown unattributed", async () => {
+    // The negative control. Without it the assertion above passes for a `decidedBy` written on
+    // every `billing_unknown`, which would be the opposite of the distinction being made.
+    const { spend, reservation } = await stranded();
+    await spend.markUnknown(reservation, [], { reason: "provider returned no amount" });
+
+    const stream = await new FileSpendReservationStore({ root }).readGrant(reservation.grantId);
+    const transition = stream.transitions.find(
+      (entry) =>
+        entry.reservationId === reservation.reservationId &&
+        entry.kind === "reservation.billing_unknown",
+    );
+
+    expect(transition?.detail["decidedBy"]).toBeUndefined();
   });
 });

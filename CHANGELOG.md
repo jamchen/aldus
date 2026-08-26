@@ -41,6 +41,48 @@ every layer reported success.
 looked. Two compositions disagreeing about a root is diagnosable in one command when the tool says
 which one it used, and took a day of exchanged hypotheses when it did not.
 
+## 0.2.0-next.37 — 2026-08-27
+
+### Added
+
+**`aldus costs abandon <reservation-id> --reason <why>`** — the verb a stranded reservation had no
+way to reach.
+
+A process killed between `reserve` and any billing outcome leaves its reservation `reserved`:
+nothing survived to classify it, so it never became `billing_unknown`, and `costs settle` accepts
+only `billing_unknown`. So `aldus costs` listed a reservation holding $12.00, named `costs settle`
+as its resolution, and `settle` refused it — **the one place that tells an operator what to do
+named the one command that would refuse them.**
+
+`abandon` records that a person decided the dispatch is not coming back. It records **unknown, not
+zero**: an execution killed after minutes of work may well have been charged, so the reservation
+keeps consuming its full authorization until a reconciliation resolves it. What it cost is then the
+ordinary `costs settle` question. `--decided-by` / `--verbatim` record a transcribed decision,
+exactly as on `approve` and `costs settle` (ADR-0054).
+
+It refuses every state but the stuck one: `billing_unknown` goes to `settle`, and a terminal
+reservation never resumes (ADR-0044).
+
+`AldusServices.abandonDispatch` is the service behind it. `SpendService.markUnknown` gains optional
+`decidedBy` and `transcription`, so a person's judgement that an execution is gone is
+distinguishable in the record from the runtime's own classification of a dispatch that returned
+without an amount.
+
+### Fixed
+
+**The `costs` listing named a verb the state could not accept.** The held-authorization section
+pointed at `costs settle`, which refuses every reservation that section lists. It now points at
+`costs abandon`, and the unresolved-charge section still points at `settle`.
+
+**A refusal called a non-terminal reservation terminal.** Reconciling a `reserved` reservation
+answered _"A terminal reservation never resumes"_ — false about the reservation it was printed on.
+`reserved` is neither resolved nor terminal; it is stuck, which is a third thing the state machine
+does not name. It now says so, and names the verb that accepts it.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. `markUnknown`'s new
+     options are optional and `abandonDispatch` is additive, so nothing existing changes shape.
+     The listing and refusal changes are text an operator reads, invisible to a `.d.ts` diff. -->
+
 ## Unreleased
 
 Nothing yet.

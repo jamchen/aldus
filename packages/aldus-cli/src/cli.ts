@@ -909,7 +909,7 @@ async function runArtifacts(
 }
 
 /**
- * `costs [show|settle]` (contract §19.3; #155 step 5, #215).
+ * `costs [show|settle|abandon]` (contract §19.3; #155 step 5, #215, #226).
  *
  * `settle` is the door to a reconciliation the runtime could perform and nothing could reach. A
  * reservation left `billing_unknown` made a Run **terminal** — the only exit was `cancel`, which
@@ -921,6 +921,7 @@ async function runArtifacts(
 async function runCosts(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
   const [subcommand, ...rest] = argv;
   if (subcommand === "settle") return await runCostsSettle(rest, environment);
+  if (subcommand === "abandon") return await runCostsAbandon(rest, environment);
 
   const { options } = parseCommon(subcommand === "show" ? rest : argv, environment);
   const services = servicesFor(options, environment);
@@ -1025,6 +1026,74 @@ async function runCostsSettle(
     [
       `Reservation ${data.reservationId} is now ${data.status}.`,
       ...(data.costIds.length > 0 ? [`  cost records: ${data.costIds.join(", ")}`] : []),
+    ].join("\n"),
+  );
+}
+
+/**
+ * `costs abandon <reservation-id> --reason <why> [--decided-by <actor> --verbatim <text>]`
+ *
+ * The verb a stranded reservation had no way to reach (#226). A process killed between `reserve`
+ * and any billing outcome leaves the reservation `reserved`; nothing survived to classify it, so
+ * it never became `billing_unknown`, and `costs settle` accepts only `billing_unknown`.
+ *
+ * It records **unknown, not zero**. An execution killed after some minutes of work may well have
+ * been charged, so this says only that a person decided it is not coming back. What it cost is the
+ * next question, and `costs settle` is where it is answered.
+ *
+ * `--reason` is checked by the engine and not re-checked here — a copy of a rule in front of the
+ * engine's is a second rule that fires first, which is what `next.30` removed from `waive`.
+ */
+async function runCostsAbandon(
+  argv: readonly string[],
+  environment: CliEnvironment,
+): Promise<ExitCode> {
+  const { options, values, positionals } = parseCommon(argv, environment, {
+    reason: { type: "string" },
+    "decided-by": { type: "string" },
+    verbatim: { type: "string" },
+  });
+  const reservationId = positionals[0];
+  if (reservationId === undefined) {
+    throw new AldusError("ALDUS_INVALID_REQUEST", '"costs abandon" needs a reservation id.', {
+      category: "validation",
+    });
+  }
+
+  const decidedBy = values["decided-by"];
+  const verbatim = values["verbatim"];
+  if (typeof decidedBy === "string" && (typeof verbatim !== "string" || verbatim.trim() === "")) {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`--decided-by` needs `--verbatim`: what the decider actually said.",
+      { category: "validation" },
+    );
+  }
+  if (typeof verbatim === "string" && typeof decidedBy !== "string") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`--verbatim` records what someone else said, so it needs `--decided-by`.",
+      { category: "validation" },
+    );
+  }
+
+  const services = servicesFor(options, environment);
+  const result = await services.abandonDispatch({
+    runId: requireRunId(options, "costs abandon"),
+    reservationId,
+    reason: typeof values["reason"] === "string" ? values["reason"] : "",
+    ...(typeof decidedBy === "string" && typeof verbatim === "string"
+      ? { transcribing: { decidedBy: parseActor(decidedBy), verbatim } }
+      : {}),
+    ...(options.actor !== undefined ? { actor: options.actor } : {}),
+  });
+  return emit(result, options, environment, (data) =>
+    [
+      `Reservation ${data.reservationId} is now ${data.status}.`,
+      "  It still holds its full reserved amount: unknown is neither free nor zero.",
+      "  Resolve it with: aldus costs settle " +
+        data.reservationId +
+        " --evidence <what it rests on>",
     ].join("\n"),
   );
 }

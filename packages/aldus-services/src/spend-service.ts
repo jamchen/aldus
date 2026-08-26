@@ -303,6 +303,31 @@ class OperatorSpendConsole {
     return this.#spend.reconcile(reservation, input, authority);
   }
 
+  /**
+   * Record that a dispatch is not coming back (#226).
+   *
+   * A process killed between `reserve` and any billing outcome leaves the reservation `reserved`:
+   * nothing survived to classify it. ADR-0044's terminal states do not describe it and neither
+   * does `billing_unknown` on its own — *stuck* is a third thing, and the only party who can say
+   * which it is, is a person who knows the process died.
+   *
+   * The resolution it records is **unknown, not zero**. The execution may have run for minutes
+   * before it was killed, so a verb that released the reservation as uncharged would convert an
+   * unknown into a settled fact — the failure this whole protocol exists to prevent. What this
+   * says is only "somebody decided this is not coming back"; what it cost is then the ordinary
+   * reconciliation question, answered through {@link reconcile}.
+   */
+  abandonDispatch(
+    reservation: SpendReservation,
+    input: { reason: string; transcription?: { recordedBy: ActorRef; verbatim: string } },
+  ): Promise<SpendReservation> {
+    return this.#spend.markUnknown(reservation, [], {
+      reason: input.reason,
+      decidedBy: this.#actor,
+      ...(input.transcription === undefined ? {} : { transcription: input.transcription }),
+    });
+  }
+
   /** @see SpendService.status */
   status(runId: string): Promise<readonly ReservationStatus[]> {
     return this.#spend.status(runId);
@@ -693,10 +718,26 @@ export class SpendService {
   async markUnknown(
     reservation: SpendReservation,
     costIds: readonly string[] = [],
-    options: { reason?: string; pendingObservations?: readonly PendingObservation[] } = {},
+    options: {
+      reason?: string;
+      pendingObservations?: readonly PendingObservation[];
+      /**
+       * Who decided the billing outcome is unknown, when a person did.
+       *
+       * Absent for the ordinary case — a dispatch that returned without an amount, where the
+       * runtime is the only party involved. Present when an operator classified a reservation
+       * nothing else could: a process killed mid-dispatch leaves `reserved`, which is neither
+       * resolved nor terminal, and only a human can say it is not coming back (#226).
+       */
+      decidedBy?: ActorRef;
+      /** Who wrote it down, where that differs from who decided (ADR-0054). */
+      transcription?: { recordedBy: ActorRef; verbatim: string };
+    } = {},
   ): Promise<SpendReservation> {
     return this.#appendOne(reservation, "reservation.billing_unknown", {
       costIds: [...costIds],
+      ...(options.decidedBy === undefined ? {} : { decidedBy: options.decidedBy }),
+      ...(options.transcription === undefined ? {} : { transcription: options.transcription }),
       // Why it is unresolved, in the operator's terms. `budget status` surfaces this, because
       // "non-retryable" with no reason gives a human nothing to act on — and a paid dispatch that
       // came back silent is a different problem from one that threw.
@@ -1079,7 +1120,16 @@ export class SpendService {
       throw serviceError(
         ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
         `Reservation "${current.reservationId}" is "${current.status}" and only an ` +
-          "unresolved charge can be reconciled. A terminal reservation never resumes (ADR-0044).",
+          "unresolved charge can be reconciled. " +
+          // Two different refusals, because they are two different situations and the operator's
+          // next move differs. Saying "a terminal reservation never resumes" of a `reserved` one
+          // was false about the reservation it was printed on — `reserved` is not terminal, it is
+          // stuck — and it named no verb the state would accept (#226).
+          (current.status === "reserved"
+            ? "This one is not terminal: it is still reserved, so a billing outcome was never " +
+              "recorded — most often a process killed mid-dispatch. `aldus costs abandon` " +
+              "records that it is not coming back, after which it can be reconciled."
+            : "A terminal reservation never resumes (ADR-0044)."),
         {
           category: "conflict",
           retryable: false,
