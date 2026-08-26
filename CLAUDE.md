@@ -352,6 +352,21 @@ read, or do not make it.** "A search across the first adopter's integration find
 checkable by whoever has that repository. A header attributed to a file that is not there is
 checkable by nobody.
 
+**And the rule has to be absolute, because the receiving side cannot enforce it.** Named by the
+first adopter after one of these was made about their data and retracted: _"a confident guess about
+someone else's repository arrives indistinguishable from a report, and the receiving side is the one
+with no way to tell."_
+
+The asymmetry is the whole point. Here, a guess and a reading are two different things a writer
+knows apart. There, both arrive as a sentence from the party who supposedly looked — so a guess
+becomes the reader's belief about their **own** system, and they have no reason to go and check the
+thing they now think they have been told. It cost nothing that day only because they had already
+looked.
+
+So the sending side carries all of it: **say where you read it, or do not say it.** "I would expect"
+and "your record shows" are not stylistic variants; between repositories they are the difference
+between a hypothesis and a fabrication, and only the writer can tell which one they are sending.
+
 **Checks that replace something a reviewer did by hand:**
 
 | script                         | the claim it verifies                                                                         |
