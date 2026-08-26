@@ -1,6 +1,6 @@
 {
   "name": "@aldus-runtime/services",
-  "version": "0.2.0-next.42",
+  "version": "0.2.0-next.43",
   "type": "module",
   "description": "Aldus application services — the programmatic API the CLI and Production MCP both adapt.",
   "license": "Apache-2.0",
@@ -33,17 +33,17 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/artifact-registry": "0.2.0-next.42",
-    "@aldus-runtime/core": "0.2.0-next.42",
-    "@aldus-runtime/file-store": "0.2.0-next.42",
-    "@aldus-runtime/gate-engine": "0.2.0-next.42",
-    "@aldus-runtime/release": "0.2.0-next.42",
-    "@aldus-runtime/stage-runner": "0.2.0-next.42",
-    "@aldus-runtime/tts-ledger": "0.2.0-next.42",
+    "@aldus-runtime/artifact-registry": "0.2.0-next.43",
+    "@aldus-runtime/core": "0.2.0-next.43",
+    "@aldus-runtime/file-store": "0.2.0-next.43",
+    "@aldus-runtime/gate-engine": "0.2.0-next.43",
+    "@aldus-runtime/release": "0.2.0-next.43",
+    "@aldus-runtime/stage-runner": "0.2.0-next.43",
+    "@aldus-runtime/tts-ledger": "0.2.0-next.43",
     "@types/node": "^26.2.0"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "0.2.0-next.42",
+    "@aldus-runtime/testkit": "0.2.0-next.43",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },

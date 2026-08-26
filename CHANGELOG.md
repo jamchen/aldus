@@ -267,6 +267,44 @@ move `defectCountMeasurable` exists to prevent. Take them from
      optional and `ReworkStopReason` gained a member, which widens what a consumer may receive
      rather than what it must supply. -->
 
+## 0.2.0-next.43 — 2026-08-27
+
+### BREAKING
+
+**`ReworkVerdict` is now a discriminated union**, and an artifact with no evaluation can no longer
+be mistaken for a clean one (#220).
+
+The previous shape was one type whose empty state — no blocking classes, no observed classes — meant
+_"the evaluator ran and found nothing"_. **An attempt with no evaluation recorded produces exactly
+the same empty state**, so a caller reading `enumeratedFindings: 0` off a record and passing it
+through got `converged`: a non-answer read as a pass, in the arm that releases the next stage.
+
+The first adopter has a real instance, and its precise shape is worth stating because it is not the
+one anybody guesses. Their oracle skipped its output contract on one dispatch in twelve: **the stage
+did the work, registered an artifact, was charged for it, and omitted the fenced block.** The report
+is real prose a human can read; only the structure a controller needs is missing. Not a malformed
+finding, and not an empty result.
+
+```ts
+type ReworkVerdict = EvaluatedVerdict | NoEvaluationVerdict;
+```
+
+`{ kind: "not_evaluated", artifactDigest, reason }` escalates with the new `no_evaluation` stop
+reason, carrying the caller's own words. Distinct from `ambiguous_verdict`, where an evaluator ran
+and its result could not be classified: an ambiguous verdict needs a person to read it, a missing one
+needs the evaluation to happen.
+
+**What changes for an adopter:** every `ReworkVerdict` literal gains `kind: "evaluated"`. That is the
+point of the change rather than a cost of it — a caller can no longer assert an empty evaluation
+without saying an evaluation happened.
+
+<!-- No machine marker, and check-breaking-notes made no finding here — a third blind spot, filed
+     separately. `ReworkVerdict` went from an exported interface to an exported type alias over a
+     union. The export name still exists, so "removed export" does not fire; members are tracked
+     only for interfaces, so the ones it used to have simply stop being tracked rather than being
+     reported as gone. The check detects a *newly required member*, and this is the same break
+     arriving as a change of kind. Written by hand because nothing prompted it. -->
+
 ## Unreleased
 
 Nothing yet.

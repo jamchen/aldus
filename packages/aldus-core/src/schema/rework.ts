@@ -72,6 +72,16 @@ export const REWORK_STOP_REASONS = [
    * better. This is the number that says worse.
    */
   "regression",
+  /**
+   * No evaluation is recorded for the artifact at all.
+   *
+   * Distinct from `ambiguous_verdict`, where an evaluator ran and its result could not be
+   * classified. Here nothing ran, or what ran left no classifiable record — a stage that failed, an
+   * attempt that never evaluated, a report that could not be parsed. An absent evaluation is not a
+   * passing one, and the remedy differs: an ambiguous verdict needs a person to read it, and a
+   * missing one needs the evaluation to happen.
+   */
+  "no_evaluation",
   /** No policy covers this stage, so every blocking finding is a person's decision. */
   "no_policy",
 ] as const;
