@@ -24,6 +24,7 @@ import type { AldusServices } from "../src/services.js";
 import {
   OPERATOR,
   gateDefinition,
+  gatedStage,
   makeServices,
   makeTempWorkspace,
   registryOf,
@@ -331,5 +332,85 @@ describe("an undecidable gate is distinguished from an undecided one (#57)", () 
     if (result.outcome !== "refused") return;
     expect(result.refusal.reason).toBe("stage_predecessor_unmet");
     expect(result.refusal.explanation).not.toContain("cannot be decided yet");
+  });
+});
+
+describe("a decided gate releases the stage parked on it (#240)", () => {
+  // Reported by the first adopter, blocking an episode. Their owner approved
+  // `script.comprehension`, the decision recorded cleanly, and both `run` and `retry` still
+  // refused the stage. `#assertClaimable` refused on `execution.status === "waiting_for_gate"`
+  // alone and **nothing in the runtime ever cleared that status** — so a gate that WAS decided,
+  // on a stage nothing could restart, was the same permanent stop as an undecidable one, with a
+  // human's approval sitting next to it.
+  //
+  // Load-bearing for ADR-0056: a bounded repair loop whose exits all terminate at a gate could
+  // never resume after a human ruled on one, which makes `escalate` a termination rather than an
+  // escalation.
+  it("refuses while the gate is undecided", async () => {
+    // The control, and it has to come first: without it the case below could be measuring a check
+    // that never refuses anything.
+    const { services, runId } = await withRun({
+      stages: registryOf(gatedStage("script.revise", GATE)),
+      gates: [gateDefinition(GATE)],
+      subjects: subjectsForAll([GATE]),
+    });
+    await services.runStage({ runId, stageId: "script.revise" });
+
+    await expect(services.runStage({ runId, stageId: "script.revise" })).rejects.toThrow(
+      /waiting for a gate decision/,
+    );
+  });
+
+  it("allows the stage to run again once the decision is recorded", async () => {
+    const { services, runId } = await withRun({
+      stages: registryOf(gatedStage("script.revise", GATE)),
+      gates: [gateDefinition(GATE)],
+      subjects: subjectsForAll([GATE]),
+    });
+    await services.runStage({ runId, stageId: "script.revise" });
+
+    await services.approve({ runId, gateId: GATE });
+    const resumed = await services.runStage({ runId, stageId: "script.revise" });
+
+    // It halts again, because this stage always halts — what matters is that it *ran*, which is
+    // the transition that did not exist. A refusal here is the bug; a second halt is the stage.
+    expect(JSON.stringify(resumed)).not.toContain("waiting for a gate decision");
+  });
+
+  it("releases on a rejection too, because the operator is entitled to act on the answer", async () => {
+    // The predicate asks whether a decision exists, never what it says. What a decision means is
+    // the gate engine's and `requiredGates`' business, and a second copy of that judgement in the
+    // runner would be a second, divergent §13. A rejection that parked a stage forever would be
+    // the same permanent stop wearing a different word.
+    const { services, runId } = await withRun({
+      stages: registryOf(gatedStage("script.revise", GATE)),
+      gates: [gateDefinition(GATE)],
+      subjects: subjectsForAll([GATE]),
+    });
+    await services.runStage({ runId, stageId: "script.revise" });
+
+    await services.reject({ runId, gateId: GATE });
+    const resumed = await services.runStage({ runId, stageId: "script.revise" });
+
+    expect(JSON.stringify(resumed)).not.toContain("waiting for a gate decision");
+  });
+
+  it("does not release a stage parked on a different gate", async () => {
+    // The negative control for the predicate's arguments. A check that ignored `gateId` and asked
+    // only "has anything been decided on this Run" would pass every case above and unpark every
+    // parked stage the moment any unrelated gate was decided.
+    const OTHER = "unrelated.gate";
+    const { services, runId } = await withRun({
+      stages: registryOf(gatedStage("script.revise", GATE)),
+      gates: [gateDefinition(GATE), gateDefinition(OTHER)],
+      subjects: subjectsForAll([GATE, OTHER]),
+    });
+    await services.runStage({ runId, stageId: "script.revise" });
+
+    await services.approve({ runId, gateId: OTHER });
+
+    await expect(services.runStage({ runId, stageId: "script.revise" })).rejects.toThrow(
+      /waiting for a gate decision/,
+    );
   });
 });

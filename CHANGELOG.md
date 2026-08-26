@@ -305,6 +305,46 @@ without saying an evaluation happened.
      reported as gone. The check detects a *newly required member*, and this is the same break
      arriving as a change of kind. Written by hand because nothing prompted it. -->
 
+## 0.2.0-next.44 — 2026-08-27
+
+### Fixed
+
+**A stage parked on a gate could never continue after the gate was decided.** There was no path.
+
+Reported by the first adopter, blocking a real episode. Their owner approved
+`script.comprehension`, the decision recorded cleanly, and both `run` and `retry` still answered:
+
+```
+ALDUS_STAGE_STATE_INVALID: Stage "script.revise" is waiting for a gate decision and cannot be
+run again until that decision is recorded
+```
+
+The decision **was** recorded. `#assertClaimable` refused on `execution.status ===
+"waiting_for_gate"` alone and never consulted the gate engine, and nothing anywhere in the runtime
+transitioned a stage out of that status. The refusal's own sentence named a condition nothing
+tested — a description that drifted from its mechanism, in the message an operator reads while
+holding the approval it says they need.
+
+`next.35` closed _"`waiting_for_gate` on a gate nobody can decide is a permanent silent stop"_. This
+is its sibling one step along: **a gate that IS decided, on a stage nothing can restart, is the same
+permanent stop with an approval sitting next to it** — and from the outside it reads worse, because
+the record shows a human said yes.
+
+`StageRunner` takes `gateHasDecision(gateId, runId)`, wired from the services context to the Run's
+decision store. The predicate asks only whether a decision **exists**, never what it says: what a
+decision means is the gate engine's and `requiredGates`' business, and a second copy of that
+judgement in the runner would be a second, divergent §13. A rejection unparks the stage too — the
+operator is entitled to act on the answer they got, and whatever the stage requires is still
+enforced where it is enforced.
+
+**Load-bearing for ADR-0056.** A bounded repair loop whose exits all terminate at a gate could never
+resume after a human ruled on one, which made `escalate` a termination rather than an escalation —
+not what a declared policy says, and not what an owner approving one would think they were
+authorising.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. `gateHasDecision` is an
+     optional runner option, and absent means the previous behaviour. -->
+
 ## Unreleased
 
 Nothing yet.

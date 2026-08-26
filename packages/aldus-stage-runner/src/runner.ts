@@ -115,6 +115,24 @@ export interface StageRunnerOptions {
    * where it declares none — which is the honest limit rather than a silent pass.
    */
   gateIsKnown?: (gateId: string, stageId: string) => boolean;
+  /**
+   * Whether a decision has been recorded for this gate on this Run (#240).
+   *
+   * The other half of `gateIsKnown`, and the half that was missing. A stage halting at a gate
+   * records `waiting_for_gate`, and **nothing in the runtime ever cleared it** — so a gate that
+   * was decided, on a stage nothing could restart, was the same permanent stop as an undecidable
+   * one, with a human's approval sitting next to it. From the outside it reads worse, because the
+   * record shows someone said yes.
+   *
+   * The predicate asks only whether a decision **exists**, not what it says. What a decision means
+   * is the gate engine's and `requiredGates`' business, and duplicating that judgement here would
+   * put a second, divergent copy of §13 in the runner. A rejection unparks the stage too: the
+   * operator is entitled to act on the answer they got, and whatever the stage requires is still
+   * enforced where it is enforced.
+   *
+   * Absent means the old behaviour — refuse — because a runner with no way to ask must not assume.
+   */
+  gateHasDecision?: (gateId: string, runId: string) => Promise<boolean>;
   /** Who or what is running stages (contract §19.2). */
   actor: ActorRef;
   /** Backend whose capabilities are checked before execution (contract §10). */
@@ -205,6 +223,7 @@ export class StageRunner {
   };
 
   readonly #gateIsKnown: ((gateId: string, stageId: string) => boolean) | undefined;
+  readonly #gateHasDecision: ((gateId: string, runId: string) => Promise<boolean>) | undefined;
 
   /**
    * Whether this stage can wait on that gate.
@@ -262,6 +281,7 @@ export class StageRunner {
 
   constructor(options: StageRunnerOptions) {
     this.#gateIsKnown = options.gateIsKnown;
+    this.#gateHasDecision = options.gateHasDecision;
     this.#options = {
       runs: options.runs,
       events: options.events,
@@ -435,6 +455,14 @@ export class StageRunner {
     const status = existing.execution.status;
 
     if (status === "waiting_for_gate") {
+      // The decision the refusal names, actually consulted. The message has always said "cannot be
+      // run again until that decision is recorded" and nothing tested whether it was — a
+      // description that drifted from its mechanism, in the sentence an operator reads while
+      // holding the approval it says they need.
+      const gateId = gateIdOf(existing);
+      if (this.#gateHasDecision !== undefined && gateId !== undefined) {
+        if (await this.#gateHasDecision(gateId, runId)) return;
+      }
       throw stageRunnerError(
         StageRunnerErrorCodes.STAGE_STATE_INVALID,
         `Stage "${definition.id}" is waiting for a gate decision and cannot be run again until ` +
