@@ -12,6 +12,39 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.34 — 2026-08-26
+
+### Behaviour changes
+
+**`aldus costs` shows unresolved charges, and shows them first.**
+
+An unresolved charge lives in the reservation store and refuses every later dispatch on its grant.
+`costs` read cost _records_ only, so it printed the settled ones and a total **as if nothing were
+pending** while the Run could not proceed — invisible in the one command whose whole job is the
+money (#215).
+
+```
+Run run-abc
+
+1 unresolved charge(s) — every later dispatch on the grant is refused
+  res-abc  billing_unknown  reserved 2.0000 USD  (agent.execute)
+  resolve with: aldus costs settle <reservation-id> --evidence <what it rests on>
+```
+
+The reservation id printed is the one `costs settle` takes, so the report names its own remedy.
+
+**`aldus status` blocks a stage an unresolved charge would refuse**, instead of offering it as
+runnable. The action plan was a function of stages and gates and never the money, so an operator
+was sent at a command the runtime would reject — for a reason the same report already had in hand.
+The block names the reservation and the verb.
+
+### Fixed
+
+**`aldus cancel` pointed at a command that fails.** It closed with _"Start a new Run to continue
+this Episode."_ and the obvious next command then failed on a missing `--workflow`. It now prints
+the command with its required flags. An instruction that names a step without naming what it needs
+is one an operator discovers is wrong by following it.
+
 ## 0.2.0-next.33 — 2026-08-26
 
 ### Features
