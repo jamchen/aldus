@@ -231,6 +231,42 @@ now reworks where it previously converged.
      member reads identically to an existing one — the false-negative direction of the blind spot
      the tool's own source records. Both breaks are described above; only one could be detected. -->
 
+## 0.2.0-next.42 — 2026-08-27
+
+### Added
+
+**A rework loop that is measurably getting worse now stops** — the `regression` stop reason
+(#220, ADR-0055).
+
+Reported by the first adopter, from a real run, while writing the `automaticCorrectionHarm` that
+`next.41` made required:
+
+> A's first repair round took the script from 4 blocking findings to 7 **by adding explanation.**
+> Narration grew 2,246 → 2,551 → 2,904 characters across three rounds. A comprehension oracle reads
+> a longer script with more connective tissue as an improvement — so the loop can make a commentary
+> script worse while every number it watches says better.
+
+**Oscillation cannot see this**: every round produced a different artifact, so every digest is new.
+The loop spends its whole bound and every paid repair going downhill, and each round looks like
+progress.
+
+`decideRework` now escalates when the finding count **increased** over the previous round. Increase
+is the unambiguous signal; equal is not progress and deliberately not a stop, because a repair that
+resolves a deep problem and exposes a shallower one nets zero and the bound already covers that.
+Checked before oscillation and before the bound, so a person is told _"the repair made it worse"_ —
+which is the fact that makes raising the bound the wrong move — rather than _"the bound is spent"_,
+which invites raising it.
+
+`ReworkVerdict.findingCount` and `ReworkRound.inputFindingCount` are both **optional**, and when
+either is absent the arm does not fire. That is a hole and is named as one: a count over
+report-shaped evidence is not a smaller number, it is not a number (#140), and inferring one is the
+move `defectCountMeasurable` exists to prevent. Take them from
+`AttemptMetadata.evaluationEvidence.enumeratedFindings`.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding — both new fields are
+     optional and `ReworkStopReason` gained a member, which widens what a consumer may receive
+     rather than what it must supply. -->
+
 ## Unreleased
 
 Nothing yet.
