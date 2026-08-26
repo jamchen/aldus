@@ -345,6 +345,57 @@ describe("gate halts (§11, §13)", () => {
     expect(stored?.metadata[attemptId]?.subjectHashes).toEqual(["a".repeat(64)]);
   });
 
+  it("refuses a gate the stage cannot wait on, rather than waiting on it forever", async () => {
+    // An escalation that cannot be decided is worse than no escalation: `waiting_for_gate` on an
+    // unresolvable id is a permanent silent stop that reads as having halted safely, and every
+    // automatic escalation path terminates at this signal (#220).
+    harness.registry.register(
+      aStage({
+        requiredGates: ["content-freeze"],
+        execute: async () => ({
+          kind: "gate_required",
+          gateId: "conten-freeze",
+          subjectHashes: ["a".repeat(64)],
+        }),
+      }),
+    );
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("failed");
+    expect(JSON.stringify(result)).toContain("ALDUS_GATE_REQUIRED_UNKNOWN_GATE");
+  });
+
+  it("refuses it on the thrown path too, which a returned-only fix would have missed", async () => {
+    harness.registry.register(
+      aStage({
+        requiredGates: ["content-freeze"],
+        execute: async () => {
+          throw new GateRequiredSignal("performance-freeze", { subjectHashes: ["b".repeat(64)] });
+        },
+      }),
+    );
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("failed");
+  });
+
+  it("still waits on a gate the stage declared, so the rule did not widen", async () => {
+    // The control. Refusing an unknown id must not refuse a known one.
+    harness.registry.register(
+      aStage({
+        requiredGates: ["content-freeze"],
+        execute: async () => ({
+          kind: "gate_required",
+          gateId: "content-freeze",
+          subjectHashes: ["a".repeat(64)],
+        }),
+      }),
+    );
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("waiting_for_gate");
+  });
+
   it("treats a thrown GateRequiredSignal the same as a returned one", async () => {
     harness.registry.register(
       aStage({

@@ -104,6 +104,17 @@ export interface StageRunnerOptions {
   stageStatePath: (runId: string) => string;
   /** Registered stage definitions (contract §11). */
   registry: StageRegistry;
+  /**
+   * Whether a gate id a stage escalates to is one it can actually wait on.
+   *
+   * A port rather than a lookup, because the authority is the **workflow graph** and that lives in
+   * the services layer: one stage definition may be reused by workflows that gate it differently
+   * (ADR-0021), so a definition's own `requiredGates` is the fallback and not the answer.
+   *
+   * Absent means the declared gates are used where the stage declares any, and the id is accepted
+   * where it declares none — which is the honest limit rather than a silent pass.
+   */
+  gateIsKnown?: (gateId: string, stageId: string) => boolean;
   /** Who or what is running stages (contract §19.2). */
   actor: ActorRef;
   /** Backend whose capabilities are checked before execution (contract §10). */
@@ -193,7 +204,64 @@ export class StageRunner {
     newEventId: () => string;
   };
 
+  readonly #gateIsKnown: ((gateId: string, stageId: string) => boolean) | undefined;
+
+  /**
+   * Whether this stage can wait on that gate.
+   *
+   * The validator is the authority where one is supplied; the stage's declared gates are the
+   * fallback; and a stage that declares none cannot be checked here at all. That last case is a
+   * real limit rather than a pass, and it is why the refusal names which check it applied.
+   */
+  #canWaitOn(
+    gateId: string,
+    definition: { id: string; requiredGates?: readonly string[] },
+  ): boolean {
+    if (this.#gateIsKnown !== undefined) return this.#gateIsKnown(gateId, definition.id);
+    const declared = definition.requiredGates;
+    return declared === undefined ? true : declared.includes(gateId);
+  }
+
+  /**
+   * Record a refusal rather than an undecidable wait.
+   *
+   * `waiting_for_gate` on a gate nobody can decide is a permanent silent stop that reads as having
+   * halted safely — the worst of the available outcomes, because nothing ever surfaces it. Every
+   * automatic escalation path terminates at this signal, so an unresolvable id turns a bounded
+   * loop's safe exit into a Run that never moves again (#220).
+   */
+  #undecidableGate<O>(
+    manifest: RunManifest,
+    definition: StageDefinition<never, unknown> | StageDefinition<unknown, unknown>,
+    attempt: StageAttempt,
+    metadata: AttemptMetadata,
+    invocationKey: string,
+    gateId: string,
+  ): Promise<StageRunResult<O>> {
+    return this.#terminal<O>(manifest, definition, attempt, metadata, {
+      status: "failed",
+      invocationKey,
+      error: redactError(
+        toStructuredError(
+          stageRunnerError(
+            StageRunnerErrorCodes.GATE_REQUIRED_UNKNOWN_GATE,
+            `Stage "${definition.id}" stopped at gate "${gateId}", which is not a gate this stage ` +
+              "can wait on. Recording it would leave the Run waiting on a decision nobody can " +
+              "make, which reads as having stopped safely.",
+            {
+              category: "validation",
+              retryable: false,
+              details: { stageId: definition.id, gateId },
+            },
+          ),
+          { code: StageRunnerErrorCodes.GATE_REQUIRED_UNKNOWN_GATE, category: "validation" },
+        ),
+      ),
+    });
+  }
+
   constructor(options: StageRunnerOptions) {
+    this.#gateIsKnown = options.gateIsKnown;
     this.#options = {
       runs: options.runs,
       events: options.events,
@@ -1099,6 +1167,31 @@ export class StageRunner {
 
     if (thrown !== undefined) {
       if (isGateRequiredSignal(thrown)) {
+        // **An escalation that cannot be decided is worse than no escalation**, because it looks
+        // like the loop stopped safely. `thrown.gateId` was taken as given: nothing checked it
+        // against a registered gate or the stage's declared gates, so a typo or a stale name
+        // recorded a permanent, silent `waiting_for_gate` that no `approve` could ever clear.
+        //
+        // This matters more than a typo usually would because every automatic escalation path
+        // terminates here — bound exhaustion, oscillation, an unknown finding class, an ambiguous
+        // verdict (#220 criteria 5 and 7). A controller that escalates safely into an
+        // undecidable wait has not escalated.
+        //
+        // Validation is a port rather than a lookup: the authority is the workflow graph, which
+        // lives in the services layer and overrides a definition per workflow (ADR-0021). Where
+        // no validator is supplied the declared gates are the fallback, and where the stage
+        // declares none the id cannot be checked here at all — that limit is real and is why the
+        // refusal below says which check it applied.
+        if (!this.#canWaitOn(thrown.gateId, definition)) {
+          return this.#undecidableGate(
+            manifest,
+            definition,
+            settled,
+            withNotes(),
+            invocationKey,
+            thrown.gateId,
+          );
+        }
         return this.#terminal(
           manifest,
           definition,
@@ -1135,6 +1228,18 @@ export class StageRunner {
     }
 
     if (outcome.kind === "gate_required") {
+      // Both paths, because a stage may **return** a gate requirement as well as throw one, and
+      // fixing only the thrown one would leave the commoner shape unchecked.
+      if (!this.#canWaitOn(outcome.gateId, definition)) {
+        return this.#undecidableGate(
+          manifest,
+          definition,
+          settled,
+          withNotes(),
+          invocationKey,
+          outcome.gateId,
+        );
+      }
       return this.#terminal(
         manifest,
         definition,

@@ -17,6 +17,7 @@ import type { AldusServices } from "../src/services.js";
 import type { WorkflowGraph } from "../src/workflow.js";
 
 import {
+  gateDefinition,
   gatedStage,
   failingStage,
   makeServices,
@@ -105,6 +106,10 @@ describe("derived status reaches the surface", () => {
     const services = await seeded({
       stages: registryOf(gatedStage("first", "content.freeze"), passthroughStage("second")),
       workflow: GRAPH,
+      // Registered, because the runner now refuses an escalation to a gate nobody could decide.
+      // Without it this test asserted a Run held at a gate `approve` would answer GATE_NOT_FOUND
+      // for — a permanent wait dressed as a normal one (#220).
+      gates: [gateDefinition("content.freeze")],
     });
     const runId = await startRun(services);
     await services.runStage({ runId, stageId: "first", input: {} });

@@ -12,6 +12,55 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.35 — 2026-08-27
+
+Two preconditions for the bounded rework contract (#220). Neither is that contract; both are things
+it would otherwise be built on top of.
+
+### BREAKING
+
+**A stage halting at a gate no registry knows now fails instead of waiting.**
+
+`thrown.gateId` was taken as given: nothing checked it against a registered gate, so a typo or a
+stale name recorded a permanent, silent `waiting_for_gate` that no `approve` could ever clear —
+`approve` answers `GATE_NOT_FOUND` for an id the registry does not hold.
+
+<!-- No machine marker: `gateIsKnown` is optional, so check-breaking-notes reports no surface
+     finding. This is a semantic break — a halt that used to wait now fails — which is the blind
+     spot that gate names in its own output. Written by hand because nothing prompted it. -->
+
+**An escalation that cannot be decided is worse than no escalation, because it looks like the loop
+stopped safely.** That matters here more than a typo usually would: every automatic escalation path
+in #220 — bound exhaustion, oscillation, an unknown finding class, an ambiguous verdict — terminates
+at this signal, so a controller escalating into an undecidable wait has not escalated.
+
+The refusal is `ALDUS_GATE_REQUIRED_UNKNOWN_GATE`, and it covers **both** the thrown signal and the
+returned `kind: "gate_required"` outcome. Fixing only the thrown path would have left the commoner
+shape unchecked.
+
+Validation is a port, `StageRunnerOptions.gateIsKnown`, because the registry lives above the
+runner. Where none is supplied the id is accepted — a real limit of that layer rather than a pass.
+
+**Migration:** register the gates your stages halt at. If a stage halts at a gate you have not
+registered, it was already unresolvable; this reports it at the halt instead of at the Run that
+never moves.
+
+### Behaviour changes
+
+**`aldus costs` shows reservations that hold authorization, not only those needing reconciliation.**
+
+`requiresReconciliation` is `status === "billing_unknown"`, so a reservation whose dispatch began
+and never settled — a process killed mid-round, holding its full reserved amount — was filtered out
+of the report built to make blocked money visible. Measured in the first adopter: **$12 held,
+invisible**, while `costs` printed a total as if the Run were idle.
+
+The two kinds are reported separately and not conflated. An unresolved charge **blocks** every
+later dispatch and needs a decision. A reservation still holding authorization **may simply be in
+flight** — the runtime cannot tell a live dispatch from a process that died mid-round, so it is
+shown rather than flagged, and the output says which it cannot tell.
+
+`aldus status` still blocks only on the reconciliation-required kind.
+
 ## 0.2.0-next.34 — 2026-08-26
 
 ### BREAKING

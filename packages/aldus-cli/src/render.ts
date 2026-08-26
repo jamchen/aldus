@@ -429,19 +429,35 @@ export function renderCosts(report: CostReport): string {
   // if nothing were pending — so the state that stopped a Run was invisible in the one command
   // whose whole job is the money (#215). It also names the remedy: the reservation id below is
   // what `aldus costs settle` takes.
-  const blocked =
-    report.unresolved.length === 0
+  // Two kinds, and conflating them would be the defect one layer along. An unresolved charge
+  // **blocks** every later dispatch and needs a decision. A reservation whose dispatch began and
+  // has not settled **holds** authorization and may simply be in flight — the runtime cannot tell
+  // a live one from a process that died mid-round, so it is reported rather than flagged.
+  const unresolved = report.unresolved.filter((entry) => entry.status === "billing_unknown");
+  const held = report.unresolved.filter((entry) => entry.status === "reserved");
+  const line = (entry: (typeof report.unresolved)[number]): string =>
+    `  ${entry.reservationId}  ${entry.status}  holds ${entry.reservedAuthorizationAmount.amount} ` +
+    `${entry.reservedAuthorizationAmount.currency}  (${entry.operation})`;
+
+  const blocked = [
+    ...(unresolved.length === 0
       ? []
       : [
-          `${report.unresolved.length} unresolved charge(s) — every later dispatch on the grant is refused`,
-          ...report.unresolved.map(
-            (entry) =>
-              `  ${entry.reservationId}  ${entry.status}  reserved ${entry.reservedAuthorizationAmount.amount} ` +
-              `${entry.reservedAuthorizationAmount.currency}  (${entry.operation})`,
-          ),
+          `${unresolved.length} unresolved charge(s) — every later dispatch on the grant is refused`,
+          ...unresolved.map(line),
           "  resolve with: aldus costs settle <reservation-id> --evidence <what it rests on>",
           "",
-        ];
+        ]),
+    ...(held.length === 0
+      ? []
+      : [
+          `${held.length} reservation(s) holding authorization, not yet settled`,
+          ...held.map(line),
+          "  in flight, or left behind by a process that ended mid-dispatch — this cannot tell",
+          "  which. `aldus costs settle` resolves one that is not coming back.",
+          "",
+        ]),
+  ];
 
   if (summary.length === 0 && blocked.length === 0) {
     return `No costs recorded for run ${report.runId}.`;
