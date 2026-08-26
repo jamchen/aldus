@@ -492,3 +492,94 @@ describe("an evaluation that did not happen is not a clean one (#220)", () => {
     expect(decision.kind).toBe("converged");
   });
 });
+
+describe("an escalation hands over every candidate it produced (#220)", () => {
+  // The first adopter's owner bought an extra round and the round made the script worse:
+  // `7 → 7 → 2 → 5` findings, narration 2,887 → 3,063 characters. The loop always carries the
+  // newest candidate forward, so what reaches the gate is the worst artifact of the four, and the
+  // useful one — the round that measured 2 — is reachable only by whoever goes looking.
+  //
+  // Reported, never ranked. Ordering by count would recommend exactly the artifact their
+  // `automaticCorrectionHarm` warns about: a repair that cuts a load-bearing clause produces fewer
+  // findings and a worse script. Fewer findings is not better; it is fewer findings.
+  const history = [
+    { ...round(1, "a".repeat(64), "b".repeat(64)), inputFindingCount: 7 },
+    { ...round(2, "b".repeat(64), "c".repeat(64)), inputFindingCount: 2 },
+  ];
+
+  it("lists every artifact the loop saw, oldest first, with the latest last", () => {
+    const decision = decideRework({
+      policy: policy({ maxRounds: 2 }),
+      rounds: history,
+      verdict: verdict({
+        artifactDigest: "c".repeat(64),
+        blockingFindingClasses: ["comprehension"],
+        observedFindingClasses: ["comprehension"],
+        findingCount: 5,
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.candidates).toEqual([
+      { digest: "a".repeat(64), findingCount: 7 },
+      { digest: "b".repeat(64), findingCount: 2 },
+      { digest: "c".repeat(64), findingCount: 5 },
+    ]);
+    // The one it stopped on is the newest, and it is not the best. Both facts are on the decision.
+    expect(decision.artifactDigest).toBe("c".repeat(64));
+  });
+
+  it("does not reorder them, so nothing reads as a recommendation", () => {
+    // The assertion that keeps Core out of the editorial judgement. A sorted list is a ranking
+    // whatever the docstring says, and a reader would take the first entry as the advice.
+    const decision = decideRework({
+      policy: policy({ maxRounds: 2 }),
+      rounds: history,
+      verdict: verdict({
+        artifactDigest: "c".repeat(64),
+        blockingFindingClasses: ["comprehension"],
+        observedFindingClasses: ["comprehension"],
+        findingCount: 5,
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    if (decision.kind !== "escalate") throw new Error("expected an escalation");
+    const counts = decision.candidates.map((entry) => entry.findingCount);
+    expect(counts).not.toEqual([...counts].sort((a, b) => (a ?? 0) - (b ?? 0)));
+  });
+
+  it("omits a count that was never measured rather than writing zero", () => {
+    // A hole, not a zero. A count over report-shaped evidence is not a smaller number (#140), and
+    // a `0` here would make an unmeasured artifact look like the best one in the list.
+    const decision = decideRework({
+      policy: policy({ maxRounds: 1 }),
+      rounds: [round(1, "a".repeat(64), "b".repeat(64))],
+      verdict: verdict({
+        artifactDigest: "b".repeat(64),
+        blockingFindingClasses: ["comprehension"],
+        observedFindingClasses: ["comprehension"],
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    if (decision.kind !== "escalate") throw new Error("expected an escalation");
+    expect(decision.candidates).toEqual([{ digest: "a".repeat(64) }, { digest: "b".repeat(64) }]);
+  });
+
+  it("carries them on an escalation that never ran a round", () => {
+    // `no_policy` and `no_evaluation` fire with an empty history, and the artifact under judgement
+    // is still a candidate. An empty list here would make the gate's subject unreachable from the
+    // decision that escalated to it.
+    const decision = decideRework({
+      rounds: [],
+      verdict: { kind: "not_evaluated", artifactDigest: "a".repeat(64), reason: "stage failed" },
+      fallbackGateId: FALLBACK,
+    });
+
+    if (decision.kind !== "escalate") throw new Error("expected an escalation");
+    expect(decision.candidates).toEqual([{ digest: "a".repeat(64) }]);
+  });
+});
