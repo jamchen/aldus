@@ -15,7 +15,7 @@
 
 import { join } from "node:path";
 
-import type { ActorKind, ActorRef } from "@aldus-runtime/core";
+import type { ActorKind, ActorRef, SpendReservation } from "@aldus-runtime/core";
 import {
   ArtifactRegistry,
   stageArtifactRecorder,
@@ -23,7 +23,12 @@ import {
 } from "@aldus-runtime/artifact-registry";
 import { FileSpendReservationStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import type { CostRecordStore } from "./cost-store.js";
-import { SpendService, type ReservationStatus } from "./spend-service.js";
+import {
+  openOperatorConsole,
+  SpendService,
+  type OperatorSpendConsole,
+  type ReservationStatus,
+} from "./spend-service.js";
 import { RuntimePaidDispatchController, type DispatchSpendGrantProvider } from "./paid-dispatch.js";
 import { RuntimeStageAgentDispatcher } from "./agent-dispatch.js";
 import { GateEngine, GateRegistry, type SubjectsByGate } from "@aldus-runtime/gate-engine";
@@ -417,6 +422,31 @@ export class AldusContext {
    * until Aldus has a boundary that establishes operator identity or human presence, at which
    * point that boundary becomes the mint.
    */
+  /**
+   * The operator console for a human adjudicating an unresolved charge (#155 step 5, #215).
+   *
+   * **This was removed once, deliberately** — `9c85cf4`, *"authority comes from a boundary, not a
+   * parameter"* — because wiring the mint to the CLI's self-declared actor made it *look*
+   * trustworthy. Re-added under a ruling that settles what the bar actually is.
+   *
+   * The reasoning: the same trust level was already accepted where it does more damage.
+   * `aldus approve performance.freeze` establishes a spend grant and authorises paid synthesis on
+   * nothing but `ALDUS_ACTOR`. Refusing reconciliation on a stricter bar guarded one path while
+   * the path that actually releases money was open — and the cost of the asymmetry was a Run made
+   * terminal, two `human_oracle` approvals re-made by hand, and $12.57 of settled work redone.
+   *
+   * What changed is not the trust. It is that the record can now say who decided and who typed,
+   * so a transcription is distinguishable from a claim (ADR-0054).
+   */
+  operatorConsole(actor: ActorRef | undefined): OperatorSpendConsole {
+    return openOperatorConsole({ spend: this.#spend, actor });
+  }
+
+  /** @see SpendService.readReservation */
+  readReservation(grantId: string, reservationId: string): Promise<SpendReservation> {
+    return this.#spend.readReservation(grantId, reservationId);
+  }
+
   spendStatus(runId: string): Promise<readonly ReservationStatus[]> {
     return this.#spend.status(runId);
   }

@@ -908,11 +908,125 @@ async function runArtifacts(
   }
 }
 
+/**
+ * `costs [show|settle]` (contract §19.3; #155 step 5, #215).
+ *
+ * `settle` is the door to a reconciliation the runtime could perform and nothing could reach. A
+ * reservation left `billing_unknown` made a Run **terminal** — the only exit was `cancel`, which
+ * discards approvals and artifacts because both are Run-scoped.
+ *
+ * A subcommand of `costs` rather than a verb of its own: the state it resolves is only visible
+ * there, and a verb whose precondition lives in another command is one nobody finds.
+ */
 async function runCosts(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
-  const { options } = parseCommon(argv, environment);
+  const [subcommand, ...rest] = argv;
+  if (subcommand === "settle") return await runCostsSettle(rest, environment);
+
+  const { options } = parseCommon(subcommand === "show" ? rest : argv, environment);
   const services = servicesFor(options, environment);
   const result = await services.costs(requireRunId(options, "costs"));
   return emit(result, options, environment, renderCosts);
+}
+
+/**
+ * `costs settle <reservation-id> --evidence <text> [--amount <n> [--currency <c>] | --uncharged]`
+ *
+ * Three resolutions, and choosing is the operator's judgement rather than a default:
+ *
+ * - `--amount` — evidence established what was charged.
+ * - `--uncharged` — positive evidence that **nothing** was charged. Not the same as having found
+ *   nothing, which is the third case.
+ * - neither — the investigation ended without an answer. **Resolves nothing**, deliberately:
+ *   *"I could not find a charge"* is not evidence that no charge occurred, and recording it as one
+ *   is how a budget is quietly exceeded.
+ *
+ * `--decided-by` / `--verbatim` record a decision someone else made, exactly as on `approve`.
+ *
+ * `--evidence` is required by the engine and not re-checked here. A copy of a rule in front of the
+ * engine's is a second rule and it fires first — which is what `next.30` had to remove from
+ * `waive`.
+ */
+async function runCostsSettle(
+  argv: readonly string[],
+  environment: CliEnvironment,
+): Promise<ExitCode> {
+  const { options, values, positionals } = parseCommon(argv, environment, {
+    evidence: { type: "string" },
+    amount: { type: "string" },
+    currency: { type: "string" },
+    uncharged: { type: "boolean", default: false },
+    observation: { type: "string" },
+    "decided-by": { type: "string" },
+    verbatim: { type: "string" },
+  });
+  const reservationId = positionals[0];
+  if (reservationId === undefined) {
+    throw new AldusError("ALDUS_INVALID_REQUEST", '"costs settle" needs a reservation id.', {
+      category: "validation",
+    });
+  }
+
+  const amount = values["amount"];
+  const uncharged = values["uncharged"] === true;
+  if (typeof amount === "string" && uncharged) {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`--amount` and `--uncharged` are different findings: one says what was charged, the other " +
+        "says nothing was. Pass one.",
+      { category: "validation" },
+    );
+  }
+
+  const decidedBy = values["decided-by"];
+  const verbatim = values["verbatim"];
+  if (typeof decidedBy === "string" && (typeof verbatim !== "string" || verbatim.trim() === "")) {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`--decided-by` needs `--verbatim`: what the decider actually said.",
+      { category: "validation" },
+    );
+  }
+  if (typeof verbatim === "string" && typeof decidedBy !== "string") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`--verbatim` records what someone else said, so it needs `--decided-by`.",
+      { category: "validation" },
+    );
+  }
+
+  const observationId = values["observation"];
+  const observation = typeof observationId === "string" ? { observationId } : {};
+  const resolution =
+    typeof amount === "string"
+      ? {
+          kind: "settled_with_amount" as const,
+          amount: {
+            amount,
+            currency: typeof values["currency"] === "string" ? values["currency"] : "USD",
+          },
+          ...observation,
+        }
+      : uncharged
+        ? { kind: "released_as_uncharged" as const, ...observation }
+        : { kind: "investigation_ended" as const };
+
+  const services = servicesFor(options, environment);
+  const result = await services.settleSpend({
+    runId: requireRunId(options, "costs settle"),
+    reservationId,
+    resolution,
+    evidenceRef: typeof values["evidence"] === "string" ? values["evidence"] : "",
+    ...(typeof decidedBy === "string" && typeof verbatim === "string"
+      ? { transcribing: { decidedBy: parseActor(decidedBy), verbatim } }
+      : {}),
+    ...(options.actor !== undefined ? { actor: options.actor } : {}),
+  });
+  return emit(result, options, environment, (data) =>
+    [
+      `Reservation ${data.reservationId} is now ${data.status}.`,
+      ...(data.costIds.length > 0 ? [`  cost records: ${data.costIds.join(", ")}`] : []),
+    ].join("\n"),
+  );
 }
 
 /**

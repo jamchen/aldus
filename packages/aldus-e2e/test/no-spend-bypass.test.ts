@@ -119,9 +119,19 @@ describe("no published surface mints reconciliation authority (#155 step 5)", ()
       AldusContext: { prototype: Record<string, unknown> };
     };
     expect(typeof AldusContext.prototype["spendStatus"]).toBe("function");
-    // Removed rather than never added. It existed, wired to the self-declared CLI actor, and that
-    // is exactly the composition that made the mint look trustworthy.
-    expect(AldusContext.prototype["operatorConsole"]).toBeUndefined();
+    // **The console is back, under a ruling, and the invariant this case protects has moved.**
+    //
+    // It was removed once because wiring the mint to the self-declared CLI actor made it *look*
+    // trustworthy. What settled it is that the same trust was already accepted where it does more
+    // damage: `approve performance.freeze` establishes a spend grant and authorises paid synthesis
+    // on nothing but `ALDUS_ACTOR`. Guarding reconciliation more strictly protected one path while
+    // the path that releases money stayed open, and the asymmetry cost a Run, two `human_oracle`
+    // approvals and $12.57 of redone work.
+    //
+    // So the property is no longer "no console exists". It is that reconciliation still refuses a
+    // non-human decider and an assembled authority — asserted below — and that a decision made by
+    // someone other than the actor is recorded as a transcription rather than as a claim.
+    expect(typeof AldusContext.prototype["operatorConsole"]).toBe("function");
   });
 
   it("refuses an assembled authority, so reconcile is unreachable rather than weakly guarded", async () => {
