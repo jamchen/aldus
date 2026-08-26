@@ -615,7 +615,19 @@ export class AldusServices {
       runId,
       records,
       summary: summariseCosts(records),
-      unresolved: reservations.filter((entry) => entry.requiresReconciliation),
+      // **Everything still holding authorization**, not only what needs reconciling.
+      //
+      // `requiresReconciliation` is `status === "billing_unknown"`, so a reservation whose dispatch
+      // began and never settled — a process killed mid-round, holding its full reserved amount —
+      // was filtered out of the report built to make blocked money visible. Measured in the first
+      // adopter: $12 held, invisible here, while `costs` printed a total as if the Run were idle.
+      //
+      // `reserved` with an `execution` is not by itself a fault: an in-flight dispatch looks
+      // identical, and the runtime cannot tell a live one from an abandoned one. So it is shown
+      // rather than flagged, and the render says which kind each is.
+      unresolved: reservations.filter(
+        (entry) => entry.status === "billing_unknown" || entry.status === "reserved",
+      ),
     });
   }
 

@@ -336,6 +336,14 @@ export class AldusContext {
     return createStageRunner(this.workspace, {
       registry: this.stageRegistry,
       actor,
+      // The graph is the authority on which gates a stage can wait on, and it lives here rather
+      // than in the runner. Without this a stage escalating to an unregistered or misspelled gate
+      // recorded a permanent silent `waiting_for_gate` (#220).
+      // **Registration, not ordering.** `requiredGates` names what must be satisfied *before* a
+      // stage runs; a stage that halts at a gate to request a decision does not require it first,
+      // and validating against that list makes the pattern unreachable. What makes an escalation
+      // decidable is that the gate exists to be decided.
+      gateIsKnown: (gateId) => this.gateRegistry.has(gateId),
       // Without this a stage's `registerOutput` refuses with ARTIFACT_RECORDER_UNAVAILABLE, so
       // the capability exists on the context, is reachable as `context.artifacts`, and is
       // unusable from every stage the services actually run. The refusal is correct — a stage

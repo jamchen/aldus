@@ -213,9 +213,29 @@ describe("running stages (§11)", () => {
 
   // A gate halt is the runtime doing what §11 requires, not a malfunction — but it is also not
   // success, and a script chaining stages has to be able to stop on it.
+  it("refuses a halt at a gate no registry knows, rather than waiting on it forever", async () => {
+    // The wiring, not the runner's own rule: the graph and the gate registry live here, and
+    // without this case the validator could be replaced by `() => true` with every test green.
+    // An unregistered id answers GATE_NOT_FOUND on `approve`, so recording `waiting_for_gate`
+    // would be a permanent stop that reads as having halted safely (#220).
+    const { services, runId } = await withRun({
+      stages: registryOf(gatedStage("stage-a", "conten-freeze")),
+      gates: [gateDefinition("content-freeze")],
+    });
+    const result = await services.runStage({ runId, stageId: "stage-a" });
+
+    expect(result.outcome).toBe("unsuccessful");
+    if (result.outcome !== "unsuccessful") return;
+    expect(result.data.status).toBe("failed");
+    expect(JSON.stringify(result)).toContain("ALDUS_GATE_REQUIRED_UNKNOWN_GATE");
+  });
+
   it("reports a gate halt as unsuccessful, naming the gate", async () => {
     const { services, runId } = await withRun({
       stages: registryOf(gatedStage("stage-a", "content-freeze")),
+      // Registered, because the runner refuses an escalation to a gate nobody could decide: an
+      // unregistered id answers GATE_NOT_FOUND on `approve`, so the wait would be permanent (#220).
+      gates: [gateDefinition("content-freeze")],
     });
     const result = await services.runStage({ runId, stageId: "stage-a" });
 

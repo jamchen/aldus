@@ -170,6 +170,13 @@ export const StageRunnerErrorCodes = {
   STAGE_STATE_INVALID: "ALDUS_STAGE_STATE_INVALID",
   /** Stored stage state could not be parsed or did not validate. */
   STAGE_STATE_MALFORMED: "ALDUS_STAGE_STATE_MALFORMED",
+  /**
+   * A stage escalated to a gate it cannot wait on.
+   *
+   * Recording it would leave the Run waiting on a decision nobody can make — an escalation that
+   * cannot be decided is worse than no escalation, because it reads as having stopped safely.
+   */
+  GATE_REQUIRED_UNKNOWN_GATE: "ALDUS_GATE_REQUIRED_UNKNOWN_GATE",
 } as const;
 
 /** @see StageRunnerErrorCodes */
