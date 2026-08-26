@@ -61,30 +61,49 @@ export const cases = [
     wantOutput: "head:",
   },
   {
+    // The blind spot, named. A Zod-inferred export cannot be classified — optionality lives in
+    // `z.ZodOptional<…>` rather than in a `?` — and for one release that meant the check reported
+    // one break out of two and said nothing about the half it could not see. Validated against
+    // that release: it now names `ReworkPolicy`.
+    name: "breaking-notes: a changed Zod-inferred export is named as unclassifiable",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/schema/rework.ts",
+          "maxRounds: z.int().min(1),",
+          "maxRounds: z.int().min(1),\n    mutantField: nonEmptyString.optional(),",
+        ],
+      },
+    ],
+    command: ["node", "scripts/check-breaking-notes.mjs", "{{BASE}}"],
+    wantExit: 0,
+    wantOutput: "aldus-core:ReworkPolicy",
+  },
+  {
     name: "version-bump: a src/ change to a published package must fire",
     setup: [{ append: ["packages/aldus-core/src/schema-version.ts", "// mutant"] }],
-    command: ["node", "scripts/check-version-bump.mjs", "origin/main"],
+    command: ["node", "scripts/check-version-bump.mjs", "{{BASE}}"],
     wantExit: 1,
     wantOutput: "does not bump the version",
   },
   {
     name: "version-bump: a test/ change must NOT fire (the over-firing that made merge-time unworkable)",
     setup: [{ append: ["packages/aldus-core/test/schema-version.test.ts", "// mutant"] }],
-    command: ["node", "scripts/check-version-bump.mjs", "origin/main"],
+    command: ["node", "scripts/check-version-bump.mjs", "{{BASE}}"],
     wantExit: 0,
     wantOutput: "none alter shipped contents",
   },
   {
     name: "version-bump: a schema/ change must fire (aldus-core ships schema, others do not)",
     setup: [{ append: ["packages/aldus-core/schema/actor-ref.schema.json", ""] }],
-    command: ["node", "scripts/check-version-bump.mjs", "origin/main"],
+    command: ["node", "scripts/check-version-bump.mjs", "{{BASE}}"],
     wantExit: 1,
     wantOutput: "packages/aldus-core — still",
   },
   {
     name: "version-bump: a docs-only change must NOT fire",
     setup: [{ append: ["docs/adr/README.md", ""] }],
-    command: ["node", "scripts/check-version-bump.mjs", "origin/main"],
+    command: ["node", "scripts/check-version-bump.mjs", "{{BASE}}"],
     wantExit: 0,
     wantOutput: "none alter shipped contents",
   },
@@ -94,7 +113,7 @@ export const cases = [
       { append: ["packages/aldus-core/src/schema-version.ts", "// mutant"] },
       { version: "0.2.0-next.21" },
     ],
-    command: ["node", "scripts/check-version-bump.mjs", "origin/main"],
+    command: ["node", "scripts/check-version-bump.mjs", "{{BASE}}"],
     wantExit: 0,
     wantOutput: "none alter shipped contents",
   },
@@ -116,23 +135,28 @@ export const cases = [
     wantOutput: "version unchanged",
   },
   {
+    // These three carried `setup: []` and measured **the branch you happened to be on**, against
+    // `origin/main`. That made their result a fact about the current PR rather than about the
+    // checker: "no-shipped-change holds for this PR" is false on any branch touching `src`, and it
+    // failed for that reason rather than for a defect. A case whose answer depends on where it is
+    // run is a case that will be red for the wrong reason and then ignored.
     name: "claim-scope: an unknown claim must refuse rather than be satisfied",
-    setup: [],
-    command: ["node", "scripts/check-claim-scope.mjs", "origin/main", "not-a-real-claim"],
+    setup: [{ append: ["docs/adr/README.md", ""] }],
+    command: ["node", "scripts/check-claim-scope.mjs", "{{BASE}}", "not-a-real-claim"],
     wantExit: 2,
     wantOutput: "unknown claim",
   },
   {
-    name: "claim-scope: docs-only is false for a PR carrying scripts and workflows",
-    setup: [],
-    command: ["node", "scripts/check-claim-scope.mjs", "origin/main", "docs-only"],
+    name: "claim-scope: docs-only is false for a PR carrying a script",
+    setup: [{ append: ["scripts/mutants.mjs", "// mutant"] }],
+    command: ["node", "scripts/check-claim-scope.mjs", "{{BASE}}", "docs-only"],
     wantExit: 1,
     wantOutput: 'The claim "docs-only" is false',
   },
   {
-    name: "claim-scope: no-shipped-change holds for this PR",
-    setup: [],
-    command: ["node", "scripts/check-claim-scope.mjs", "origin/main", "no-shipped-change"],
+    name: "claim-scope: no-shipped-change holds for a docs-only diff",
+    setup: [{ append: ["docs/adr/README.md", ""] }],
+    command: ["node", "scripts/check-claim-scope.mjs", "{{BASE}}", "no-shipped-change"],
     wantExit: 0,
     wantOutput: "holds across",
   },
