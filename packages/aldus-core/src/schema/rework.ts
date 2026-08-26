@@ -104,6 +104,21 @@ export const reworkPolicySchemaBase = z
     escalateToGateId: nonEmptyString,
     /** The decision that authorised this bound (§13). */
     authorizationId: nonEmptyString,
+    /**
+     * The asymmetric harm of unnecessary automatic correction, as the authorising party weighed it
+     * (§12.1; ADR-0056).
+     *
+     * Required, because a policy may cover a class whose channel is `advisory` — which is the
+     * ordinary case for a model-assisted evaluator with no promotion evidence, and the population
+     * that most needs a loop. §12.1 lists this harm among what promotion must consider, and a
+     * bounded loop does not make the consideration go away; it moves it to whoever authorises the
+     * policy.
+     *
+     * A weak mechanism, labelled as one. It catches an author who never considered the question and
+     * cannot catch a bad answer — the same shape, and the same justification, as `verified at:` in
+     * the evidence block: the move for an invisible omission is a required field.
+     */
+    automaticCorrectionHarm: nonEmptyString,
   })
   .meta({
     id: "ReworkPolicy",

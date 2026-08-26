@@ -72,3 +72,4 @@ Rules:
 | [0053](0053-an-exported-schema-carries-the-rule.md)                                         | An exported schema carries the rule                                                        | Accepted | #199              |
 | [0054](0054-a-decision-records-who-wrote-it-down.md)                                        | A decision records who wrote it down                                                       | Accepted | #213              |
 | [0055](0055-rework-is-not-retry-and-a-policy-is-not-a-judgement.md)                         | Rework is not retry, and a declared policy is not a judgement                              | Accepted | #220              |
+| [0056](0056-an-advisory-channel-may-warrant-repair-but-never-a-stop.md)                     | An advisory channel may warrant repair, but never a stop                                   | Accepted | #220              |

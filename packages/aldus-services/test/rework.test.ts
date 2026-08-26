@@ -24,6 +24,9 @@ const policy = (over: Partial<ReworkPolicy> = {}): ReworkPolicy => ({
   maxRounds: 2,
   escalateToGateId: "script.freeze",
   authorizationId: "decision-a",
+  automaticCorrectionHarm:
+    "A wrong repair rewrites narration the host will read aloud; bounded at two rounds and " +
+    "escalated to the editorial freeze, so no unreviewed rewrite reaches a take.",
   ...over,
 });
 
@@ -45,6 +48,7 @@ const round = (index: number, input: string, output: string): ReworkRound => ({
 const verdict = (over: Partial<ReworkVerdict> = {}): ReworkVerdict => ({
   artifactDigest: "a".repeat(64),
   blockingFindingClasses: ["comprehension"],
+  observedFindingClasses: over.blockingFindingClasses ?? ["comprehension"],
   ...over,
 });
 
@@ -220,5 +224,104 @@ describe("the decision is a function of durable state alone", () => {
     };
 
     expect(decideRework(input)).toEqual(decideRework(input));
+  });
+});
+
+describe("an advisory finding a policy covers still warrants repair (ADR-0056)", () => {
+  // Reported by the first adopter compiling against next.40. Their oracle emits eight finding
+  // classes and all eight channels are `advisory`, because §12.1 permits a blocking channel only
+  // after calibration and none of the eight has promotion evidence. So `blockingFindingClasses` is
+  // correctly `[]` on every attempt.
+  //
+  // Under ADR-0055 the controller read only that list, so for a model-assisted evaluator the
+  // derived verdict was always `pass` — the loop was unreachable for exactly the population that
+  // needs one, and an adopter got it only by declaring their own policy beside the runtime's and
+  // hoping the two agreed.
+  it("reworks on a covered advisory class with nothing blocking", () => {
+    const decision = decideRework({
+      policy: policy({ coversFindingClasses: ["unresolved_reference", "time_anchor_missing"] }),
+      rounds: [],
+      verdict: verdict({
+        blockingFindingClasses: [],
+        observedFindingClasses: ["unresolved_reference", "cut_candidate"],
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("rework");
+    if (decision.kind !== "rework") return;
+    // Only the covered class. Handing the repair `cut_candidate` would be acting on a class the
+    // policy's authorisation never named.
+    expect(decision.consumeFindingClasses).toEqual(["unresolved_reference"]);
+  });
+
+  it("converges when the only advisory classes are ones no policy covers", () => {
+    // The control, and the reason this is not "rework on anything observed": an advisory finding
+    // outside the policy is one the adopter chose to record and not act on. That is what advisory
+    // means, and reworking it would make every recorded observation compulsory.
+    const decision = decideRework({
+      policy: policy({ coversFindingClasses: ["unresolved_reference"] }),
+      rounds: [],
+      verdict: verdict({
+        blockingFindingClasses: [],
+        observedFindingClasses: ["cut_candidate", "style_note"],
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("converged");
+  });
+
+  it("still escalates a blocking class the policy does not cover", () => {
+    // The invariant that must survive the widening: rework never releases what enforcement blocked.
+    const decision = decideRework({
+      policy: policy({ coversFindingClasses: ["comprehension"] }),
+      rounds: [],
+      verdict: verdict({
+        blockingFindingClasses: ["legal"],
+        observedFindingClasses: ["legal", "comprehension"],
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("unknown_finding_class");
+  });
+
+  it("is still bounded when the trigger is advisory", () => {
+    // An uncalibrated evaluator driving an unbounded loop is the thing §12.1 exists to prevent.
+    // The bound is what makes the widening safe, so it is asserted on this path specifically.
+    const decision = decideRework({
+      policy: policy({ coversFindingClasses: ["unresolved_reference"], maxRounds: 1 }),
+      rounds: [round(1, "a".repeat(64), "b".repeat(64))],
+      verdict: verdict({
+        artifactDigest: "b".repeat(64),
+        blockingFindingClasses: [],
+        observedFindingClasses: ["unresolved_reference"],
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("bounds_exhausted");
+  });
+
+  it("does not escalate an advisory class outside the policy as unknown", () => {
+    // `unknown_finding_class` means "enforcement stopped work and no bounded round can resolve it".
+    // Firing it for an advisory class would send a person a decision nobody needs to make, and the
+    // hint an operator learns to skip is the one that fails on the day it matters.
+    const decision = decideRework({
+      policy: policy({ coversFindingClasses: ["unresolved_reference"] }),
+      rounds: [],
+      verdict: verdict({
+        blockingFindingClasses: [],
+        observedFindingClasses: ["unresolved_reference", "style_note"],
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("rework");
   });
 });
