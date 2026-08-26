@@ -14,6 +14,21 @@ Nothing yet.
 
 ## 0.2.0-next.34 — 2026-08-26
 
+### BREAKING
+
+**`CostReport.unresolved` is a required member.** Anyone constructing a `CostReport` — a test
+double, an alternative renderer — must supply it. Reading one is unaffected.
+
+<!-- breaking: aldus-services:CostReport.unresolved -->
+
+Required rather than optional deliberately. An optional field lets a report legitimately omit the
+state this release exists to make visible, and a reader cannot tell "no unresolved charges" from
+"this producer does not report them" — which is the same conflation the release is fixing one layer
+up. Pass `unresolved: []` where there are none.
+
+Caught by `check-breaking-notes`, which is the first time that gate has fired on a change of mine
+that I had not already noticed.
+
 ### Behaviour changes
 
 **`aldus costs` shows unresolved charges, and shows them first.**
