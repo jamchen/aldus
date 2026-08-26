@@ -36,6 +36,7 @@ import {
 import { readFileOrUndefined, writeDocument, type EventStore } from "@aldus-runtime/file-store";
 import { z } from "zod";
 
+import type { EvaluationObservation } from "./definition.js";
 import { StageRunnerErrorCodes, stageRunnerError } from "./errors.js";
 
 /**
@@ -170,6 +171,50 @@ export interface AttemptMetadata {
   subjectHashes?: string[] | undefined;
   /** Operator-facing notes recorded during the attempt (contract §20). */
   notes?: string[] | undefined;
+  /**
+   * What the evaluator emitted, as a record rather than as prose (§12, #140; #220).
+   *
+   * The observations previously survived only inside {@link notes}, formatted as
+   * `finding/<class>: <message>`. `locator` and `category` were dropped, and — the part that
+   * matters — so was the `finding` / `report` **discriminant**, the thing #140 added so a report is
+   * never counted as a defect. With it gone, `countEvaluationEvidence` cannot be computed from the
+   * record at all: `defectCountMeasurable` becomes unrecoverable rather than false.
+   *
+   * **Prose in a record is worse than nothing there**, which is why this is a fix rather than an
+   * addition. A consumer that finds nothing writes the persistence; a consumer that finds
+   * `finding/<class>: <message>` writes a regex, it works on the corpus in front of it, and the day
+   * a separator changes the count silently drops. {@link AggregateReport}'s own docstring rejects
+   * exactly that move for another program's output, and the note format was on the wrong side of
+   * its own argument.
+   *
+   * Notes stay. They are good operator output — they are now a **rendering** of this, not the
+   * record.
+   *
+   * Optional, so a cache written before this parses. Absent reads as "this attempt predates the
+   * field", which is true, rather than as "the evaluator emitted nothing".
+   */
+  observations?: EvaluationObservation[] | undefined;
+  /**
+   * How much the evaluator's evidence establishes, counted at the time (§12; #140).
+   *
+   * Stored rather than derived on read, for the same reason `executionCeilingEvidence` is: the
+   * count is a fact about what this attempt emitted, and recomputing it later from a different
+   * version's rules would report today's answer about yesterday's evidence.
+   */
+  evaluationEvidence?:
+    { enumeratedFindings: number; reports: number; defectCountMeasurable: boolean } | undefined;
+  /**
+   * Finding classes the stage's declared channels classified as **blocking**, at this attempt.
+   *
+   * Recorded rather than re-derived, and that is the load-bearing half. Enforcement is a property
+   * of the channel declaration **in force when the stage ran**; re-deriving it from today's
+   * registry would claim a classification from a declaration that was not the one applied — the
+   * defect ADR-0030 names, in the one place where the answer decides whether work stops.
+   *
+   * It is also what a rework controller consumes: a controller that read the observations and
+   * decided which block would be a stage promoting its own findings with extra steps (§12.1).
+   */
+  blockingFindingClasses?: string[] | undefined;
 }
 
 /** One stage execution, plus the metadata Core's record cannot carry. */
@@ -226,6 +271,50 @@ const attemptMetadataSchema = z.object({
   gateId: z.string().optional(),
   subjectHashes: z.array(z.string()).optional(),
   notes: z.array(z.string()).optional(),
+  // Permissive on the observation body and strict on the discriminant. The discriminant is the
+  // field #140 exists for; `category` and `locator` are adopter-shaped and Core names neither.
+  observations: z
+    .array(
+      z.discriminatedUnion("kind", [
+        // Transformed rather than cast: `exactOptionalPropertyTypes` distinguishes an absent
+        // property from one present and undefined, and Zod's `.optional()` produces the second.
+        // Dropping the key when there is no value is what makes the parsed record satisfy
+        // `EnumeratedFinding` honestly, instead of asserting past the flag the style rules exist
+        // to respect.
+        z
+          .object({
+            kind: z.literal("finding"),
+            findingClass: z.string(),
+            message: z.string(),
+            category: z.string().optional(),
+            locator: z.string().optional(),
+          })
+          .transform((finding) => ({
+            kind: "finding" as const,
+            findingClass: finding.findingClass,
+            message: finding.message,
+            ...(finding.category === undefined ? {} : { category: finding.category }),
+            ...(finding.locator === undefined ? {} : { locator: finding.locator }),
+          })),
+        // No `locator`, no `category`, and the omission is the point: a report is not a defect that
+        // happens to lack detail, and giving it a finding's fields would invite it to be counted as
+        // one (#140). Parsing it back with them would undo that here.
+        z.object({
+          kind: z.literal("report"),
+          findingClass: z.string(),
+          message: z.string(),
+        }),
+      ]),
+    )
+    .optional(),
+  evaluationEvidence: z
+    .object({
+      enumeratedFindings: z.number().int().nonnegative(),
+      reports: z.number().int().nonnegative(),
+      defectCountMeasurable: z.boolean(),
+    })
+    .optional(),
+  blockingFindingClasses: z.array(z.string()).optional(),
 });
 
 const stageStateFileSchema = z.object({

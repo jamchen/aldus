@@ -1143,9 +1143,22 @@ export class StageRunner {
     // and a value captured earlier silently drops whatever came after it. An advisory evaluation
     // finding lost that way would leave a green record that looks like semantic correctness, which
     // is the one thing §12 says a green record never means.
+    // Late-bound with the notes, for the same reason and from the same values — so the record and
+    // its rendering cannot disagree about what the evaluator said.
+    let observations: EvaluationObservation[] | undefined;
+    let evaluationEvidence:
+      { enumeratedFindings: number; reports: number; defectCountMeasurable: boolean } | undefined;
+    let blockingFindingClasses: string[] | undefined;
     const withNotes = (): AttemptMetadata => ({
       ...metadata,
       ...(notes.length > 0 ? { notes: [...notes] } : {}),
+      // Redacted like everything else that reaches a record: an evaluator's message is
+      // operator-facing text over the adopter's own subject (§19.2).
+      ...(observations === undefined
+        ? {}
+        : { observations: redact(observations.map((o) => ({ ...o }))) as EvaluationObservation[] }),
+      ...(evaluationEvidence === undefined ? {} : { evaluationEvidence }),
+      ...(blockingFindingClasses === undefined ? {} : { blockingFindingClasses }),
       // Late-bound like the notes, and for the same reason: invocations accumulate right up to the
       // point a stage settles, and a value captured earlier silently drops whatever came after it.
       ...(workerInvocations.length > 0
@@ -1332,12 +1345,24 @@ export class StageRunner {
 
       // Recorded either way — an advisory finding that vanished would make a green result look
       // like semantic correctness, which §12 forbids.
+      //
+      // **Structurally, and rendered as notes second.** These previously survived only as the
+      // formatted strings below: `locator` and `category` were dropped, and so was the
+      // `finding`/`report` discriminant, so `countEvaluationEvidence` could not be recomputed from
+      // the record and `defectCountMeasurable` was unrecoverable rather than false. A consumer
+      // then has one route to a verdict — a regex over prose the runtime formatted for a human —
+      // which is the move `AggregateReport`'s own docstring rejects for another program's output.
+      // Reported by the first adopter, who wanted the record before they wanted the loop.
+      observations = [...outcome.observations];
+      const evidence = countEvaluationEvidence(outcome.observations);
+      evaluationEvidence = { ...evidence };
+      blockingFindingClasses = [...new Set(blocking.map((finding) => finding.findingClass))];
+
       for (const observation of outcome.observations) {
         // The kind is written into the note, because a note reading only "warning: …" is exactly
         // the record that gets counted as one defect later (#140).
         notes.push(`${observation.kind}/${observation.findingClass}: ${observation.message}`);
       }
-      const evidence = countEvaluationEvidence(outcome.observations);
       if (!evidence.defectCountMeasurable) {
         notes.push(
           `evaluation evidence: ${evidence.enumeratedFindings} enumerated finding(s) and ` +
