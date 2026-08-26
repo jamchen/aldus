@@ -24,7 +24,9 @@ export const cases = [
       {
         replace: [
           "packages/aldus-core/src/schema-version.ts",
-          'export const SCHEMA_VERSION = "1.11"',
+          // A pattern, not a literal: pinning the current version made this case go stale on the
+          // next bump, and it refused for three of them.
+          /export const SCHEMA_VERSION = "[\d.]+"/,
           'export const SCHEMA_VERSION = "99.99"',
         ],
       },
@@ -37,6 +39,26 @@ export const cases = [
     ],
     wantExit: 0,
     wantOutput: "importer saw the mutation",
+  },
+  {
+    // The adopter's failure and mine, one argument apart: they probed a check with `--check` where
+    // the flag is `--verify`, their harness ignored it, ran the whole suite, and reported SURVIVED
+    // for a mutation the named check catches on sight. A typo'd `--suite` here would have skipped
+    // suite measurement and still printed a block that looks complete.
+    name: "evidence: an unknown flag refuses rather than being ignored",
+    setup: [],
+    command: ["node", "scripts/evidence.mjs", "--suite", "--no-mutants"],
+    wantExit: 2,
+    wantOutput: 'unknown flag "--suite"',
+  },
+  {
+    // The negative control. Without it the case above passes for an emitter that refuses every
+    // invocation, which would be exactly as broken and much easier to miss.
+    name: "evidence: a known flag still runs",
+    setup: [],
+    command: ["node", "scripts/evidence.mjs", "--no-mutants"],
+    wantExit: 0,
+    wantOutput: "head:",
   },
   {
     name: "version-bump: a src/ change to a published package must fire",

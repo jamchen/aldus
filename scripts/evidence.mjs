@@ -37,6 +37,41 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
+
+// An unknown flag stops the run rather than being ignored.
+//
+// Not hypothetical, and not mine: the adopter probed a check with `--check <name>` where the flag
+// is `--verify`, their harness ignored it, fell through to the whole suite, and reported SURVIVED
+// for a mutation the named check catches on sight. A confident wrong verdict about an instrument
+// that was never consulted — the same day I got a green measurement from a mutation that never
+// reached the code under test.
+//
+// The shape is what makes it dangerous: a typo'd `--suite` here would silently skip suite
+// measurement and still print a block that looks complete. A tool that answers a question it was
+// not asked is the third failure category with better manners.
+const KNOWN_FLAGS = new Set(["--base", "--suites", "--no-mutants", "--check"]);
+const VALUED_FLAGS = new Set(["--base", "--check"]);
+for (let i = 0; i < args.length; i += 1) {
+  const arg = args[i];
+  if (!arg.startsWith("--")) continue;
+  if (!KNOWN_FLAGS.has(arg)) {
+    process.stderr.write(
+      `evidence: unknown flag "${arg}".\n` +
+        `  known: ${[...KNOWN_FLAGS].join(", ")}\n` +
+        "  Refusing rather than ignoring it: a flag that is silently dropped produces a block\n" +
+        "  that looks complete and measured something else.\n",
+    );
+    process.exit(2);
+  }
+  if (VALUED_FLAGS.has(arg)) {
+    const value = args[i + 1];
+    if (value === undefined || value.startsWith("--")) {
+      process.stderr.write(`evidence: "${arg}" needs a value.\n`);
+      process.exit(2);
+    }
+    i += 1;
+  }
+}
 const base = (() => {
   const index = args.indexOf("--base");
   return index === -1 ? "origin/main" : args[index + 1];
