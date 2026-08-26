@@ -83,6 +83,43 @@ does not name. It now says so, and names the verb that accepts it.
      options are optional and `abandonDispatch` is additive, so nothing existing changes shape.
      The listing and refusal changes are text an operator reads, invisible to a `.d.ts` diff. -->
 
+## 0.2.0-next.38 — 2026-08-27
+
+Schema version **1.14 → 1.15** (additive: two new types, no existing type changed).
+
+### Added
+
+**`ReworkPolicy` and `ReworkRound`** (`@aldus-runtime/core`) and **`decideRework`**
+(`@aldus-runtime/services`) — the durable half of the bounded rework contract (#220, ADR-0055).
+
+The first adopter's script process ran `candidate → oracle → blocking findings? revise and evaluate
+again → clean? human freeze`. The human owned the final editorial freeze and **did not decide every
+ordinary oracle round**. On Aldus that loop had nowhere to live: either a `gate_required` per failed
+pass, which regresses an agent-driven process into repeated manual routing, or an operator's shell
+loop, which is outside the record entirely.
+
+`decideRework` is a pure decision over durable state — the policy, the round history, and the latest
+verdict, all of which are on disk. Deliberately: a loop must resume correctly in a process with no
+memory of the previous rounds, and a controller holding state in a session cannot be resumed by the
+next one.
+
+Its exits: converge, run the declared repair, or escalate to a named gate with one of
+`bounds_exhausted`, `oscillation`, `unknown_finding_class`, `ambiguous_verdict`, `no_policy`.
+
+Core names no finding classes, repair stages or thresholds (§4.2) — every such value is an opaque
+string the adopter supplies. The policy's bound carries `authorizationId`, because a cap an operator
+can raise mid-run by editing config is not a bound.
+
+**No graph cycle.** ADR-0028's DAG keeps its static ordering guarantees; iteration is a controller's
+decision about which stage runs next.
+
+**Not yet wired.** This release carries the schema and the decision, not the execution: nothing in
+the runner or `status` consults a policy yet, and there is no end-to-end rework test. Declaring a
+policy has no effect on a Run in `next.38`.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. Both types and the
+     function are new; nothing existing changed shape. -->
+
 ## Unreleased
 
 Nothing yet.
