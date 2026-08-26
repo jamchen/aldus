@@ -177,6 +177,7 @@ export class AldusContext {
   readonly gateRegistry: GateRegistry;
   readonly stageRegistry: StageRegistry;
   readonly gates: GateEngine;
+  readonly #gateDecisions: RunStoreGateDecisionStore;
   readonly actor: ActorRef | undefined;
   readonly backend: AgentBackend | undefined;
   readonly workers: WorkerRegistry | undefined;
@@ -271,9 +272,10 @@ export class AldusContext {
             now: () => this.now(),
           });
 
+    this.#gateDecisions = new RunStoreGateDecisionStore(this.workspace.runs);
     this.gates = new GateEngine({
       registry: this.gateRegistry,
-      decisions: new RunStoreGateDecisionStore(this.workspace.runs),
+      decisions: this.#gateDecisions,
       costs: new RunStoreCostReader(this.workspace.runs),
       events: new EventStoreGateEventSink(this.workspace.events),
     });
@@ -344,6 +346,13 @@ export class AldusContext {
       // and validating against that list makes the pattern unreachable. What makes an escalation
       // decidable is that the gate exists to be decided.
       gateIsKnown: (gateId) => this.gateRegistry.has(gateId),
+      // And whether it has been decided, which is what lets a parked stage move again. Without it
+      // `waiting_for_gate` was written and never cleared by anything in the runtime: the first
+      // adopter's owner approved `script.comprehension`, the decision recorded cleanly, and both
+      // `run` and `retry` still refused the stage — a permanent stop with an approval beside it
+      // (#240).
+      gateHasDecision: async (gateId, runId) =>
+        (await this.#gateDecisions.list(runId)).some((decision) => decision.gateId === gateId),
       // Without this a stage's `registerOutput` refuses with ARTIFACT_RECORDER_UNAVAILABLE, so
       // the capability exists on the context, is reachable as `context.artifacts`, and is
       // unusable from every stage the services actually run. The refusal is correct — a stage
