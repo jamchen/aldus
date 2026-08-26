@@ -41,6 +41,13 @@ export const GateEngineErrorCodes = {
    */
   GATE_WAIVER_INVALID: "ALDUS_GATE_WAIVER_INVALID",
   /**
+   * A decision named the decider as its own transcriber.
+   *
+   * `transcription` exists to record that someone **else** wrote the decision down. Naming the
+   * same actor for both says nothing, and it would make the field unreadable where it is real.
+   */
+  GATE_TRANSCRIPTION_INVALID: "ALDUS_GATE_TRANSCRIPTION_INVALID",
+  /**
    * An operation requiring authorization was attempted without a valid one.
    *
    * Contract §13.2: paid TTS MUST NOT run until the operator approves. This is the refusal that

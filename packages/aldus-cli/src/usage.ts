@@ -68,6 +68,8 @@ Command options
   run           --stage-version <version> --input <json> --force
   retry         --stage-version <version> --input <json> --force
   approve       --comment <text>
+                --decided-by <kind:id> --verbatim <text>
+                  record a decision someone else made; you are recorded as the transcriber
   waive         --reason <text>   (required; a waiver always expires when its subjects change)
   cancel        --reason <text>
   reject        --comment <text>

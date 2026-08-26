@@ -70,3 +70,4 @@ Rules:
 | [0051](0051-strictness-needs-a-declared-extension-point.md)                                 | Strictness needs a declared extension point                                                | Accepted | #186              |
 | [0052](0052-provenance-records-what-produced-the-bytes.md)                                  | Provenance records what produced the bytes                                                 | Accepted | #196              |
 | [0053](0053-an-exported-schema-carries-the-rule.md)                                         | An exported schema carries the rule                                                        | Accepted | #199              |
+| [0054](0054-a-decision-records-who-wrote-it-down.md)                                        | A decision records who wrote it down                                                       | Accepted | #213              |

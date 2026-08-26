@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.13:StageExecution",
+  "$id": "urn:aldus:schema:1.14:StageExecution",
   "type": "object",
   "properties": {
     "schemaVersion": {

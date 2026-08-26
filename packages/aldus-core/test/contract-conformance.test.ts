@@ -98,7 +98,15 @@ const SANCTIONED_ADDITIONS: Partial<Record<SchemaName, readonly string[]>> = {
   // ADR-0003: persisted as a standalone document, so it carries its own version.
   // `decisionId`: §6 shows ProductionRun 1→many GateDecision; without an ID two decisions on
   // one gate are indistinguishable.
-  GateDecision: ["schemaVersion", "decisionId"],
+  // `transcription`: added at SCHEMA_VERSION 1.14 (ADR-0054). §19.2 requires a recorded actor and
+  // §13 requires a decision be attributable; neither says who *wrote the record*, so `decidedBy`
+  // carried two readings — the person typed it, and the person decided it while something else
+  // typed it. Both read as "a human decided" and the second has a link that can fail.
+  //
+  // The honest shape was unreachable while the misleading one was not: nothing authenticates an
+  // actor string, so an agent transcribing a decision could already record the human as the actor.
+  // Forced by an owner on a phone whose approval could not reach the runtime at all.
+  GateDecision: ["schemaVersion", "decisionId", "transcription"],
   // ADR-0003 plus §6: ReleaseReceipt is a child of a Run, and lineage queries need the edge.
   //
   // `bundleId`: added at SCHEMA_VERSION 1.4 (ADR-0033). §17 describes a bundle as something a

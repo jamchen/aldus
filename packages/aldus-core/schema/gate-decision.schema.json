@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aldus:schema:1.13:GateDecision",
+  "$id": "urn:aldus:schema:1.14:GateDecision",
   "type": "object",
   "properties": {
     "schemaVersion": {
@@ -41,6 +41,22 @@
     },
     "decidedBy": {
       "$ref": "#/$defs/ActorRef"
+    },
+    "transcription": {
+      "type": "object",
+      "properties": {
+        "recordedBy": {
+          "$ref": "#/$defs/ActorRef"
+        },
+        "verbatim": {
+          "type": "string",
+          "maxLength": 8000
+        }
+      },
+      "required": [
+        "recordedBy",
+        "verbatim"
+      ]
     },
     "decidedAt": {
       "type": "string",

@@ -12,6 +12,44 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.32 — 2026-08-26
+
+### Features
+
+**A decision can record who wrote it down** (ADR-0054).
+
+```
+aldus approve <gate> --decided-by human:jamchen --verbatim "同意，可以 freeze"
+```
+
+`decidedBy` answered _who decided_ and nothing answered _who wrote the record_, so one field
+carried two events — _the person typed it_, and _the person decided it and something else typed
+it_. Both read as "a human decided", and the second has one more link that can fail.
+
+**The honest shape was unreachable while the misleading one was not.** Nothing authenticates an
+actor string, so an agent transcribing a decision could always set the human as the actor. Refusing
+the field never prevented transcription — it prevented _truthful_ transcription.
+
+The case that forced it was operational: an owner working from a mobile app, where `!` is a
+terminal feature that is not intercepted, sent an approval command twice and it arrived as text
+both times. Everything in the pipeline worked and the channel did not exist. **The shape reachable
+from a phone was the dishonest one.**
+
+`transcription` is one object — `{ recordedBy, verbatim }` — because a transcriber with no record
+of what they were told cannot be checked, and words with no transcriber name nobody.
+
+**`recordedBy` is derived from the acting actor and there is no flag for it.** A transcriber that
+could name itself could name someone else. The engine refuses a decision naming the decider as its
+own transcriber (`ALDUS_GATE_TRANSCRIPTION_INVALID`): that is the ordinary case wearing an extra
+field, and allowing it would make the field unreadable wherever it is real.
+
+`--decided-by` and `--verbatim` are required together and refused apart.
+
+**This grants no authority.** `permittedActorKinds` still applies to `decidedBy`, so an agent
+transcribing cannot record a decision an agent could not make — tested in both directions.
+
+`SCHEMA_VERSION` **1.13 → 1.14** (MINOR, additive, ADR-0003).
+
 ## 0.2.0-next.31 — 2026-08-26
 
 ### Behaviour changes

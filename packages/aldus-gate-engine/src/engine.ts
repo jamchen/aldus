@@ -138,6 +138,15 @@ export interface DecideInput {
   comment?: string;
   /** Canonical Episode identity, for the emitted event (§6.4). */
   episodeId: string;
+  /**
+   * Present when the decider did not write this record themselves (§19.2).
+   *
+   * Supplied by the composition, which knows the acting actor. The engine's job is to refuse a
+   * transcription that names the decider as its own transcriber — that is not a transcription,
+   * it is the ordinary case wearing an extra field, and letting it through would make the field
+   * mean nothing wherever it appeared.
+   */
+  transcription?: GateDecision["transcription"];
   /** Overrides the gate's default. Defaults to the definition's `expiresOnChange`. */
   expiresOnChange?: boolean;
   /** Supplied for deterministic tests; defaults to a fresh ULID-based id. */
@@ -238,6 +247,23 @@ export class GateEngine {
       );
     }
 
+    // A transcription names someone **other** than the decider. Recording the decider as their own
+    // transcriber says nothing and would make the field unreadable wherever it did appear: a reader
+    // could no longer tell a transcribed decision from one that carried the field by habit.
+    if (
+      input.transcription !== undefined &&
+      input.transcription.recordedBy.kind === input.decidedBy.kind &&
+      input.transcription.recordedBy.id === input.decidedBy.id
+    ) {
+      throw gateEngineError(
+        GateEngineErrorCodes.GATE_TRANSCRIPTION_INVALID,
+        `The decision for gate "${gate.gateId}" records the decider as its own transcriber. A ` +
+          "transcription exists to say that someone else wrote the record down; naming the same " +
+          "actor for both says nothing and makes the field unreadable where it is real (§19.2).",
+        { category: "validation", details: { gateId: gate.gateId } },
+      );
+    }
+
     // A waiver is not an approval, and the two refusals below are what keep it from becoming one.
     //
     // **It must not outlive the content it was granted against.** `expiresOnChange` is a per-
@@ -283,6 +309,7 @@ export class GateEngine {
       decidedBy: input.decidedBy,
       decidedAt: input.decidedAt,
       ...(input.comment !== undefined ? { comment: input.comment } : {}),
+      ...(input.transcription === undefined ? {} : { transcription: input.transcription }),
       // Forced for a waiver, never taken from the gate default or the caller. See above.
       expiresOnChange:
         input.decision === "waived" ? true : (input.expiresOnChange ?? gate.expiresOnChange),
