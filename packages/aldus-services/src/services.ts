@@ -607,7 +607,16 @@ export class AldusServices {
   async costs(runId: string): Promise<ServiceResult<CostReport>> {
     await this.#requireRun(runId);
     const records = await this.#context.workspace.runs.listRecords(runId, "costs");
-    return ok({ runId, records, summary: summariseCosts(records) });
+    // Reservations too, not only cost records. An unresolved charge lives in the reservation store
+    // and blocks every later dispatch on its grant, and reading records alone made that state
+    // invisible in the one command an operator checks when the money looks wrong (#215).
+    const reservations = await this.#context.spendStatus(runId);
+    return ok({
+      runId,
+      records,
+      summary: summariseCosts(records),
+      unresolved: reservations.filter((entry) => entry.requiresReconciliation),
+    });
   }
 
   /** Release receipts and what they imply (contract §17). */
@@ -1251,7 +1260,13 @@ export class AldusServices {
     const gates = await this.#gateStatuses(runId);
     const state = await runner.stageState(runId);
     const stages = this.#stageReports(state.stages);
+    // The money, which this input never carried. A stage blocked by an unresolved charge was
+    // offered as runnable because the plan knew about gates and stages and nothing else (#215).
+    const unresolvedSpend = (await this.#context.spendStatus(runId))
+      .filter((entry) => entry.requiresReconciliation)
+      .map((entry) => ({ reservationId: entry.reservationId, operation: entry.operation }));
     return {
+      ...(unresolvedSpend.length > 0 ? { unresolvedSpend } : {}),
       // The derived status, not the stored one. `decideActions` already knows what to say about
       // a cancelled or completed Run; before ADR-0026 it simply never received either.
       run: {

@@ -7,6 +7,7 @@
  * inside one service's file drifts into being that service's private business.
  */
 
+import type { ReservationStatus } from "./spend-service.js";
 import type {
   ArtifactRef,
   CostRecord,
@@ -195,6 +196,19 @@ export interface CostReport {
   runId: string;
   records: CostRecord[];
   summary: CostSummary;
+  /**
+   * Reservations still awaiting reconciliation (#215).
+   *
+   * Absent from this report until an adopter found out the hard way: `costs` read cost *records*
+   * only, so an unresolved charge — which lives in the reservation store and blocks every later
+   * dispatch on its grant — printed nothing at all. The command whose whole job is the money
+   * showed six settled records and a total, as if nothing were pending, while the Run could not
+   * proceed.
+   *
+   * Each carries the `reservationId` `aldus costs settle` takes, so the report names its own
+   * remedy rather than leaving an operator to find one.
+   */
+  unresolved: ReservationStatus[];
 }
 
 /**

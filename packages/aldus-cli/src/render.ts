@@ -423,8 +423,30 @@ export function renderArchive(report: ArchiveReport): string {
 /** Render `costs`. */
 export function renderCosts(report: CostReport): string {
   const summary = renderCostSummary(report.summary);
-  if (summary.length === 0) return `No costs recorded for run ${report.runId}.`;
-  return [`Run ${report.runId}`, "", ...summary].join("\n");
+
+  // **Unresolved charges first, and shown even when nothing settled.** An unresolved charge blocks
+  // every later dispatch on its grant, and this command printed the settled records and a total as
+  // if nothing were pending — so the state that stopped a Run was invisible in the one command
+  // whose whole job is the money (#215). It also names the remedy: the reservation id below is
+  // what `aldus costs settle` takes.
+  const blocked =
+    report.unresolved.length === 0
+      ? []
+      : [
+          `${report.unresolved.length} unresolved charge(s) — every later dispatch on the grant is refused`,
+          ...report.unresolved.map(
+            (entry) =>
+              `  ${entry.reservationId}  ${entry.status}  reserved ${entry.reservedAuthorizationAmount.amount} ` +
+              `${entry.reservedAuthorizationAmount.currency}  (${entry.operation})`,
+          ),
+          "  resolve with: aldus costs settle <reservation-id> --evidence <what it rests on>",
+          "",
+        ];
+
+  if (summary.length === 0 && blocked.length === 0) {
+    return `No costs recorded for run ${report.runId}.`;
+  }
+  return [`Run ${report.runId}`, "", ...blocked, ...summary].join("\n");
 }
 
 /** Render `release status`. */
@@ -639,6 +661,10 @@ export function renderCancelRun(report: RunReport): string {
     lines.push(`  at       ${cancellation.cancelledAt}`);
     if (cancellation.reason !== undefined) lines.push(`  reason   ${cancellation.reason}`);
   }
-  lines.push("", "Start a new Run to continue this Episode.");
+  // The command, not the intention. This said "Start a new Run to continue this Episode." and the
+  // obvious next command then failed on a missing `--workflow` — an instruction that names a step
+  // without naming what it needs is one an operator discovers is wrong by following it.
+  lines.push("", "Start a new Run to continue this Episode:");
+  lines.push("  aldus start --workflow <workflow-id> --workflow-version <version>");
   return lines.join("\n");
 }

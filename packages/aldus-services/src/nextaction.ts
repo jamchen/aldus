@@ -78,6 +78,15 @@ export interface ActionPolicyInput {
   stages: readonly StageSnapshot[];
   /** Evaluated gate states (contract §13). */
   gates: readonly GateStatus[];
+  /**
+   * Reservations awaiting reconciliation (#215).
+   *
+   * An unresolved charge refuses every later dispatch on its grant, and `status` offered the
+   * blocked stage as runnable because the plan consulted gates and stages and never the money. An
+   * operator was told to run a stage the runtime would refuse, with no mention of why or of the
+   * verb that clears it.
+   */
+  unresolvedSpend?: readonly { reservationId: string; operation: string }[];
 }
 
 /**
@@ -371,6 +380,24 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
       // Reported and not offered, enforced or not — this is exactly what `status` printed before
       // ADR-0024, and that wording is unchanged. What changed is only whether `runStage` refuses:
       // an advisory block explains a risk, an enforced one stops the work.
+      continue;
+    }
+
+    // Money blocks a stage as surely as a gate does, and the plan used to know only about gates.
+    // Offering a stage the runtime will refuse is worse than saying nothing: it sends an operator
+    // at a command that fails for a reason this report already had in hand.
+    const unresolved = input.unresolvedSpend ?? [];
+    if (unresolved.length > 0) {
+      blocked.push({
+        kind: "run-stage",
+        summary: `Run "${stage.stageId}"`,
+        reason:
+          `${unresolved.length} unresolved charge(s) stand against this Run's grant, so every ` +
+          "paid dispatch is refused until they are reconciled. Resolve with `aldus costs settle " +
+          `${unresolved[0]?.reservationId ?? "<reservation-id>"} --evidence <what it rests on>\`.`,
+        enforcement: "enforced",
+        stageId: stage.stageId,
+      });
       continue;
     }
 
