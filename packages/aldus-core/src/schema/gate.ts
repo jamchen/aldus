@@ -69,6 +69,54 @@ export const gateDecisionSchemaBase = z
     subjectHashes: z.array(sha256Hex).max(4096),
     /** Who decided (contract §19.2). */
     decidedBy: actorRefSchema,
+    /**
+     * Present when the decider did not write the record themselves (§19.2).
+     *
+     * **Transcription and delegation are different failures and were the same record.** Delegation
+     * is an agent forming the judgement — refused, and `takeDecisionActorKinds` is the declared
+     * opt-out where a show genuinely has none. Transcription is a human forming the judgement and
+     * an agent typing it: the risk is misrepresentation, not usurpation, and `decidedBy` alone
+     * cannot tell the two readings apart:
+     *
+     * - *the person typed it*
+     * - *the person decided it and something else typed it*
+     *
+     * Both read as "a human decided", and the second has one more link that can fail.
+     *
+     * **The honest shape was unreachable while the misleading one was not.** Nothing authenticates
+     * an actor string — `parseActor` splits `"kind:id"` and believes it — so an agent transcribing
+     * a decision could already record the human as the actor and nothing could distinguish that
+     * from the human having typed it. Refusing this field never prevented transcription; it
+     * prevented *truthful* transcription. An owner reading this project's own history will find
+     * the case that forced it: an owner on a phone, whose approval could not reach the runtime at
+     * all, for whom the only available path was an agent typing their identity.
+     *
+     * **Both halves or neither**, structurally. A transcriber with no record of what they were
+     * told cannot be checked against anything, and words with no transcriber name nobody. That is
+     * why this is one object rather than two optional fields.
+     *
+     * This grants no authority. `recordedBy` names who wrote the record down; it does not make
+     * that actor able to decide anything, and every `permittedActorKinds` rule still applies to
+     * `decidedBy`.
+     */
+    transcription: z
+      .object({
+        /**
+         * Who wrote the record.
+         *
+         * Derived by the runtime from the acting actor, never supplied by a caller: a transcriber
+         * that could name itself could name someone else.
+         */
+        recordedBy: actorRefSchema,
+        /**
+         * What the decider actually said, as they said it.
+         *
+         * The actor ids alone make a transcription attributable and not checkable. A reader can
+         * only judge whether the record matches the decision if the words are in it.
+         */
+        verbatim: humanText,
+      })
+      .optional(),
     /** When the decision was made. */
     decidedAt: iso8601,
     /** Optional rationale. Contract §12.4 expects a reason to be recorded for a rejection. */

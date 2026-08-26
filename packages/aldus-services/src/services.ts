@@ -144,6 +144,17 @@ export interface GateDecisionRequest {
   runId: string;
   gateId: string;
   comment?: string;
+  /**
+   * A decision made by someone other than the actor running this command (§19.2).
+   *
+   * The **acting** actor becomes `transcription.recordedBy`; `decidedBy` becomes the person named
+   * here. The transcriber is derived rather than accepted, because a transcriber that could name
+   * itself could name someone else.
+   *
+   * `verbatim` is required with it and not separately optional: a transcriber with no record of
+   * what they were told cannot be checked against anything.
+   */
+  transcribing?: { decidedBy: ActorRef; verbatim: string };
   /** Overrides the gate definition's default. */
   expiresOnChange?: boolean;
   actor?: ActorRef;
@@ -1031,7 +1042,16 @@ export class AldusServices {
     request: GateDecisionRequest,
     decision: "approved" | "rejected" | "changes_requested" | "waived",
   ): Promise<ServiceResult<GateDecisionReport>> {
-    const actor = requireActor(request.actor ?? this.#context.actor, decision);
+    const acting = requireActor(request.actor ?? this.#context.actor, decision);
+
+    // Who decided, and — where those differ — who wrote it down. `recordedBy` is the **acting**
+    // actor and is never taken from the request: the caller says whose decision this is, and the
+    // runtime says who is recording it, so a transcriber cannot omit or rename itself.
+    const actor = request.transcribing?.decidedBy ?? acting;
+    const transcription =
+      request.transcribing === undefined
+        ? undefined
+        : { recordedBy: acting, verbatim: request.transcribing.verbatim };
     const manifest = await this.#requireRun(request.runId);
     const subjects = await this.#context.subjectsFor(request.runId);
     const gateSubjects = subjects[request.gateId] ?? [];
@@ -1045,6 +1065,7 @@ export class AldusServices {
       decidedAt: this.#context.now().toISOString(),
       episodeId: manifest.episode.episodeId,
       ...(request.comment !== undefined ? { comment: request.comment } : {}),
+      ...(transcription === undefined ? {} : { transcription }),
       ...(request.expiresOnChange !== undefined
         ? { expiresOnChange: request.expiresOnChange }
         : {}),

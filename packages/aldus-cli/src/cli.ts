@@ -710,6 +710,8 @@ async function runDecision(
 ): Promise<ExitCode> {
   const { options, values, positionals } = parseCommon(argv, environment, {
     comment: { type: "string" },
+    "decided-by": { type: "string" },
+    verbatim: { type: "string" },
   });
   const gateId = positionals[0];
   if (gateId === undefined) {
@@ -718,11 +720,41 @@ async function runDecision(
     });
   }
 
+  // `--decided-by` records a decision someone else made (§19.2). The acting actor becomes the
+  // transcriber, derived rather than supplied.
+  //
+  // The pair is required together and refused apart. Without `--verbatim` a transcription is
+  // attributable and not checkable — a reader can see who typed it and has nothing to compare the
+  // record against — and `--verbatim` without `--decided-by` is a comment wearing a different
+  // flag. This is the only shape in which the runtime can say "a person decided and a machine
+  // wrote it down", which was previously expressible only by typing that person's identity.
+  const decidedBy = values["decided-by"];
+  const verbatim = values["verbatim"];
+  if (typeof decidedBy === "string" && (typeof verbatim !== "string" || verbatim.trim() === "")) {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`--decided-by` needs `--verbatim`: what the decider actually said. Without it the record " +
+        "says who typed the decision and gives a reader nothing to check it against.",
+      { category: "validation" },
+    );
+  }
+  if (typeof verbatim === "string" && typeof decidedBy !== "string") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`--verbatim` records what someone else said, so it needs `--decided-by`. For your own " +
+        "rationale, use `--comment`.",
+      { category: "validation" },
+    );
+  }
+
   const services = servicesFor(options, environment);
   const request = {
     runId: requireRunId(options, command),
     gateId,
     ...(typeof values["comment"] === "string" ? { comment: values["comment"] } : {}),
+    ...(typeof decidedBy === "string" && typeof verbatim === "string"
+      ? { transcribing: { decidedBy: parseActor(decidedBy), verbatim } }
+      : {}),
     ...(options.actor !== undefined ? { actor: options.actor } : {}),
   };
 

@@ -27,7 +27,7 @@ import { AldusError, CoreErrorCodes } from "./errors.js";
  * - `1.3` — adds `RunManifest.goalStages` and `RunManifest.cancellation` (§6.2, §19.1).
  *   Additive: both are optional, so every `1.2` record stays readable and reads as `forward`.
  */
-export const SCHEMA_VERSION = "1.13";
+export const SCHEMA_VERSION = "1.14";
 
 /** Parsed form of a `MAJOR.MINOR` schema version. */
 export interface SchemaVersion {
