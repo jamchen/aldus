@@ -283,13 +283,32 @@ export class FileSpendReservationStore implements SpendReservationStore {
     }
   }
 
+  /**
+   * Where this store looks. Exposed so a refusal can name the path it searched: "no reservation
+   * here" and "I could not look" read identically to an operator otherwise (§19.2).
+   */
+  get root(): string {
+    return this.#root;
+  }
+
   async #grantIds(): Promise<string[]> {
     try {
       return (await readdir(this.#root, { withFileTypes: true }))
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name);
-    } catch {
-      return [];
+    } catch (error) {
+      // A root that does not exist yet is a workspace that has reserved nothing — an ordinary
+      // empty answer. Anything else is the instrument failing to look: a permission error, a file
+      // where the directory should be, a root pointed at a composition's idea of the layout rather
+      // than this one's. Swallowing those returned `[]`, and `[]` is indistinguishable from a
+      // truthful "no reservations" — so `costs` reported an empty ledger for a workspace holding
+      // real money and `settle` answered "holds no reservation", both stating a fact about the
+      // world when the instrument had never reached it.
+      //
+      // The distinction is the point: an empty answer must come from an empty store, never from a
+      // failure to read one.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
     }
   }
 

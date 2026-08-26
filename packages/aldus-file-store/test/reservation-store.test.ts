@@ -209,3 +209,84 @@ describe("lookups scan, because a hint cannot establish absence", () => {
     ]);
   });
 });
+
+describe("a reservation is findable through a grant whose id is not a plain word", () => {
+  // Every test above uses `grant-a`. The first adopter's grants are named
+  // `grant:<runId>:agent:<decisionId>` — the Run is inside the grant's own identity — and a grant
+  // id becomes a directory name at `reservation-store.ts:249`. So the venue every existing test
+  // measured in is one where the id happens to be a safe path segment, which is the property under
+  // test rather than an incidental detail of the fixture.
+  const NESTED = "grant:run_01AAAA:agent:dec_01BBBB";
+
+  it("survives being a directory name, and the run is still found through it", async () => {
+    await store.compareAndAppend({
+      grantId: NESTED,
+      expectedRevision: 0,
+      transitions: [reserved("a", { grantId: NESTED } as never)],
+    });
+
+    const byRun = await store.listByRun("run-a");
+    expect(byRun.map((r) => r.reservationId)).toContain("res-a");
+  });
+
+  it("stays found after a dispatch_prepared, which carries no runId of its own", async () => {
+    // The adopter's exact shape: `reservation.reserved` carries `runId`, the transition after it
+    // does not. If anything read the run off the latest transition rather than the projection, the
+    // reservation would drop out of `listByRun` here and `costs settle` would answer
+    // "holds no reservation" — the reported symptom.
+    await store.compareAndAppend({
+      grantId: NESTED,
+      expectedRevision: 0,
+      transitions: [reserved("a", { grantId: NESTED } as never)],
+    });
+    await store.compareAndAppend({
+      grantId: NESTED,
+      expectedRevision: 1,
+      transitions: [
+        {
+          schemaVersion: SCHEMA_VERSION,
+          transitionId: "a-prepared",
+          reservationId: "res-a",
+          grantId: NESTED,
+          kind: "reservation.dispatch_prepared",
+          at: "2026-01-01T00:00:01.000Z",
+          detail: { execution: { attemptId: "att-1" } },
+        } as unknown as SpendReservationTransition,
+      ],
+    });
+
+    const byRun = await store.listByRun("run-a");
+    const found = byRun.find((r) => r.reservationId === "res-a");
+    expect(found).toBeDefined();
+    expect(found?.runId).toBe("run-a");
+    expect(found?.execution).toBeDefined();
+  });
+});
+
+describe('a store that cannot look does not answer "nothing"', () => {
+  // The first adopter held $12.00 in a reservation `costs` reported as an empty ledger and `settle`
+  // refused as "Run holds no reservation". Their composition rooted the store at a path this one
+  // does not read, and `#grantIds()` caught every error and returned `[]` — so a root it could not
+  // read was indistinguishable from a root with nothing in it. Both statements were about the
+  // world; neither instrument had reached the world.
+  it("reports an empty store for a root that does not exist yet", async () => {
+    // The legitimate empty answer, kept: a workspace that has reserved nothing has no root.
+    const missing = new FileSpendReservationStore({ root: join(root, "never-created") });
+    await expect(missing.listByRun("run-a")).resolves.toEqual([]);
+  });
+
+  it("throws for a root it cannot read, rather than reporting an empty store", async () => {
+    // A file where the directory belongs — ENOTDIR, not ENOENT. Under the old catch-all this
+    // returned `[]` and the caller stated "no reservations" as a fact.
+    const asFile = join(root, "root-is-a-file");
+    await writeFile(asFile, "not a directory", "utf8");
+    const broken = new FileSpendReservationStore({ root: asFile });
+
+    await expect(broken.listByRun("run-a")).rejects.toThrow();
+  });
+
+  it("names where it looked, so two compositions can compare paths", async () => {
+    const store = new FileSpendReservationStore({ root: join(root, "spend", "reservations") });
+    expect(store.root).toBe(join(root, "spend", "reservations"));
+  });
+});
