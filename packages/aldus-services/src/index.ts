@@ -80,6 +80,13 @@ export {
   type StageSummaryStatus,
 } from "./nextaction.js";
 
+export {
+  decideRework,
+  type ReworkDecision,
+  type ReworkInput,
+  type ReworkVerdict,
+} from "./rework.js";
+
 export { deriveRunState, goalStagesFor, type RunState, type RunStateSource } from "./runstate.js";
 
 export type {

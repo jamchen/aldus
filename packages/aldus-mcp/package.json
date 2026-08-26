@@ -1,6 +1,6 @@
 {
   "name": "@aldus-runtime/mcp",
-  "version": "0.2.0-next.36",
+  "version": "0.2.0-next.38",
   "type": "module",
   "description": "Aldus Production MCP — a capability-checked tool surface over @aldus-runtime/services (architecture contract §18.1).",
   "license": "Apache-2.0",
@@ -33,18 +33,18 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/artifact-registry": "0.2.0-next.36",
-    "@aldus-runtime/core": "0.2.0-next.36",
-    "@aldus-runtime/file-store": "0.2.0-next.36",
-    "@aldus-runtime/gate-engine": "0.2.0-next.36",
-    "@aldus-runtime/release": "0.2.0-next.36",
-    "@aldus-runtime/services": "0.2.0-next.36",
-    "@aldus-runtime/stage-runner": "0.2.0-next.36",
-    "@aldus-runtime/tts-ledger": "0.2.0-next.36",
+    "@aldus-runtime/artifact-registry": "0.2.0-next.38",
+    "@aldus-runtime/core": "0.2.0-next.38",
+    "@aldus-runtime/file-store": "0.2.0-next.38",
+    "@aldus-runtime/gate-engine": "0.2.0-next.38",
+    "@aldus-runtime/release": "0.2.0-next.38",
+    "@aldus-runtime/services": "0.2.0-next.38",
+    "@aldus-runtime/stage-runner": "0.2.0-next.38",
+    "@aldus-runtime/tts-ledger": "0.2.0-next.38",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "0.2.0-next.36",
+    "@aldus-runtime/testkit": "0.2.0-next.38",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

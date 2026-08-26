@@ -454,7 +454,13 @@ export function renderCosts(report: CostReport): string {
           `${held.length} reservation(s) holding authorization, not yet settled`,
           ...held.map(line),
           "  in flight, or left behind by a process that ended mid-dispatch — this cannot tell",
-          "  which. `aldus costs settle` resolves one that is not coming back.",
+          // Named `abandon`, not `settle`. The previous line pointed at `settle`, which accepts
+          // only `billing_unknown` and refuses every reservation listed here — so the one place
+          // that tells an operator what to do named the one command that would refuse them
+          // (#226). A verb offered for a state that cannot accept it is worse than no verb: it
+          // spends the operator's trust before it spends their time.
+          "  which. `aldus costs abandon <reservation-id> --reason <why>` records that one is not",
+          "  coming back; it is then reconcilable with `aldus costs settle`.",
           "",
         ]),
   ];

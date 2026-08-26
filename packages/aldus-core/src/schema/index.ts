@@ -19,6 +19,7 @@ import { episodeRefSchemaBase } from "./episode.js";
 import { gateDecisionSchemaBase } from "./gate.js";
 import { knowledgePackManifestSchemaBase } from "../knowledge/manifest.js";
 import { releaseReceiptSchemaBase } from "./release.js";
+import { reworkPolicySchemaBase, reworkRoundSchemaBase } from "./rework.js";
 import { runManifestSchemaBase } from "./run.js";
 import { stageAttemptSchema, stageExecutionSchemaBase } from "./stage.js";
 
@@ -29,6 +30,7 @@ export * from "./episode.js";
 export * from "./event.js";
 export * from "./gate.js";
 export * from "./release.js";
+export * from "./rework.js";
 export * from "./run.js";
 export * from "./stage.js";
 
@@ -60,6 +62,8 @@ export const aldusEventSchema = withForeignMajorRefused(aldusEventSchemaBase);
 export const knowledgePackManifestSchema = withForeignMajorRefused(knowledgePackManifestSchemaBase);
 // Found by the conformance test, not by the list: these carry `schemaVersion` and are exported,
 // and they are not in `coreSchemas` — so a hand-written list would have missed both doors.
+export const reworkPolicySchema = withForeignMajorRefused(reworkPolicySchemaBase);
+export const reworkRoundSchema = withForeignMajorRefused(reworkRoundSchemaBase);
 export const spendReservationSchema = withForeignMajorRefused(spendReservationSchemaBase);
 export const spendReservationTransitionSchema = withForeignMajorRefused(
   spendReservationTransitionSchemaBase,
