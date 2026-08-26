@@ -322,6 +322,18 @@ forty-zero base ref assumed to make a check decline, and an appended export assu
 importer. Both read as failures of the thing under test. `invalidated by:` applies to cases, not
 only to findings.
 
+And a case's claim can expire. The rebuild guard's own case pinned `SCHEMA_VERSION = "1.11"` as a
+literal replace target; the version moved and the target stopped matching, so `run-mutants.mjs`
+exited 2 before running anything — **across three minor bumps**. Fixed by making the target a
+pattern, which removes the class rather than the instance.
+
+**A tool that stops answering stops being asked, and that is why it stayed broken.** It refused
+loudly and correctly every time, which sounds like the safe failure and is how it became the normal
+state: the `mutants:` line of an evidence block is one command, and its failure reads like a broken
+checkout rather than a stale claim. `DECLINED` is a state the _reader_ must not fold away — this is
+the other half, where nobody is reading because the instrument has been silent long enough to seem
+that way by design. **Before citing an instrument, check it produced a result this week.**
+
 **And an instrument is only ever checked by its holder**, so the check has to be habitual rather
 than triggered by suspicion. An invalid measurement that agrees with a plausible worry is the
 hardest to discard, because discarding it feels like refusing evidence. Establish the instrument is
