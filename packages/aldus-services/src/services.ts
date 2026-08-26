@@ -1093,6 +1093,85 @@ export class AldusServices {
   }
 
   /**
+   * Record that a dispatch is not coming back, so its reservation can be reconciled (#226).
+   *
+   * A process killed between `reserve` and any billing outcome leaves the reservation `reserved`.
+   * Nothing survived to classify it, so it never became `billing_unknown` — and `settleSpend`
+   * accepts only `billing_unknown`. The first adopter hit exactly this: `aldus costs` listed a
+   * reservation holding $12.00 and named `costs settle` as the resolution, and `settle` refused it.
+   * **The one place that tells an operator what to do named the one command that would refuse
+   * them.**
+   *
+   * What this records is that a person decided the dispatch is not coming back. It records
+   * **unknown, not zero**: the execution may have run for minutes before it was killed, so
+   * releasing it as uncharged would be a lie, and no amount is knowable from here. The reservation
+   * keeps consuming its full authorization until a reconciliation resolves it — which is the
+   * conservative direction and the point of ADR-0044.
+   *
+   * `reason` is required. A reservation moved out of `reserved` with no stated reason is
+   * indistinguishable from one the runtime classified itself.
+   */
+  async abandonDispatch(request: {
+    runId: string;
+    reservationId: string;
+    reason: string;
+    transcribing?: { decidedBy: ActorRef; verbatim: string };
+    actor?: ActorRef;
+  }): Promise<ServiceResult<{ reservationId: string; status: string }>> {
+    const acting = requireActor(request.actor ?? this.#context.actor, "abandon");
+    const decider = request.transcribing?.decidedBy ?? acting;
+
+    if (request.reason.trim() === "") {
+      return refused({
+        reason: "reason_required",
+        explanation:
+          "Abandoning a dispatch needs a reason: it records a person's judgement that an " +
+          "execution is not coming back, and without one the record cannot be told from a " +
+          "billing outcome the runtime classified itself.",
+        details: { reservationId: request.reservationId },
+      });
+    }
+
+    const known = await this.#context.spendStatus(request.runId);
+    const found = known.find((entry) => entry.reservationId === request.reservationId);
+    if (found === undefined) {
+      return refused({
+        reason: "reservation_not_found",
+        explanation:
+          `Run "${request.runId}" holds no reservation "${request.reservationId}". ` +
+          "`aldus costs` lists the ones it does, and which are unresolved.",
+        details: { runId: request.runId, reservationId: request.reservationId },
+      });
+    }
+
+    // Only a stuck reservation. `billing_unknown` is already unresolved and goes to `settle`; a
+    // settled or released one is terminal. Refusing here rather than in the store keeps the
+    // operator's error next to the operator's verb.
+    if (found.status !== "reserved") {
+      return refused({
+        reason: "reservation_not_stuck",
+        explanation:
+          `Reservation "${request.reservationId}" is "${found.status}", not "reserved". ` +
+          (found.status === "billing_unknown"
+            ? "Its billing outcome is already unresolved — `aldus costs settle` is the verb for it."
+            : "It is terminal: a reservation that stopped consuming authorization never resumes " +
+              "(ADR-0044)."),
+        details: { reservationId: request.reservationId, status: found.status },
+      });
+    }
+
+    const reservation = await this.#context.readReservation(found.grantId, found.reservationId);
+    const marked = await this.#context.operatorConsole(decider).abandonDispatch(reservation, {
+      reason: request.reason,
+      ...(request.transcribing === undefined
+        ? {}
+        : { transcription: { recordedBy: acting, verbatim: request.transcribing.verbatim } }),
+    });
+
+    return ok({ reservationId: marked.reservationId, status: marked.status });
+  }
+
+  /**
    * Record a waiver — the check was **bypassed**, not passed (contract §13).
    *
    * `waived` has been a first-class decision since §13 was written: attributable, dated,
