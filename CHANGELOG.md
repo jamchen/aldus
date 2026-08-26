@@ -8,6 +8,37 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.36 — 2026-08-27
+
+### BREAKING
+
+**A reservation store that cannot read its root now throws instead of reporting no reservations.**
+
+`FileSpendReservationStore` caught every error from reading its root directory and returned an
+empty list. So a root it could not read was indistinguishable from a root with nothing in it:
+`aldus costs` printed an empty ledger for a workspace holding real money, and `costs settle`
+answered `Run "…" holds no reservation "…"`. Both stated a fact about the world; neither
+instrument had reached the world.
+
+Now only `ENOENT` means empty — a workspace that has reserved nothing has no root yet, which is an
+ordinary empty answer. Every other error (a permission failure, a file where the directory belongs,
+a root pointed at another composition's idea of the layout) propagates.
+
+<!-- breaking: file-store:FileSpendReservationStore.listByRun -->
+<!-- breaking: file-store:FileSpendReservationStore.get -->
+
+**What changes for an adopter:** a composition whose spend store is rooted at a path that is not a
+readable directory now fails loudly at the first `costs` or `settle` instead of silently reporting
+nothing. That is the intended break. Found by the first adopter, whose composition rooted the store
+one directory up and one path segment short; twelve dollars sat held and invisible for a day, and
+every layer reported success.
+
+### Added
+
+**`FileSpendReservationStore.root`** — the path the store searches, so a refusal can name where it
+looked. Two compositions disagreeing about a root is diagnosable in one command when the tool says
+which one it used, and took a day of exchanged hypotheses when it did not.
+
 ## Unreleased
 
 Nothing yet.
