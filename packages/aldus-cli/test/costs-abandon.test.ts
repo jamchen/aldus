@@ -1,4 +1,9 @@
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { SCHEMA_VERSION, type SpendReservationTransition } from "@aldus-runtime/core";
+import { FileSpendReservationStore } from "@aldus-runtime/file-store";
 
 import type { CliOptions, TempWorkspace } from "./helpers.js";
 import { invoke, makeTempWorkspace } from "./helpers.js";
@@ -94,5 +99,70 @@ describe("the verb exists and states its own preconditions", () => {
     expect((await invoke(base, "costs", "settle", "--run", runId)).stderr).toContain(
       "needs a reservation id",
     );
+  });
+});
+
+describe("the printed remedy is one the invoking actor may run", () => {
+  // Reported by the first adopter from the first real use: `costs` printed `aldus costs abandon …`,
+  // they ran exactly that as `ALDUS_ACTOR=agent:coordinator`, and got
+  // `SPEND_NOT_AUTHORIZED: reconciliation is a human decision`. The refusal is right; the listing
+  // told the current actor to run a command the current actor may not run.
+  //
+  // End to end through the CLI rather than against `renderCosts` directly, because the unit tests
+  // pass the actor kind in by hand and therefore cannot see the CLI failing to pass it at all.
+  // That mutation — dropping `options.actor?.kind` at the call site — survived every other test in
+  // this package.
+  async function seedHeldReservation(root: string, runId: string): Promise<void> {
+    const grantId = `grant:${runId}:agent:decision-a`;
+    const store = new FileSpendReservationStore({
+      root: join(root, "spend", "reservations"),
+    });
+    const result = await store.compareAndAppend({
+      grantId,
+      expectedRevision: 0,
+      transitions: [
+        {
+          schemaVersion: SCHEMA_VERSION,
+          transitionId: "res-a:reservation.reserved",
+          reservationId: "res-a",
+          grantId,
+          kind: "reservation.reserved",
+          at: "2026-08-27T00:00:00.000Z",
+          detail: {
+            authorizationId: "decision-a",
+            operation: "agent.execute",
+            runId,
+            stageId: "script.draft",
+            attemptId: "att-1",
+            effectKey: "att-1:draft",
+            reserved: { amount: "12.00", currency: "USD" },
+          },
+        } as unknown as SpendReservationTransition,
+      ],
+    });
+    if (result.kind !== "appended") throw new Error(`seed failed: ${result.kind}`);
+  }
+
+  it("tells an agent to transcribe a human's decision", async () => {
+    const options: CliOptions = { root: temp.root, env: { ALDUS_ACTOR: "agent:coordinator" } };
+    const runId = await seed(options);
+    await seedHeldReservation(temp.root, runId);
+
+    const result = await invoke(options, "costs", "--run", runId);
+
+    expect(result.stdout).toContain("res-a");
+    expect(result.stdout).toContain("--decided-by");
+  });
+
+  it("gives a human the plain form", async () => {
+    // The control. Printing the clause to everyone would make it noise a human learns to skip,
+    // which is how a hint stops working on the day it matters.
+    const runId = await seed(base);
+    await seedHeldReservation(temp.root, runId);
+
+    const result = await invoke(base, "costs", "--run", runId);
+
+    expect(result.stdout).toContain("res-a");
+    expect(result.stdout).not.toContain("--decided-by");
   });
 });

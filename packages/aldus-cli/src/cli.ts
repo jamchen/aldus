@@ -926,7 +926,7 @@ async function runCosts(argv: readonly string[], environment: CliEnvironment): P
   const { options } = parseCommon(subcommand === "show" ? rest : argv, environment);
   const services = servicesFor(options, environment);
   const result = await services.costs(requireRunId(options, "costs"));
-  return emit(result, options, environment, renderCosts);
+  return emit(result, options, environment, (data) => renderCosts(data, options.actor?.kind));
 }
 
 /**

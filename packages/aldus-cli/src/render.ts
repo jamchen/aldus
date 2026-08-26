@@ -420,8 +420,19 @@ export function renderArchive(report: ArchiveReport): string {
   return lines.join("\n");
 }
 
-/** Render `costs`. */
-export function renderCosts(report: CostReport): string {
+/**
+ * Render `costs`.
+ *
+ * `actorKind` shapes the remedy lines, because reconciliation is a human decision (§13.3, §19.3)
+ * and this listing is where an agent coordinator looks. Printing the plain form to an agent tells
+ * the current actor to run a command the current actor may not run — reported by the first adopter
+ * from the first real use, at the cost of a round trip, and it would have cost every adopter the
+ * same one.
+ *
+ * The guidance therefore **is** the rule rather than a sentence about it: an agent is told to
+ * transcribe a human's decision, which is the only shape that will work for them.
+ */
+export function renderCosts(report: CostReport, actorKind?: string): string {
   const summary = renderCostSummary(report.summary);
 
   // **Unresolved charges first, and shown even when nothing settled.** An unresolved charge blocks
@@ -433,6 +444,14 @@ export function renderCosts(report: CostReport): string {
   // **blocks** every later dispatch and needs a decision. A reservation whose dispatch began and
   // has not settled **holds** authorization and may simply be in flight — the runtime cannot tell
   // a live one from a process that died mid-round, so it is reported rather than flagged.
+  // Reconciliation is a human decision, so an agent reading this needs the transcription form or
+  // it will run a command that refuses it. Absent actor kind gets the plain form: an unknown actor
+  // is not evidence of an agent, and adding the clause everywhere would make it noise a human
+  // learns to skip — which is how a hint stops working on the day it matters.
+  const transcribe =
+    actorKind === "human" || actorKind === undefined
+      ? ""
+      : "\n  reconciliation is a human decision, so record theirs: --decided-by <actor> --verbatim <text>";
   const unresolved = report.unresolved.filter((entry) => entry.status === "billing_unknown");
   const held = report.unresolved.filter((entry) => entry.status === "reserved");
   const line = (entry: (typeof report.unresolved)[number]): string =>
@@ -445,7 +464,7 @@ export function renderCosts(report: CostReport): string {
       : [
           `${unresolved.length} unresolved charge(s) — every later dispatch on the grant is refused`,
           ...unresolved.map(line),
-          "  resolve with: aldus costs settle <reservation-id> --evidence <what it rests on>",
+          `  resolve with: aldus costs settle <reservation-id> --evidence <what it rests on>${transcribe}`,
           "",
         ]),
     ...(held.length === 0
@@ -460,7 +479,7 @@ export function renderCosts(report: CostReport): string {
           // (#226). A verb offered for a state that cannot accept it is worse than no verb: it
           // spends the operator's trust before it spends their time.
           "  which. `aldus costs abandon <reservation-id> --reason <why>` records that one is not",
-          "  coming back; it is then reconcilable with `aldus costs settle`.",
+          `  coming back; it is then reconcilable with \`aldus costs settle\`.${transcribe}`,
           "",
         ]),
   ];

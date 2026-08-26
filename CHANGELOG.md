@@ -120,6 +120,30 @@ policy has no effect on a Run in `next.38`.
 <!-- No machine marker: check-breaking-notes reports no surface finding. Both types and the
      function are new; nothing existing changed shape. -->
 
+## 0.2.0-next.39 — 2026-08-27
+
+### Fixed
+
+**`aldus costs` printed a remedy the invoking actor may not run.**
+
+Reported by the first adopter from the first real use. The listing said
+`aldus costs abandon <reservation-id> --reason <why>`; they ran exactly that as
+`ALDUS_ACTOR=agent:coordinator` and got `SPEND_NOT_AUTHORIZED: reconciliation is a human decision`.
+
+The refusal is correct — an agent that could reconcile could release authorization it had itself
+consumed (§13.3, §19.3). What was wrong is that the one place telling an operator what to do named
+a command that operator cannot run, and that listing is where an agent coordinator looks. It cost
+one round trip and would have cost every adopter the same one.
+
+Both remedy lines now depend on the invoking actor. An agent is told to transcribe a human's
+decision — `--decided-by <actor> --verbatim <text>` — so the guidance **is** the rule rather than a
+sentence about it. A human, or an unknown actor, gets the plain form: printing the clause to
+everyone would make it noise a human learns to skip, which is how a hint stops working on the day
+it matters.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. `renderCosts` gains an
+     optional second parameter; nothing existing changed shape. -->
+
 ## Unreleased
 
 Nothing yet.
