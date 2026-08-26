@@ -118,7 +118,24 @@ export type ReworkDecision =
       gateId: string;
       reason: ReworkStopReason;
       explanation: string;
+      /** The artifact the loop stopped on. The **latest**, which is not the same as the best. */
       artifactDigest: string;
+      /**
+       * Every artifact this loop produced, oldest first, with what was measured about it.
+       *
+       * **Reported, never ranked.** The loop always carries the newest candidate forward, and after
+       * a regression the useful artifact is an earlier one — so a person deciding this gate needs
+       * to see the alternatives, and today every adopter would reimplement finding them.
+       *
+       * Core does not pick, and the reason is the adopter's own evidence rather than §4.2 alone: a
+       * repair that *cut* a load-bearing clause produces **fewer** findings and a worse script, so
+       * ordering by count would recommend exactly the artifact their
+       * `automaticCorrectionHarm` warns about. Fewer findings is not better; it is fewer findings.
+       * The person at the gate is who §13 says decides, and this hands them what they need to.
+       *
+       * `findingCount` is absent wherever it was absent on the round — a hole, not a zero.
+       */
+      candidates: readonly { digest: string; findingCount?: number }[];
     };
 
 /** The state a decision is taken against. All of it durable (criterion 4). */
@@ -150,6 +167,21 @@ export function decideRework(input: ReworkInput): ReworkDecision {
   const { policy, rounds, verdict } = input;
   const digest = verdict.artifactDigest;
 
+  // Every artifact this loop has seen, oldest first: each round's input, then the one under
+  // judgement now. Built once, attached to every escalation, and never ordered — see `candidates`.
+  const candidates: { digest: string; findingCount?: number }[] = [
+    ...rounds.map((round) => ({
+      digest: round.inputDigest,
+      ...(round.inputFindingCount === undefined ? {} : { findingCount: round.inputFindingCount }),
+    })),
+    {
+      digest,
+      ...(verdict.kind === "evaluated" && verdict.findingCount !== undefined
+        ? { findingCount: verdict.findingCount }
+        : {}),
+    },
+  ];
+
   // First, and before anything reads a finding list. An artifact with no evaluation has no empty
   // finding list — it has no finding list — and the two were indistinguishable while one type
   // carried both.
@@ -162,6 +194,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
         `No evaluation is recorded for this artifact: ${verdict.reason}. Nothing here establishes ` +
         "that it is clean, and an absent evaluation is not a passing one.",
       artifactDigest: digest,
+      candidates,
     };
   }
 
@@ -175,6 +208,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
         "The evaluator ran and its verdict could not be classified as blocking or clean, so " +
         "neither accepting the artifact nor reworking it is supported by evidence.",
       artifactDigest: digest,
+      candidates,
     };
   }
 
@@ -197,6 +231,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
         "A blocking finding was reported and no declared rework policy covers this stage, so " +
         "whether to rework is a person's decision (ADR-0055).",
       artifactDigest: digest,
+      candidates,
     };
   }
 
@@ -215,6 +250,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
         `Policy "${policy.policyId}" does not cover blocking finding class(es) ` +
         `${uncovered.join(", ")}, so this round was not authorised in advance.`,
       artifactDigest: digest,
+      candidates,
     };
   }
 
@@ -239,6 +275,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
         "artifact worse will not be improved by repeating it, and the remaining rounds would be " +
         "spent going further in that direction.",
       artifactDigest: digest,
+      candidates,
     };
   }
 
@@ -261,6 +298,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
         "An artifact digest an earlier round already produced has come back, so the repair is " +
         "cycling rather than converging and further rounds cannot be expected to help.",
       artifactDigest: digest,
+      candidates,
     };
   }
 
@@ -273,6 +311,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
         `Policy "${policy.policyId}" authorised ${policy.maxRounds} rework round(s) and all of ` +
         "them are spent, so continuing would be work nobody authorised.",
       artifactDigest: digest,
+      candidates,
     };
   }
 

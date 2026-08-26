@@ -345,6 +345,34 @@ authorising.
 <!-- No machine marker: check-breaking-notes reports no surface finding. `gateHasDecision` is an
      optional runner option, and absent means the previous behaviour. -->
 
+## 0.2.0-next.45 — 2026-08-27
+
+### Added
+
+**An escalation carries every artifact the loop produced** — `ReworkDecision.candidates` (#220).
+
+The first adopter's owner bought an extra repair round and the round made the script worse:
+`7 → 7 → 2 → 5` findings, narration 2,887 → 3,063 characters. **A rework loop always carries the
+newest candidate forward**, so what reaches the gate is the worst artifact of the four, and the
+useful one — the round that measured 2 — is reachable only by whoever goes looking. Without this,
+every adopter reimplements finding it.
+
+**Reported, never ranked.** Core does not pick, and the reason is the adopter's own evidence rather
+than §4.2 alone: a repair that _cuts_ a load-bearing clause produces **fewer** findings and a worse
+script, so ordering by count would recommend exactly the artifact their `automaticCorrectionHarm`
+warns about. Fewer findings is not better; it is fewer findings. The person at the gate is who §13
+says decides, and this hands them what they need to.
+
+Oldest first, latest last, and unsorted — a sorted list is a ranking whatever the docstring says.
+`findingCount` is omitted wherever it was never measured, because a `0` would make an unmeasured
+artifact look like the best one in the list.
+
+`artifactDigest` is unchanged and still names the artifact the loop stopped on — the latest, which
+is not the same as the best. Both facts are now on the decision.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. `candidates` is a new
+     member on a union arm consumers read rather than construct. -->
+
 ## Unreleased
 
 Nothing yet.
