@@ -98,10 +98,19 @@ for (const testCase of cases) {
       // new export cannot be measured through the package boundary at all, because the index
       // re-exports named symbols — the first version of the rebuild guard's own case made that
       // mistake and read as a guard failure.
+      // `from` may be a string or a RegExp. The RegExp form exists because the first version of
+      // the rebuild-guard case pinned `SCHEMA_VERSION = "1.11"` as a literal, and the moment the
+      // schema version moved the case stopped matching — so this runner refused at its very first
+      // case and stayed refused across three minor bumps. It refused loudly and correctly, which
+      // is exactly why nobody noticed: a tool that stops answering is stopped being asked.
+      //
+      // A case is a claim too, and "this literal is still in the file" was a claim with a shelf
+      // life nobody wrote down.
       const [path, from, to] = step.replace;
       const contents = readFileSync(path, "utf8");
-      if (!contents.includes(from)) {
-        console.error(`run-mutants: replace target not found in ${path}: ${JSON.stringify(from)}`);
+      const matches = from instanceof RegExp ? from.test(contents) : contents.includes(from);
+      if (!matches) {
+        console.error(`run-mutants: replace target not found in ${path}: ${String(from)}`);
         process.exit(2);
       }
       writeFileSync(path, contents.replace(from, to));
