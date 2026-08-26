@@ -27,10 +27,19 @@ export interface ReworkVerdict {
   /**
    * Blocking finding classes, as classified by the stage's declared enforcement.
    *
-   * Empty means nothing blocks — advisory findings may still have been recorded, and recording them
-   * without forcing rework is the point of the distinction.
+   * Empty means nothing stops work. It does **not** mean nothing was found: a model-assisted
+   * evaluator with no promotion evidence declares every channel `advisory` (§12.1), so this list is
+   * empty for exactly the evaluators most likely to need a repair loop.
    */
   blockingFindingClasses: readonly string[];
+  /**
+   * Every finding class the evaluator emitted, blocking or not (ADR-0056).
+   *
+   * Read straight from the attempt's recorded observations. The controller does not decide what any
+   * of them means — enforcement decides what stops work, and the policy decides what warrants a
+   * repair round. Those are different licences and neither substitutes for the other.
+   */
+  observedFindingClasses: readonly string[];
   /**
    * The evaluator ran and what it said could not be classified.
    *
@@ -115,7 +124,13 @@ export function decideRework(input: ReworkInput): ReworkDecision {
     };
   }
 
-  if (verdict.blockingFindingClasses.length === 0) {
+  // Nothing stops work and nothing the policy covers was found. Under ADR-0055 this read only the
+  // blocking list, so an artifact with four advisory findings a policy explicitly covers converged
+  // — and for a model-assisted evaluator, which cannot declare a blocking channel without promotion
+  // evidence, that was every artifact. The loop was unreachable for the population that needed it.
+  const covers = (cls: string): boolean => policy?.coversFindingClasses.includes(cls) === true;
+  const repairable = verdict.observedFindingClasses.filter(covers);
+  if (verdict.blockingFindingClasses.length === 0 && repairable.length === 0) {
     return { kind: "converged", artifactDigest: digest };
   }
 
@@ -131,8 +146,10 @@ export function decideRework(input: ReworkInput): ReworkDecision {
     };
   }
 
-  // A class outside the policy is exactly the case a person should see. Treating it as covered
-  // would let a reviewed policy authorise rework nobody reviewed.
+  // A **blocking** class outside the policy is exactly the case a person should see: enforcement
+  // stopped work and the policy cannot repair it, so no bounded round can resolve it. An *advisory*
+  // class outside the policy is not an escalation — it is a finding the adopter chose to record and
+  // not act on, which is what advisory means.
   const covered = new Set(policy.coversFindingClasses);
   const uncovered = verdict.blockingFindingClasses.filter((cls) => !covered.has(cls));
   if (uncovered.length > 0) {
@@ -185,7 +202,10 @@ export function decideRework(input: ReworkInput): ReworkDecision {
     kind: "rework",
     round: rounds.length + 1,
     repairStageId: policy.repairStageId,
-    consumeFindingClasses: verdict.blockingFindingClasses,
+    // What the repair is being asked to fix: the covered classes actually observed. Not the
+    // blocking list, which is empty for an uncalibrated evaluator, and not everything observed,
+    // which would hand the repair classes nobody authorised it to act on.
+    consumeFindingClasses: repairable,
     inputDigest: digest,
   };
 }

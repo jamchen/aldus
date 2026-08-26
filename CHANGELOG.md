@@ -185,6 +185,52 @@ and whose run directory contained zero occurrences of them.
 <!-- No machine marker: check-breaking-notes reports no surface finding. Three optional fields on
      `AttemptMetadata`; nothing existing changed shape. -->
 
+## 0.2.0-next.41 — 2026-08-27
+
+### BREAKING
+
+**`ReworkPolicy` requires `automaticCorrectionHarm`, and `ReworkVerdict` requires
+`observedFindingClasses`** (ADR-0056, amending ADR-0055).
+
+ADR-0055 tied a rework round to a **blocking** finding. The first adopter compiled against
+`next.40` and reported what that means: their oracle emits eight finding classes and **all eight
+channels are declared `advisory`**, because §12.1 permits a blocking channel only after calibration
+and none of the eight has promotion evidence. So `blockingFindingClasses` is correctly `[]` on every
+attempt, and a controller deriving its verdict from declared enforcement concluded there was nothing
+to repair.
+
+**For an adopter who cannot promote a model-assisted channel, the derived verdict was always
+`pass`** — the loop was unreachable for exactly the population that needs one.
+
+The fix separates two licences that ADR-0055 conflated. Stopping work is licensed by promotion
+evidence (§12.1). A **bounded repair** is licensed by the policy's own authorisation, and is not the
+same act: it produces a new artifact, spends an authorised round, and escalates to a named human
+gate. Neither substitutes for the other, and three invariants hold:
+
+- rework never releases what enforcement blocked — an uncovered blocking class still escalates;
+- rework never blocks what enforcement allowed;
+- every exit still terminates at a named gate.
+
+`automaticCorrectionHarm` is required because §12.1 lists _"asymmetric harm caused by unnecessary
+automatic correction"_ among what promotion must consider, and a bounded loop does not make that
+consideration go away — it moves it to whoever authorises the policy. It is a weak mechanism and
+ADR-0056 labels it as one: it catches an author who never considered the question, never a bad
+answer.
+
+**What changes for an adopter:** a `ReworkPolicy` literal gains one required field, and a caller of
+`decideRework` supplies the classes observed alongside the classes enforcement blocked — both read
+straight from `AttemptMetadata` as of `next.40`. An artifact with advisory findings a policy covers
+now reworks where it previously converged.
+
+<!-- breaking: aldus-services:ReworkVerdict.observedFindingClasses -->
+
+<!-- No marker for `ReworkPolicy.automaticCorrectionHarm`, and the asymmetry is the tool working as
+     documented rather than a gap in this entry. `ReworkVerdict` is a plain interface, so a newly
+     required member is visible as the absence of a `?` and check-breaking-notes found it.
+     `ReworkPolicy` is Zod-inferred, so optionality lives in `z.ZodOptional<…>` and a newly required
+     member reads identically to an existing one — the false-negative direction of the blind spot
+     the tool's own source records. Both breaks are described above; only one could be detected. -->
+
 ## Unreleased
 
 Nothing yet.
