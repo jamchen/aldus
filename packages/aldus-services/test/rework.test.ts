@@ -325,3 +325,112 @@ describe("an advisory finding a policy covers still warrants repair (ADR-0056)",
     expect(decision.kind).toBe("rework");
   });
 });
+
+describe("a loop that is measurably getting worse stops (#220)", () => {
+  // Reported by the first adopter from a real run, while writing the `automaticCorrectionHarm` the
+  // policy now requires: a repair round took their script from 4 findings to 7 **by adding
+  // explanation**, and narration grew 2,246 → 2,551 → 2,904 characters over three rounds. A
+  // comprehension evaluator reads a longer script with more connective tissue as an improvement, so
+  // the loop can make a commentary script worse while every number it watches says better.
+  //
+  // Oscillation cannot see this: every round produced a different artifact, so every digest is new.
+  const worsening = (before: number, now: number) => ({
+    policy: policy({ maxRounds: 5, coversFindingClasses: ["comprehension"] }),
+    rounds: [{ ...round(1, "a".repeat(64), "b".repeat(64)), inputFindingCount: before }],
+    verdict: verdict({
+      artifactDigest: "b".repeat(64),
+      blockingFindingClasses: [],
+      observedFindingClasses: ["comprehension"],
+      findingCount: now,
+    }),
+    fallbackGateId: FALLBACK,
+  });
+
+  it("escalates when the repair increased the finding count", () => {
+    const decision = decideRework(worsening(4, 7));
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("regression");
+    // Both numbers, so an operator reads what happened rather than a state name.
+    expect(decision.explanation).toContain("4");
+    expect(decision.explanation).toContain("7");
+  });
+
+  it("keeps working when the repair reduced the count", () => {
+    // The positive control. Without it the case above passes for an arm that escalates every second
+    // round, which would break every healthy loop and look like caution.
+    expect(decideRework(worsening(7, 4)).kind).toBe("rework");
+  });
+
+  it("keeps working when the count is unchanged", () => {
+    // Equal is not progress, and it is deliberately not a stop. A repair that resolves a deep
+    // problem and exposes one shallower one nets zero, and escalating that would hand a person a
+    // decision the bound already covers. Increase is the unambiguous signal; the bound catches the
+    // rest.
+    expect(decideRework(worsening(4, 4)).kind).toBe("rework");
+  });
+
+  it("stays silent when either count is missing, rather than reading absence as progress", () => {
+    // A round recorded before the field, or an evaluator whose evidence is reports rather than
+    // enumerated findings, has no count to compare. Inferring one is the move
+    // `defectCountMeasurable` exists to prevent (#140), so the arm does not fire — a hole, not a
+    // clean bill.
+    const input = worsening(4, 7);
+    const rounds = [{ ...input.rounds[0]!, inputFindingCount: undefined }];
+    expect(decideRework({ ...input, rounds }).kind).toBe("rework");
+
+    const { findingCount: _dropped, ...verdictWithoutCount } = input.verdict;
+    expect(decideRework({ ...input, verdict: verdictWithoutCount }).kind).toBe("rework");
+  });
+
+  it("does not fire on the first evaluation, which has no previous round", () => {
+    const decision = decideRework({
+      policy: policy(),
+      rounds: [],
+      verdict: verdict({ findingCount: 99 }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("rework");
+  });
+
+  it("reports regression rather than exhaustion when both are true", () => {
+    // Both escalate to the same gate, so this is about what the person is told. "The bound is
+    // spent" invites raising the bound; "the repair made it worse" is the fact that makes raising
+    // it the wrong move. The more actionable reason wins, and the ordering is what makes that so.
+    const decision = decideRework({
+      policy: policy({ maxRounds: 1 }),
+      rounds: [{ ...round(1, "a".repeat(64), "b".repeat(64)), inputFindingCount: 4 }],
+      verdict: verdict({
+        artifactDigest: "b".repeat(64),
+        blockingFindingClasses: [],
+        observedFindingClasses: ["comprehension"],
+        findingCount: 7,
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("regression");
+  });
+
+  it("still converges on a clean verdict even after a worsening round", () => {
+    // Order matters here as it does for exhaustion: an artifact that now passes must not be
+    // escalated for how it got there.
+    const decision = decideRework({
+      policy: policy({ maxRounds: 5 }),
+      rounds: [{ ...round(1, "a".repeat(64), "b".repeat(64)), inputFindingCount: 4 }],
+      verdict: verdict({
+        artifactDigest: "b".repeat(64),
+        blockingFindingClasses: [],
+        observedFindingClasses: [],
+        findingCount: 7,
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("converged");
+  });
+});

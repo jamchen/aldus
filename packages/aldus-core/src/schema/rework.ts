@@ -58,6 +58,20 @@ export const REWORK_STOP_REASONS = [
    * guessing is how a crashed checker gets counted as a clean one.
    */
   "ambiguous_verdict",
+  /**
+   * The repair made it worse: more findings came back than went in.
+   *
+   * Distinct from oscillation, which needs a digest to repeat. A loop can produce a different
+   * artifact every round and get steadily worse, spending its whole bound and every paid repair on
+   * the way down — and each round looks like progress to a controller comparing digests.
+   *
+   * Reported by the first adopter from a real run: a repair round took a script from 4 findings to
+   * 7 **by adding explanation**, and narration grew 2,246 → 2,551 → 2,904 characters across three
+   * rounds. A comprehension evaluator reads a longer script with more connective tissue as an
+   * improvement, so the loop can make a commentary script worse while every number it watches says
+   * better. This is the number that says worse.
+   */
+  "regression",
   /** No policy covers this stage, so every blocking finding is a person's decision. */
   "no_policy",
 ] as const;
@@ -149,6 +163,20 @@ export const reworkRoundSchemaBase = z
     inputDigest: nonEmptyString,
     /** Which finding classes the repair consumed. Opaque to Core (§4.2). */
     consumedFindingClasses: z.array(nonEmptyString),
+    /**
+     * How many policy-covered findings the evaluator enumerated at this round's **input**.
+     *
+     * Occurrences, not classes: a repair that turns two problems into five may leave the class list
+     * unchanged, and the class list is what a controller would otherwise have to compare. Take it
+     * from `AttemptMetadata.evaluationEvidence.enumeratedFindings`.
+     *
+     * Optional, and absence is honest rather than convenient: a round recorded before this field,
+     * or by an evaluator whose evidence is reports rather than enumerated findings, has no count to
+     * compare. The regression arm then cannot fire — a hole, and named as one, because inferring a
+     * count from an unmeasurable evidence form is the exact move `defectCountMeasurable` exists to
+     * prevent.
+     */
+    inputFindingCount: z.int().nonnegative().optional(),
     /** The repair execution, so the round points at its own provenance and cost. */
     repairStageId: nonEmptyString,
     repairAttemptId: nonEmptyString,

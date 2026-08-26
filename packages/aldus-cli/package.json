@@ -1,6 +1,6 @@
 {
   "name": "@aldus-runtime/cli",
-  "version": "0.2.0-next.41",
+  "version": "0.2.0-next.42",
   "type": "module",
   "description": "Aldus CLI — a thin adapter over @aldus-runtime/services (architecture contract §18).",
   "license": "Apache-2.0",
@@ -36,17 +36,17 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/artifact-registry": "0.2.0-next.41",
-    "@aldus-runtime/core": "0.2.0-next.41",
-    "@aldus-runtime/file-store": "0.2.0-next.41",
-    "@aldus-runtime/gate-engine": "0.2.0-next.41",
-    "@aldus-runtime/release": "0.2.0-next.41",
-    "@aldus-runtime/services": "0.2.0-next.41",
-    "@aldus-runtime/stage-runner": "0.2.0-next.41",
-    "@aldus-runtime/tts-ledger": "0.2.0-next.41"
+    "@aldus-runtime/artifact-registry": "0.2.0-next.42",
+    "@aldus-runtime/core": "0.2.0-next.42",
+    "@aldus-runtime/file-store": "0.2.0-next.42",
+    "@aldus-runtime/gate-engine": "0.2.0-next.42",
+    "@aldus-runtime/release": "0.2.0-next.42",
+    "@aldus-runtime/services": "0.2.0-next.42",
+    "@aldus-runtime/stage-runner": "0.2.0-next.42",
+    "@aldus-runtime/tts-ledger": "0.2.0-next.42"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "0.2.0-next.41",
+    "@aldus-runtime/testkit": "0.2.0-next.42",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

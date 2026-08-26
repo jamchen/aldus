@@ -41,6 +41,17 @@ export interface ReworkVerdict {
    */
   observedFindingClasses: readonly string[];
   /**
+   * How many findings the evaluator enumerated, when that is measurable.
+   *
+   * From `AttemptMetadata.evaluationEvidence` — and only when `defectCountMeasurable` is true. A
+   * report states that an evaluator had something to say and not how much, so a count over
+   * report-shaped evidence is not a smaller number, it is not a number (#140).
+   *
+   * Absent means the regression arm cannot fire. That is a hole rather than a pass, and it is named
+   * in the decision's own docstring rather than left for a reader to discover.
+   */
+  findingCount?: number;
+  /**
    * The evaluator ran and what it said could not be classified.
    *
    * Distinct from a blocking verdict and from a failure. A stage whose evaluator could not execute
@@ -160,6 +171,30 @@ export function decideRework(input: ReworkInput): ReworkDecision {
       explanation:
         `Policy "${policy.policyId}" does not cover blocking finding class(es) ` +
         `${uncovered.join(", ")}, so this round was not authorised in advance.`,
+      artifactDigest: digest,
+    };
+  }
+
+  // Getting worse. Checked before oscillation and before the bound, because a loop that is
+  // measurably degrading should not spend another authorised round or another paid repair proving
+  // it — and unlike oscillation this needs no digest to repeat, so it fires on the first bad round.
+  //
+  // Occurrences rather than classes: a repair that turns two problems into five may leave the class
+  // list unchanged, and the adopter's real case was 4 findings to 7 from one round that made the
+  // script longer. Only when both counts are present and measurable; otherwise the arm is silent,
+  // which is a hole rather than a clean bill.
+  const previous = rounds.at(-1);
+  const before = previous?.inputFindingCount;
+  const now = verdict.findingCount;
+  if (previous !== undefined && before !== undefined && now !== undefined && now > before) {
+    return {
+      kind: "escalate",
+      gateId: policy.escalateToGateId,
+      reason: "regression",
+      explanation:
+        `The last repair increased findings from ${before} to ${now}. A repair that makes the ` +
+        "artifact worse will not be improved by repeating it, and the remaining rounds would be " +
+        "spent going further in that direction.",
       artifactDigest: digest,
     };
   }
