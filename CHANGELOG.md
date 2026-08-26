@@ -144,6 +144,47 @@ it matters.
 <!-- No machine marker: check-breaking-notes reports no surface finding. `renderCosts` gains an
      optional second parameter; nothing existing changed shape. -->
 
+## 0.2.0-next.40 — 2026-08-27
+
+### Fixed
+
+**An evaluator's observations survived only as prose.**
+
+An `evaluated` outcome's observations were formatted into `notes` as
+`finding/<class>: <message>` and nothing else was written. `locator` and `category` were dropped,
+and — the part that matters — so was the `finding` / `report` **discriminant**, the field added in
+#140 so a report is never counted as a defect. With it gone, `countEvaluationEvidence` could not be
+recomputed from the record at all: `defectCountMeasurable` was _unrecoverable_ rather than false.
+
+**Prose in a record is worse than nothing there.** A consumer that finds nothing writes the
+persistence; a consumer that finds `finding/<class>: <message>` writes a regex, it works on the
+corpus in front of it, and the day a separator changes the count silently drops. `AggregateReport`'s
+own docstring rejects exactly that move for another program's output, and the note format was on the
+wrong side of its own argument.
+
+`AttemptMetadata` now carries three optional fields, all recorded through the event log rather than
+only into the `stages.json` cache:
+
+- `observations` — the emitted observations, discriminant included;
+- `evaluationEvidence` — `enumeratedFindings`, `reports`, `defectCountMeasurable`, counted at the
+  time rather than derived on read;
+- `blockingFindingClasses` — the classes the stage's declared channels classified as blocking
+  **at that attempt**. Recorded rather than re-derived, because enforcement is a property of the
+  declaration in force when the stage ran; recomputing it from a later registry would claim a
+  classification from a declaration that was not the one applied.
+
+Notes are unchanged and stay. They are now a rendering of the record rather than the record.
+
+All three are optional, so a cache written before this parses, and absence reads as _"this attempt
+predates the field"_ rather than as _"the evaluator emitted nothing"_. A stage that is not an
+evaluator writes none of them.
+
+Reported by the first adopter, whose oracle has been emitting structured observations for a while
+and whose run directory contained zero occurrences of them.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. Three optional fields on
+     `AttemptMetadata`; nothing existing changed shape. -->
+
 ## Unreleased
 
 Nothing yet.

@@ -14,6 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { asEnumeratedFinding, countEvaluationEvidence } from "../src/definition.js";
+import { rebuildStageState } from "../src/state.js";
 
 import { aStage, makeTempRun, type TempRun } from "./helpers.js";
 
@@ -491,5 +492,175 @@ describe("the seven acceptance cases of the #140 ruling", () => {
       reports: 0,
       defectCountMeasurable: true,
     });
+  });
+});
+
+describe("observations survive as a record, not only as prose (#220)", () => {
+  // Reported by the first adopter, who wanted the record before they wanted the loop. Observations
+  // previously survived only inside `notes` as `finding/<class>: <message>`: `locator` and
+  // `category` were dropped, and so was the `finding`/`report` discriminant — the field #140 added
+  // so a report is never counted as a defect. With it gone, `countEvaluationEvidence` cannot be
+  // recomputed from the record and `defectCountMeasurable` is unrecoverable rather than false.
+  //
+  // Prose in a record is worse than nothing there: a consumer that finds nothing writes the
+  // persistence; a consumer that finds a formatted string writes a regex, it works on the corpus in
+  // front of it, and the day a separator changes the count silently drops.
+  const oracle = (observations: readonly unknown[]) =>
+    aStage({
+      id: "stage-a",
+      evaluation: {
+        channels: [
+          {
+            findingClass: "error",
+            level: "hard_gate",
+            enforcement: "blocking",
+            evidenceKind: "enumerated_findings",
+          },
+          {
+            findingClass: "warning",
+            level: "advisory_signal",
+            enforcement: "advisory",
+            evidenceKind: "enumerated_findings",
+          },
+          {
+            findingClass: "linted",
+            level: "advisory_signal",
+            enforcement: "advisory",
+            evidenceKind: "aggregate_reports",
+          },
+        ],
+      },
+      execute: async () => ({ kind: "evaluated", output: {}, observations }) as never,
+    });
+
+  async function metadataFor(): Promise<Record<string, unknown>> {
+    const stored = await harness.runner.stageExecution(harness.manifest.runId, "stage-a");
+    const attemptId = stored?.execution.attempts.at(-1)?.attemptId ?? "";
+    return (stored?.metadata[attemptId] ?? {}) as unknown as Record<string, unknown>;
+  }
+
+  it("keeps the fields the note format dropped", async () => {
+    harness.registry.register(
+      oracle([
+        {
+          kind: "finding",
+          findingClass: "warning",
+          message: "no time anchor",
+          category: "claim/unsupported",
+          locator: "para:3",
+        },
+      ]),
+    );
+
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    const metadata = await metadataFor();
+
+    expect(metadata["observations"]).toEqual([
+      {
+        kind: "finding",
+        findingClass: "warning",
+        message: "no time anchor",
+        category: "claim/unsupported",
+        locator: "para:3",
+      },
+    ]);
+  });
+
+  it("keeps the discriminant, so a report is still not a defect", async () => {
+    // The assertion #140 exists for. Both of these render to a `<kind>/<class>: <message>` note;
+    // only the record can say that one is countable and the other is not.
+    harness.registry.register(
+      oracle([
+        { kind: "finding", findingClass: "warning", message: "long sentence" },
+        { kind: "report", findingClass: "linted", message: "the linter had something to say" },
+      ]),
+    );
+
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    const metadata = await metadataFor();
+
+    expect(metadata["evaluationEvidence"]).toEqual({
+      enumeratedFindings: 1,
+      reports: 1,
+      defectCountMeasurable: false,
+    });
+  });
+
+  it("records which classes blocked, as classified when the stage ran", async () => {
+    // Recorded rather than re-derivable, and that is the point. Enforcement is a property of the
+    // declaration in force at the time; recomputing it from a later registry would claim a
+    // classification from a declaration that was not the one applied (ADR-0030's defect), in the
+    // one place where the answer decides whether work stops.
+    harness.registry.register(
+      oracle([
+        { kind: "finding", findingClass: "error", message: "unresolved reference" },
+        { kind: "finding", findingClass: "warning", message: "long sentence" },
+      ]),
+    );
+
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    const metadata = await metadataFor();
+
+    expect(metadata["blockingFindingClasses"]).toEqual(["error"]);
+  });
+
+  it("records nothing for a stage that is not an evaluator", async () => {
+    // The negative control. Absent must mean "this attempt emitted no evaluation", not "the field
+    // exists everywhere and is sometimes empty" — an empty array on every ordinary stage would
+    // make `defectCountMeasurable` look answered for stages that never asked the question.
+    harness.registry.register(
+      aStage({ id: "stage-a", execute: async () => ({ kind: "completed", output: {} }) }),
+    );
+
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    const metadata = await metadataFor();
+
+    expect(metadata["observations"]).toBeUndefined();
+    expect(metadata["evaluationEvidence"]).toBeUndefined();
+    expect(metadata["blockingFindingClasses"]).toBeUndefined();
+  });
+
+  it("still renders the notes, so operator output did not regress", async () => {
+    harness.registry.register(
+      oracle([{ kind: "finding", findingClass: "warning", message: "long sentence" }]),
+    );
+
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    const metadata = await metadataFor();
+
+    expect(metadata["notes"]).toContain("finding/warning: long sentence");
+  });
+
+  it("survives a cache rebuild, because the cache is not where a record lives", async () => {
+    // `stages.json` is a cache and the event log is the source of truth (ADR-0008). A field that
+    // reached only the cache would look durable in every test that reads it back and vanish the
+    // first time an operator deleted the file — and #220's whole premise is a loop resuming in a
+    // process that remembers nothing.
+    harness.registry.register(
+      oracle([
+        {
+          kind: "finding",
+          findingClass: "error",
+          message: "unresolved reference",
+          locator: "para:1",
+        },
+        { kind: "report", findingClass: "linted", message: "the linter had something to say" },
+      ]),
+    );
+
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+    const rebuilt = await rebuildStageState(harness.workspace.events, harness.manifest.runId);
+
+    const stage = rebuilt.stages.find((entry) => entry.execution.stageId === "stage-a");
+    const attemptId = stage?.execution.attempts.at(-1)?.attemptId ?? "";
+    const metadata = stage?.metadata[attemptId] as unknown as Record<string, unknown>;
+
+    expect(metadata["observations"]).toHaveLength(2);
+    expect(metadata["evaluationEvidence"]).toEqual({
+      enumeratedFindings: 1,
+      reports: 1,
+      defectCountMeasurable: false,
+    });
+    expect(metadata["blockingFindingClasses"]).toEqual(["error"]);
   });
 });
