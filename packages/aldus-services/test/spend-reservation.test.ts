@@ -639,3 +639,34 @@ describe("silence is not evidence that nothing was charged", () => {
     expect(settled.reservation.status).toBe("released");
   });
 });
+
+describe("a reservation whose dispatch was prepared is still findable", () => {
+  it("appears in status(runId), which is what `costs settle` looks it up in", async () => {
+    // An adopter reported that `costs settle` could not reach a `dispatch_prepared` reservation and
+    // proposed that the lookup and `requiresReconciliation` "read the same predicate". They do not:
+    // the lookup searches every reservation for the Run. This pins that, so the next report of an
+    // unreachable reservation is measured against a covered case rather than a guess.
+    const { spend } = services();
+    const outcome = await spend.reserve({
+      ...reserveInput,
+      grant: grant(),
+      expectation: { kind: "estimated", amount: { amount: "1.0000", currency: "USD" } },
+    });
+    if (!outcome.reserved) throw new Error("expected a reservation");
+    const prepared = await spend.prepareDispatch(outcome.reservation, {
+      backendId: "backend-a",
+      backendVersion: "1.0.0",
+      ceilingEnforced: false,
+    });
+
+    const listed = await spend.status(prepared.runId);
+    const found = listed.find((entry) => entry.reservationId === prepared.reservationId);
+
+    expect(found).toBeDefined();
+    // Still holding authorization, and not the kind `requiresReconciliation` covers — which is why
+    // it was invisible in `costs` and why that is a rendering question, not a lookup one.
+    expect(found?.status).toBe("reserved");
+    expect(found?.requiresReconciliation).toBe(false);
+    expect(found?.execution).toBeDefined();
+  });
+});
