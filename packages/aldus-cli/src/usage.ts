@@ -25,6 +25,8 @@ Commands
   approve <gate>            Record an approval
   reject <gate>             Record a rejection
   waive <gate>              Record that a check was bypassed, not passed (--reason required)
+  costs [show]              Money recorded for a Run
+  costs settle <res-id>     Resolve an unresolved charge (--evidence required)
   cancel                    Abandon a Run
   costs                     Cost records and totals
 
@@ -71,6 +73,10 @@ Command options
                 --decided-by <kind:id> --verbatim <text>
                   record a decision someone else made; you are recorded as the transcriber
   waive         --reason <text>   (required; a waiver always expires when its subjects change)
+  costs settle  --evidence <text>               (required) what the finding rests on
+                --amount <n> [--currency USD]   evidence established this charge
+                --uncharged                     positive evidence nothing was charged
+                (neither)                       investigation ended; resolves nothing
   cancel        --reason <text>
   reject        --comment <text>
   release       --bundle <path>            plan, reconcile, and execute

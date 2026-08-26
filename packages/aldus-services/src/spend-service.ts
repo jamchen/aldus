@@ -366,6 +366,16 @@ export interface ReconcileInput {
   resolution: ReconciliationResolution;
   /** Stable across retries, so reconciling twice is one decision rather than two. */
   decisionId: string;
+  /**
+   * Present when the decider did not type this themselves (§19.2, ADR-0054).
+   *
+   * The same shape a gate decision carries, for the same reason: nothing here authenticates anyone
+   * and it does not claim to. What it does is stop *"a human decided"* and *"a human decided and a
+   * machine typed it"* being the same record — the only difference an auditor can act on.
+   *
+   * Supplied by the composition from the **acting** actor, never by a caller naming itself.
+   */
+  transcription?: { recordedBy: ActorRef; verbatim: string };
 }
 
 /** Dependencies. */
@@ -896,6 +906,23 @@ export class SpendService {
         },
       );
     }
+    if (
+      input.transcription !== undefined &&
+      input.transcription.recordedBy.kind === authority.actor.kind &&
+      input.transcription.recordedBy.id === authority.actor.id
+    ) {
+      throw serviceError(
+        ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
+        "This reconciliation records the decider as its own transcriber. A transcription exists " +
+          "to say someone else wrote the record down; naming the same actor for both says nothing " +
+          "and makes the field unreadable where it is real (§19.2).",
+        {
+          category: "validation",
+          retryable: false,
+          details: { reservationId: reservation.reservationId },
+        },
+      );
+    }
     if (input.evidenceRef.trim().length === 0) {
       throw serviceError(
         ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
@@ -973,6 +1000,17 @@ export class SpendService {
     });
 
     const decisionDetail: Record<string, unknown> = {
+      ...(input.transcription === undefined
+        ? {}
+        : {
+            // Who wrote it down, and what they were told. Recorded beside `decidedBy` rather than
+            // replacing it, so the two readings stop being one record (ADR-0054).
+            recordedBy: {
+              kind: input.transcription.recordedBy.kind,
+              id: input.transcription.recordedBy.id,
+            },
+            verbatim: input.transcription.verbatim,
+          }),
       decisionId: input.decisionId,
       decisionDigest,
       resolution: input.resolution.kind,
@@ -1342,6 +1380,17 @@ export class SpendService {
       `Grant "${reservation.grantId}" is under sustained contention; "${kind}" was not recorded.`,
       { category: "conflict", retryable: true, details: {} },
     );
+  }
+
+  /**
+   * Read one reservation back.
+   *
+   * Public because a console needs the record to reconcile it and had no way to obtain one:
+   * `status` returns a projection and `reconcile` takes the record. That gap is part of why the
+   * reconciliation path existed and nothing could reach it (#215).
+   */
+  readReservation(grantId: string, reservationId: string): Promise<SpendReservation> {
+    return this.#require(grantId, reservationId);
   }
 
   async #require(grantId: string, reservationId: string): Promise<SpendReservation> {

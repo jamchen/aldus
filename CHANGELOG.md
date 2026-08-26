@@ -12,6 +12,45 @@ rely on now behaves differently by reading this file, not by watching a test go 
 
 Nothing yet.
 
+## 0.2.0-next.33 — 2026-08-26
+
+### Features
+
+**`aldus costs settle <reservation-id>`** — resolve an unresolved charge a human has adjudicated.
+
+```
+aldus costs settle res-abc --uncharged --evidence "the dispatch error said nothing was spawned"
+aldus costs settle res-abc --amount 0.42 --evidence "provider statement line 3"
+aldus costs settle res-abc --evidence "support ticket 88, no answer"   # resolves nothing
+```
+
+`SpendService.reconcile` has been able to do this since the reservation protocol landed and
+**nothing could reach it**. So a reservation left `billing_unknown` made a Run **terminal**: the
+only exit was `cancel`, which discards approvals and artifacts because both are Run-scoped. An
+adopter lost two `human_oracle` decisions and $12.57 of settled work to a bookkeeping state whose
+true amount was zero and whose own error said `Nothing was spawned`.
+
+Three resolutions, and choosing is the operator's judgement rather than a default. `--amount`
+records what evidence established. `--uncharged` asserts that nothing was charged. Passing neither
+records that the investigation ended and **resolves nothing** — _"I could not find a charge"_ is
+not evidence that no charge occurred, and recording it as one is how a budget is quietly exceeded.
+
+`--decided-by` and `--verbatim` work here exactly as on `approve` (ADR-0054): the named person is
+the decider, the acting actor is the transcriber, and the transcriber is derived rather than
+accepted.
+
+**On the trust model, because this reverses a deliberate removal.** `AldusContext.operatorConsole`
+existed, was wired to the self-declared CLI actor, and was removed because that made the mint
+_look_ trustworthy. What settles it is that the same trust was already accepted where it does more
+damage: `aldus approve performance.freeze` establishes a spend grant and authorises paid synthesis
+on nothing but `ALDUS_ACTOR`. Guarding reconciliation more strictly protected one path while the
+path that actually releases money stayed open.
+
+Nothing here authenticates anyone, and it does not claim to. What changed is that the record can
+say who decided and who typed, so a transcription is distinguishable from a claim.
+
+Reconciliation still refuses a non-human decider and an assembled authority. Both remain asserted.
+
 ## 0.2.0-next.32 — 2026-08-26
 
 ### Features

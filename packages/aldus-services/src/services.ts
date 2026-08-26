@@ -39,6 +39,7 @@ import type {
 } from "@aldus-runtime/tts-ledger";
 
 import { requireActor } from "./actor.js";
+import type { ReconciliationResolution } from "./spend-service.js";
 import type { AldusContext } from "./context.js";
 import { summariseCosts } from "./costs.js";
 import { ServiceErrorCodes, serviceError } from "./errors.js";
@@ -1012,6 +1013,62 @@ export class AldusServices {
   /** Record a request for changes (contract §13). */
   requestChanges(request: GateDecisionRequest): Promise<ServiceResult<GateDecisionReport>> {
     return this.#decide(request, "changes_requested");
+  }
+
+  /**
+   * Resolve an unresolved charge a human has adjudicated (#155 step 5, #215).
+   *
+   * `SpendService.reconcile` has done this since the reservation protocol landed and **nothing
+   * could reach it**. A reservation left `billing_unknown` therefore made a Run terminal: the only
+   * exit was `cancel`, which discards approvals and artifacts because both are Run-scoped. An
+   * adopter lost two `human_oracle` decisions and $12.57 of settled work to a bookkeeping state
+   * whose true amount was zero and whose own error said `Nothing was spawned`.
+   *
+   * `transcribing` mirrors {@link GateDecisionRequest}: the named person is the decider, the
+   * **acting** actor is the transcriber, and the transcriber is derived rather than accepted.
+   * Nothing authenticates either — what changes is that the record can tell them apart.
+   *
+   * Human-only and evidence-required, and neither is re-decided here.
+   */
+  async settleSpend(request: {
+    runId: string;
+    reservationId: string;
+    resolution: ReconciliationResolution;
+    evidenceRef: string;
+    decisionId?: string;
+    transcribing?: { decidedBy: ActorRef; verbatim: string };
+    actor?: ActorRef;
+  }): Promise<ServiceResult<{ reservationId: string; status: string; costIds: string[] }>> {
+    const acting = requireActor(request.actor ?? this.#context.actor, "settle");
+    const decider = request.transcribing?.decidedBy ?? acting;
+
+    const known = await this.#context.spendStatus(request.runId);
+    const found = known.find((entry) => entry.reservationId === request.reservationId);
+    if (found === undefined) {
+      return refused({
+        reason: "reservation_not_found",
+        explanation:
+          `Run "${request.runId}" holds no reservation "${request.reservationId}". ` +
+          "`aldus costs` lists the ones it does, and which are unresolved.",
+        details: { runId: request.runId, reservationId: request.reservationId },
+      });
+    }
+
+    const reservation = await this.#context.readReservation(found.grantId, found.reservationId);
+    const settled = await this.#context.operatorConsole(decider).reconcile(reservation, {
+      evidenceRef: request.evidenceRef,
+      resolution: request.resolution,
+      decisionId: request.decisionId ?? `settle:${request.reservationId}`,
+      ...(request.transcribing === undefined
+        ? {}
+        : { transcription: { recordedBy: acting, verbatim: request.transcribing.verbatim } }),
+    });
+
+    return ok({
+      reservationId: settled.reservation.reservationId,
+      status: settled.reservation.status,
+      costIds: settled.costs.map((record) => record.costId),
+    });
   }
 
   /**
