@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import { SCHEMA_VERSION, type ReworkPolicy, type ReworkRound } from "@aldus-runtime/core";
 
-import { decideRework, type ReworkVerdict } from "../src/rework.js";
+import { decideRework, type EvaluatedVerdict } from "../src/rework.js";
 
 const FALLBACK = "editorial.freeze";
 
@@ -45,7 +45,8 @@ const round = (index: number, input: string, output: string): ReworkRound => ({
   at: "2026-08-27T00:00:00.000Z",
 });
 
-const verdict = (over: Partial<ReworkVerdict> = {}): ReworkVerdict => ({
+const verdict = (over: Partial<EvaluatedVerdict> = {}): EvaluatedVerdict => ({
+  kind: "evaluated",
   artifactDigest: "a".repeat(64),
   blockingFindingClasses: ["comprehension"],
   observedFindingClasses: over.blockingFindingClasses ?? ["comprehension"],
@@ -428,6 +429,63 @@ describe("a loop that is measurably getting worse stops (#220)", () => {
         observedFindingClasses: [],
         findingCount: 7,
       }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("converged");
+  });
+});
+
+describe("an evaluation that did not happen is not a clean one (#220)", () => {
+  // Reported by the first adopter after measuring rather than recalling: their oracle skipped its
+  // output contract four times in forty, delivering prose with no fenced block. The analysis was
+  // real and the structure was missing.
+  //
+  // The previous shape had one verdict type whose empty state meant "the evaluator ran and found
+  // nothing". An attempt with no evaluation produces the same empty state, so a caller reading
+  // `enumeratedFindings: 0` off a record got `converged` — a non-answer read as a pass, in the arm
+  // that releases the next stage.
+  it("escalates rather than converging", () => {
+    const decision = decideRework({
+      policy: policy(),
+      rounds: [],
+      verdict: {
+        kind: "not_evaluated",
+        artifactDigest: "a".repeat(64),
+        reason: "the stage produced no fenced oracle block",
+      },
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("no_evaluation");
+    // The caller's own words, so an operator reads what went wrong rather than a state name.
+    expect(decision.explanation).toContain("no fenced oracle block");
+  });
+
+  it("escalates with no policy too, to the caller's gate", () => {
+    // A missing evaluation is not a policy question. Reaching the `no_policy` arm first would tell
+    // an operator to declare a policy when what is missing is the evaluation.
+    const decision = decideRework({
+      rounds: [],
+      verdict: { kind: "not_evaluated", artifactDigest: "a".repeat(64), reason: "stage failed" },
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("no_evaluation");
+    expect(decision.gateId).toBe(FALLBACK);
+  });
+
+  it("still converges for an evaluation that ran and found nothing", () => {
+    // The control, and the distinction the split exists to make. These two produce identical
+    // finding lists; only the caller's assertion that an evaluation happened tells them apart.
+    const decision = decideRework({
+      policy: policy(),
+      rounds: [],
+      verdict: verdict({ blockingFindingClasses: [], observedFindingClasses: [] }),
       fallbackGateId: FALLBACK,
     });
 

@@ -21,7 +21,35 @@ import type { ReworkPolicy, ReworkRound, ReworkStopReason } from "@aldus-runtime
  * blocks: a controller that could reclassify a finding would be a stage promoting its own findings
  * with extra steps.
  */
-export interface ReworkVerdict {
+export type ReworkVerdict = EvaluatedVerdict | NoEvaluationVerdict;
+
+/**
+ * No evaluation is recorded for this artifact (#220).
+ *
+ * **Representable on purpose, and required rather than inferable.** The previous shape had a single
+ * verdict type whose empty state — no blocking classes, no observed classes — meant *"the evaluator
+ * ran and found nothing"*. An attempt with no evaluation recorded at all produces exactly the same
+ * empty state, so a caller reading `enumeratedFindings: 0` off a record and passing it through got
+ * `converged`: a non-answer read as a pass, in the arm that releases the next stage.
+ *
+ * The first adopter has a real instance. Their oracle skipped its output contract four times in
+ * forty — delivering prose with no fenced block — and the analysis was real while the structure was
+ * missing. Their stage throws, so their loop sees a stage failure, which is right. A controller that
+ * took the zero at face value would have called it clean.
+ *
+ * Splitting the type is what makes that unrepresentable: a caller cannot assert an empty evaluation
+ * without saying an evaluation happened.
+ */
+export interface NoEvaluationVerdict {
+  kind: "not_evaluated";
+  artifactDigest: string;
+  /** Why there is no evaluation — a stage failure, a missing attempt, an unparsed report. */
+  reason: string;
+}
+
+/** The evaluator ran and produced a classifiable result. */
+export interface EvaluatedVerdict {
+  kind: "evaluated";
   /** Digest of the artifact this verdict is about. A verdict applies to nothing else (criterion 8). */
   artifactDigest: string;
   /**
@@ -121,6 +149,21 @@ export interface ReworkInput {
 export function decideRework(input: ReworkInput): ReworkDecision {
   const { policy, rounds, verdict } = input;
   const digest = verdict.artifactDigest;
+
+  // First, and before anything reads a finding list. An artifact with no evaluation has no empty
+  // finding list — it has no finding list — and the two were indistinguishable while one type
+  // carried both.
+  if (verdict.kind === "not_evaluated") {
+    return {
+      kind: "escalate",
+      gateId: policy?.escalateToGateId ?? input.fallbackGateId,
+      reason: "no_evaluation",
+      explanation:
+        `No evaluation is recorded for this artifact: ${verdict.reason}. Nothing here establishes ` +
+        "that it is clean, and an absent evaluation is not a passing one.",
+      artifactDigest: digest,
+    };
+  }
 
   // A verdict the enforcement could not classify is not a clean one and not a blocking one.
   if (verdict.ambiguous === true) {
