@@ -23,6 +23,7 @@ const policy = (over: Partial<ReworkPolicy> = {}): ReworkPolicy => ({
   coversFindingClasses: ["comprehension"],
   maxRounds: 2,
   escalateToGateId: "script.freeze",
+  candidateArtifactKind: "script-candidate",
   authorizationId: "decision-a",
   automaticCorrectionHarm:
     "A wrong repair rewrites narration the host will read aloud; bounded at two rounds and " +

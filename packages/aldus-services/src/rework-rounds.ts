@@ -1,31 +1,35 @@
 /**
  * Rework rounds, derived from the record rather than stored beside it (#220, ADR-0055).
  *
- * Criterion 6 wants each round to carry the digests it read, the findings consumed, the repair
- * execution, the output and the cost. **Every one of those is already durable**: a repair is an
- * ordinary stage attempt with input and output artifacts, and the evaluation that opened the round
- * is an attempt carrying `blockingFindingClasses` and `evaluationEvidence` since `next.40`.
+ * A round's facts are already durable: a repair is an ordinary stage attempt with input and output
+ * artifacts, and the evaluation that opened it carries its observations and enforcement
+ * classification since `next.40`. So a round is a **reading** of two existing records, not a third
+ * one — the choice this codebase makes elsewhere for the same reason (`#pendingObservations`
+ * derives rather than stores "so the two cannot drift").
  *
- * So a round is not a new record. It is a **reading** of two existing ones, and deriving it is the
- * choice this codebase makes elsewhere for the same reason — `#pendingObservations` derives rather
- * than stores "so the two cannot drift". A second record of the same facts is a second place for
- * them to disagree, and the disagreement surfaces when someone is already stuck.
+ * **What it will not do is infer a round it cannot establish.** The first version of this joined by
+ * `inputArtifacts.at(-1)` and by which evaluation finished most recently before the repair started.
+ * Neither is lineage: the contract gives array order no meaning, a stage may consume and produce
+ * several artifacts, and the most recent evaluation may have judged a different candidate than the
+ * one the repair consumed. A stored temporal ordering can narrow candidates; it cannot prove what
+ * was read.
  *
- * It also avoids inventing a durable Core type for something the contract does not yet name. Adding
- * `ReworkRound` to the run-collection registry would make it a stored domain type on the strength
- * of a work package rather than the contract, and that is a decision for the contract to make.
+ * So the joins are explicit — the policy declares the candidate's artifact kind, and the evaluation
+ * that opened a round is the one that *judged that candidate*, matched by digest. A repair whose
+ * joins cannot be established is **refused, visibly**, and never reported as a round with an
+ * inferred one.
  */
 
-import type { ReworkPolicy, ReworkRound, StageAttempt } from "@aldus-runtime/core";
+import type { ArtifactRef, ReworkPolicy, ReworkRound, StageAttempt } from "@aldus-runtime/core";
 import { SCHEMA_VERSION } from "@aldus-runtime/core";
 
 /** What a derivation reads: the two stages the policy names, as the record holds them. */
 export interface ReworkRoundSource {
   runId: string;
   policy: ReworkPolicy;
-  /** Attempts of the evaluating stage (`policy.stageId`), oldest first. */
+  /** Attempts of the evaluating stage (`policy.stageId`), in record order. */
   evaluationAttempts: readonly AttemptWithMetadata[];
-  /** Attempts of the repair stage (`policy.repairStageId`), oldest first. */
+  /** Attempts of the repair stage (`policy.repairStageId`), in record order. */
   repairAttempts: readonly AttemptWithMetadata[];
 }
 
@@ -33,89 +37,189 @@ export interface ReworkRoundSource {
 export interface AttemptWithMetadata {
   attempt: StageAttempt;
   /**
-   * From `AttemptMetadata`, and only the fields a round reads.
+   * Finding classes the evaluator **emitted**, from `AttemptMetadata.observations`.
    *
-   * Optional throughout, because an attempt recorded before `next.40` has none of them. Absence is
-   * carried into the round as absence rather than as a zero — a count that was never measured is
-   * not a small one (#140).
+   * Separate from {@link blockingFindingClasses} and load-bearing, because ADR-0056 permits a
+   * reviewed policy to cover an *advisory* class. The first adopter's oracle declares eight
+   * advisory channels and no blocking ones, so a round derived from blocking classes alone records
+   * `consumedFindingClasses: []` for a repair that consumed four findings — not conservative
+   * absence, a false statement.
    */
+  observedFindingClasses?: readonly string[] | undefined;
+  /** Classes the stage's declared enforcement classified as blocking. Enforcement provenance. */
   blockingFindingClasses?: readonly string[] | undefined;
   enumeratedFindings?: number | undefined;
   defectCountMeasurable?: boolean | undefined;
 }
 
+/** Why a repair attempt could not be read as a round. */
+export type ReworkJoinRefusal =
+  | "repair_unsuccessful"
+  | "candidate_input_ambiguous"
+  | "candidate_output_ambiguous"
+  | "no_evaluation_judged_this_candidate"
+  | "consumed_classes_unrecorded";
+
+/** A repair the record could not establish as a round, and what was missing. */
+export interface RefusedRound {
+  repairAttemptId: string;
+  reason: ReworkJoinRefusal;
+  explanation: string;
+}
+
+/** Rounds the record establishes, and repairs it refuses to call rounds. */
+export interface ReworkRoundReading {
+  rounds: ReworkRound[];
+  /**
+   * Repairs that happened and could not be joined.
+   *
+   * Surfaced rather than dropped. A repair silently absent from the round list reads as a repair
+   * that never ran, which understates what was spent — and a reader comparing a bound against a
+   * shorter list would conclude there is room left.
+   */
+  refused: RefusedRound[];
+}
+
 /**
- * Read the completed rework rounds for one policy.
+ * Read the rework rounds one policy's records establish.
  *
- * A **round** is one repair attempt that produced an artifact, paired with the evaluation that
- * opened it — the latest evaluation attempt that finished before the repair started. Pairing by
- * time rather than by an identifier, because nothing links them today and inventing a link would
- * be storing the thing this function exists not to store.
+ * A **round** is a successful repair that consumed a candidate some evaluation judged. Every part
+ * of that is joined explicitly:
  *
- * Rounds are numbered by position, so a resumed process derives the same ordinals from the same
- * records. That is criterion 4 as a property of the derivation rather than a claim about it.
+ * - the candidate is the artifact of `policy.candidateArtifactKind` — exactly one on the way in and
+ *   exactly one on the way out, or the repair is refused rather than disambiguated by position;
+ * - the evaluation that opened the round is the one whose **inputs** include that same digest,
+ *   because an evaluator judges its input and emits a report as its output;
+ * - `consumedFindingClasses` is that evaluation's observed classes intersected with what the policy
+ *   covers, so an advisory class a reviewed policy covers is recorded as consumed (ADR-0056).
+ *
+ * Ordinals are positions among established rounds, so a process with no memory of the previous ones
+ * derives the same numbers from the same records.
  */
-export function deriveReworkRounds(source: ReworkRoundSource): ReworkRound[] {
+export function deriveReworkRounds(source: ReworkRoundSource): ReworkRoundReading {
   const { policy, runId } = source;
-
-  // Only repairs that finished and produced something. A repair that failed or was cancelled did
-  // not consume a finding and did not produce the next candidate, so counting it would spend a
-  // bound on work that never happened — and the bound is an authorised value.
-  const repairs = source.repairAttempts.filter(
-    (entry) => entry.attempt.status === "succeeded" && entry.attempt.outputArtifacts.length > 0,
-  );
-
   const rounds: ReworkRound[] = [];
-  for (const [index, repair] of repairs.entries()) {
-    const opened = latestBefore(source.evaluationAttempts, repair.attempt.startedAt);
-    const inputDigest =
-      repair.attempt.inputArtifacts.at(-1)?.sha256 ??
-      opened?.attempt.outputArtifacts.at(-1)?.sha256;
-    const outputDigest = repair.attempt.outputArtifacts.at(-1)?.sha256;
-    // A repair whose input digest cannot be established is not reported as a round with a guessed
-    // one. It is skipped, and the skip is visible as a gap in the ordinals rather than as a round
-    // that reads as complete — the same reason an unmeasured count stays absent.
-    if (inputDigest === undefined || outputDigest === undefined) continue;
+  const refused: RefusedRound[] = [];
 
-    const measurable = opened?.defectCountMeasurable === true;
+  for (const repair of source.repairAttempts) {
+    const refuse = (reason: ReworkJoinRefusal, explanation: string): void => {
+      refused.push({ repairAttemptId: repair.attempt.attemptId, reason, explanation });
+    };
+
+    // A repair that failed or was cancelled consumed no finding and produced no candidate. Counting
+    // it would spend an authorised round on work that never happened, and the bound is an
+    // authorised value.
+    if (repair.attempt.status !== "succeeded") {
+      refuse(
+        "repair_unsuccessful",
+        `attempt is "${repair.attempt.status}", not a completed repair`,
+      );
+      continue;
+    }
+
+    const consumed = onlyOfKind(repair.attempt.inputArtifacts, policy.candidateArtifactKind);
+    if (consumed === undefined) {
+      refuse(
+        "candidate_input_ambiguous",
+        `did not consume exactly one "${policy.candidateArtifactKind}" artifact, so which ` +
+          "candidate it repaired is not established",
+      );
+      continue;
+    }
+
+    const produced = onlyOfKind(repair.attempt.outputArtifacts, policy.candidateArtifactKind);
+    if (produced === undefined) {
+      refuse(
+        "candidate_output_ambiguous",
+        `did not produce exactly one "${policy.candidateArtifactKind}" artifact, so which ` +
+          "candidate it produced is not established",
+      );
+      continue;
+    }
+
+    // The evaluation that judged **this** candidate, by digest. Not the most recent one: a repair
+    // run between two evaluations, or an evaluation of a different candidate, would otherwise
+    // attribute a reading to a round that could not have read it.
+    const opened = judgedBy(
+      source.evaluationAttempts,
+      consumed.sha256,
+      policy.candidateArtifactKind,
+    );
+    if (opened === undefined) {
+      refuse(
+        "no_evaluation_judged_this_candidate",
+        `no completed evaluation of "${policy.stageId}" judged the candidate this repair consumed`,
+      );
+      continue;
+    }
+
+    // Unknown is not an empty list. An attempt recorded before observations were persisted cannot
+    // establish what the round consumed, and reporting `[]` would state that it consumed nothing.
+    if (opened.observedFindingClasses === undefined) {
+      refuse(
+        "consumed_classes_unrecorded",
+        `the evaluation that opened this round predates recorded observations, so what the repair ` +
+          "consumed cannot be established",
+      );
+      continue;
+    }
+
+    const covers = new Set(policy.coversFindingClasses);
+    const measurable = opened.defectCountMeasurable === true;
     rounds.push({
       schemaVersion: SCHEMA_VERSION,
       policyId: policy.policyId,
       runId,
-      roundIndex: index + 1,
-      inputDigest,
-      consumedFindingClasses: [...(opened?.blockingFindingClasses ?? [])],
+      roundIndex: rounds.length + 1,
+      inputDigest: consumed.sha256,
+      consumedFindingClasses: opened.observedFindingClasses.filter((cls) => covers.has(cls)),
       repairStageId: policy.repairStageId,
       repairAttemptId: repair.attempt.attemptId,
-      outputDigest,
+      outputDigest: produced.sha256,
       costIds: [],
       actor: repair.attempt.actor,
       at: repair.attempt.finishedAt ?? repair.attempt.startedAt ?? "",
-      ...(measurable && opened?.enumeratedFindings !== undefined
+      ...(measurable && opened.enumeratedFindings !== undefined
         ? { inputFindingCount: opened.enumeratedFindings }
         : {}),
     });
   }
-  return rounds;
+
+  return { rounds, refused };
 }
 
 /**
- * The latest attempt that finished before `at`.
+ * The one artifact of a kind, or `undefined` when there is not exactly one.
  *
- * `undefined` when nothing did — a repair with no evaluation before it is a repair somebody ran by
- * hand, and the round it produced carries no findings consumed rather than borrowing a later
- * evaluation's. Borrowing would attribute a reading to a round that could not have read it.
+ * Zero and several are the same answer here: neither establishes which artifact is meant, and
+ * picking one would be `.at(-1)` with extra steps.
  */
-function latestBefore(
+export function onlyOfKind(
+  artifacts: readonly ArtifactRef[],
+  kind: string,
+): ArtifactRef | undefined {
+  const matching = artifacts.filter((artifact) => artifact.kind === kind);
+  return matching.length === 1 ? matching[0] : undefined;
+}
+
+/**
+ * The completed evaluation attempt that judged the candidate with this digest.
+ *
+ * An evaluator judges its **input** and emits its report as output, so the subject is matched
+ * against `inputArtifacts`. Running and failed attempts are excluded: an attempt that has not
+ * finished has not judged anything, and reading one as a verdict is the shape `not_evaluated`
+ * exists to keep out.
+ */
+export function judgedBy(
   attempts: readonly AttemptWithMetadata[],
-  at: string | undefined,
+  digest: string,
+  kind: string,
 ): AttemptWithMetadata | undefined {
-  if (at === undefined) return undefined;
-  let best: AttemptWithMetadata | undefined;
-  for (const entry of attempts) {
-    const finished = entry.attempt.finishedAt;
-    if (finished === undefined || finished > at) continue;
-    if (best === undefined || finished > (best.attempt.finishedAt ?? "")) best = entry;
-  }
-  return best;
+  return attempts.find(
+    (entry) =>
+      entry.attempt.status === "succeeded" &&
+      entry.attempt.inputArtifacts.some(
+        (artifact) => artifact.kind === kind && artifact.sha256 === digest,
+      ),
+  );
 }
