@@ -367,6 +367,23 @@ So the sending side carries all of it: **say where you read it, or do not say it
 and "your record shows" are not stylistic variants; between repositories they are the difference
 between a hypothesis and a fabrication, and only the writer can tell which one they are sending.
 
+**And "absolute" governs assertion, not reasoning.** Recorded from the coordinator ruling on #237,
+because a ruling that lives only in a comment on a merged PR is the durability problem this file
+exists to solve — and because a safety rule read as a ban on thinking out loud gets ignored rather
+than narrowed:
+
+- a **factual assertion** about another repository names the artifact, file/line, commit or query
+  actually read;
+- a clearly labelled **hypothesis, expectation or question** is still worth stating about a
+  repository nobody here has inspected — provided it says it is unverified and what would resolve
+  it;
+- an unverified hypothesis **must not be promoted** into review evidence, an acceptance result, a
+  migration fact, or the basis of a ruling.
+
+_"Your repository shows …"_ without having read it is the prohibited case. _"I have not inspected
+it; one hypothesis is …, and the file that settles it is X"_ is the useful one, and the second
+clause is what makes it useful rather than merely honest.
+
 **Checks that replace something a reviewer did by hand:**
 
 | script                         | the claim it verifies                                                                         |
