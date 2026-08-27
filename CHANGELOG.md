@@ -396,6 +396,33 @@ ignores everything.
 
 <!-- No machine marker: check-breaking-notes reports no surface finding. Message text only. -->
 
+## 0.2.0-next.47 — 2026-08-27
+
+### Fixed
+
+**The refusal for a stage stuck in `running` now says what it cannot see, instead of leaving the
+operator to guess whether §19.1's concern applies to them.**
+
+The first adopter proposed that the runtime already knows, at the moment it refuses, whether the
+stuck attempt registered an artifact — so a takeover with nothing registered duplicates nothing.
+
+**It does not, and the first version of this change is what showed it.** Artifacts reach the attempt
+record when a stage **settles**, and a stuck attempt by definition has not. A test whose stage
+recorded two artifacts read zero. Reporting _"nothing to duplicate"_ from that would claim safety
+from evidence that cannot exist at that moment — in the message that decides whether someone re-runs
+a paid stage.
+
+So the message states the limit rather than a conclusion: this runner cannot tell what the stuck
+attempt did, artifacts reach the record at settle and this one has not, it holds no cost store, and
+**an empty attempt is not evidence that nothing happened**. `aldus costs --run <id>` shows what the
+Run holds — a pointer that would have been false before `next.35`, when `costs` could not show a
+held reservation.
+
+§19.1's concern is undiminished. What changes is that an operator is told which parts of it this
+runtime can answer.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. Message text only. -->
+
 ## Unreleased
 
 Nothing yet.

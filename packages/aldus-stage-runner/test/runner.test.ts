@@ -474,3 +474,73 @@ describe("unregistered stages", () => {
     });
   });
 });
+
+describe("a stage stuck in running says what it cannot see (#244)", () => {
+  // §19.1's concern is two runners executing one side-effecting stage at once, and the refusal
+  // stated that worst case every time with nothing an operator could use to tell whether it
+  // applied to them. The first adopter's stuck attempt had no cost record and no artifact, and a
+  // killed dispatch is the ordinary failure of a long agent stage — three in their repository so
+  // far, one of which charged $17.73 for nothing.
+  //
+  // Their proposal was that the runtime knows at that moment whether the attempt registered an
+  // artifact. **It does not**, and the first version of this test is what showed it: artifacts
+  // reach the attempt record when a stage *settles*, so a stuck attempt reads as zero however much
+  // it recorded. Reporting "nothing to duplicate" from that would claim safety from evidence that
+  // cannot exist yet.
+  async function stuckRunning(artifacts: number): Promise<void> {
+    // The stage never returns, so the attempt stays `running` — which is what a killed process
+    // leaves behind and what no completed test can produce.
+    harness.registry.register(
+      aStage({
+        execute: async (context) => {
+          for (let index = 0; index < artifacts; index += 1) {
+            context.recordOutput(anArtifact({ artifactId: `artifact-${index}` }) as never);
+          }
+          return await new Promise<never>(() => {});
+        },
+      }),
+    );
+    void harness.runner.run(harness.manifest.runId, "stage-a", {});
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+
+  it("says an empty attempt is not evidence that nothing happened", async () => {
+    // The stage recorded two artifacts and the record shows none, which is exactly the gap the
+    // sentence now names instead of papering over.
+    await stuckRunning(2);
+
+    await expect(harness.runner.run(harness.manifest.runId, "stage-a", {})).rejects.toThrow(
+      /not evidence that nothing happened/,
+    );
+  });
+
+  it("never claims the attempt was uncharged, because it holds no cost store", async () => {
+    await stuckRunning(0);
+
+    await expect(harness.runner.run(harness.manifest.runId, "stage-a", {})).rejects.toThrow(
+      /holds no cost store/,
+    );
+  });
+
+  it("points at the command that does know", async () => {
+    // `aldus costs` could not show a held reservation until next.35, so this pointer would have
+    // been false this morning. It is true now, which is the only reason it is worth writing.
+    await stuckRunning(0);
+
+    await expect(harness.runner.run(harness.manifest.runId, "stage-a", {})).rejects.toThrow(
+      /aldus costs --run/,
+    );
+  });
+
+  it("still tells the operator to pass --force, not the runner's parameter", async () => {
+    // Anchored on the instruction, not on the string `--force` anywhere in the message. The first
+    // version of this asserted `/--force/`, which the example command satisfies on its own — so
+    // reverting the instruction to the bare parameter name left it green. An assertion true for
+    // another reason, in the test written to stop exactly that.
+    await stuckRunning(0);
+
+    await expect(harness.runner.run(harness.manifest.runId, "stage-a", {})).rejects.toThrow(
+      /pass `--force` to take over/,
+    );
+  });
+});
