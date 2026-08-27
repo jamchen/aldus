@@ -25,6 +25,7 @@ import type {
 } from "@aldus-runtime/artifact-registry";
 import type { GateStatus } from "@aldus-runtime/gate-engine";
 import type { ReworkDecision } from "./rework.js";
+import type { RefusedRound } from "./rework-rounds.js";
 import type { ReworkRound } from "@aldus-runtime/core";
 import type { BundleStatus, ReconciliationReport, ReleaseOutcome } from "@aldus-runtime/release";
 import type {
@@ -359,32 +360,44 @@ export interface ReleaseReport {
 }
 
 /**
- * What each declared rework policy would do next (#220 criterion 7).
+ * What the record shows about each declared rework policy, and what the policy *would* decide.
  *
- * Read-only and derived. Nothing in it is stored, and nothing producing it runs a repair or spends
- * anything — it is the answer to "why is this loop where it is", which is the question an operator
- * had to reconstruct from eight stage executions before rounds were derivable.
+ * **Two different kinds of statement, kept apart on purpose.** Nothing executes a declared policy
+ * yet, so "rounds" here are completed repair and evaluation records that the policy's joins
+ * establish — not executions the runtime controlled under it. Presenting the second as the first
+ * would report a counterfactual as operational status, and an operator reading "stopped" would take
+ * it as something the runtime did.
+ *
+ * Criterion 7 stays open until the executing path can establish that these executions *were* rounds
+ * under this policy.
  */
 export interface ReworkStatusReport {
   runId: string;
   loops: ReworkLoopStatus[];
 }
 
-/** One policy's loop, as the record shows it. */
+/** One policy's records, and the preview derived from them. */
 export interface ReworkLoopStatus {
   policyId: string;
   /** The evaluating stage the policy governs. */
   stageId: string;
-  /** Completed rounds, derived from the record (ADR-0055). */
-  rounds: ReworkRound[];
-  /** How much of the bound is spent. Equal to `rounds.length`, named so a reader need not count. */
-  spent: number;
   /**
-   * What follows, or absent when the evaluating stage has never run.
+   * Completed repairs the policy's joins establish, oldest first.
    *
-   * Absent is not "converged". A loop that has not started and a loop that finished clean produce
-   * the same empty round list, and reporting a decision for the first would answer a question
-   * nobody has asked.
+   * Observed fact: these happened. What they are *not* is proof that a controller ran them under
+   * this policy, because no controller runs anything yet.
    */
-  decision?: ReworkDecision;
+  recordedRounds: ReworkRound[];
+  /** Repairs that happened and could not be joined, with why (ADR-0055). */
+  refusedRepairs: RefusedRound[];
+  /**
+   * What `decideRework` would answer against those records — a **preview**, not a decision taken.
+   *
+   * Absent when no completed evaluation of the policy's candidate is on record. Absent is not
+   * "converged": a loop that has not started and one that finished clean leave the same empty round
+   * list, and only one of them is a pass.
+   */
+  wouldDecide?: ReworkDecision;
+  /** Why there is no preview, when there is none. Never rendered as a decision. */
+  previewUnavailable?: string;
 }

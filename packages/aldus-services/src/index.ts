@@ -83,6 +83,8 @@ export {
 export {
   deriveReworkRounds,
   type AttemptWithMetadata,
+  type RefusedRound,
+  type ReworkRoundReading,
   type ReworkRoundSource,
 } from "./rework-rounds.js";
 

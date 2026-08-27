@@ -18,23 +18,76 @@ const B = "b".repeat(64);
 const report = (loop: Partial<ReworkStatusReport["loops"][number]>): ReworkStatusReport =>
   ({
     runId: "run-a",
-    loops: [{ policyId: "policy-a", stageId: "script.oracle", rounds: [], spent: 0, ...loop }],
+    loops: [
+      {
+        policyId: "policy-a",
+        stageId: "script.oracle",
+        recordedRounds: [],
+        refusedRepairs: [],
+        ...loop,
+      },
+    ],
   }) as unknown as ReworkStatusReport;
 
 describe("the loop explains where it is", () => {
-  it("says nothing to decide when the evaluating stage has never run", () => {
+  it("says why there is no preview, and never says converged", () => {
     // Not "converged". A loop that has not started and one that finished clean have the same empty
     // round list, and the difference is the whole reason `not_evaluated` exists.
-    const out = renderRework(report({}));
+    const out = renderRework(
+      report({ previewUnavailable: "no completed attempt has judged a candidate" }),
+    );
 
-    expect(out).toContain("has not run");
+    expect(out).toContain("no preview");
+    expect(out).toContain("no completed attempt has judged a candidate");
     expect(out).not.toContain("converged");
+  });
+
+  it("labels every line as recorded or as a preview", () => {
+    // Nothing executes a policy yet. An unlabelled "stopped" reads as runtime-controlled execution
+    // that has not happened, which is a counterfactual presented as operational status.
+    const out = renderRework(
+      report({
+        wouldDecide: {
+          kind: "escalate",
+          gateId: "script.freeze",
+          reason: "bounds_exhausted",
+          explanation: "spent",
+          artifactDigest: B,
+          candidates: [{ digest: B }],
+        },
+      }),
+    );
+
+    expect(out).toContain("Nothing executes a rework policy yet");
+    expect(out).toContain("recorded rounds");
+    expect(out).toContain("would decide");
+  });
+
+  it("surfaces repairs the record cannot join rather than dropping them", () => {
+    // A repair missing from the list reads as one that never ran, and a reader comparing that
+    // against a bound concludes there is room left.
+    const out = renderRework(
+      report({
+        refusedRepairs: [
+          {
+            repairAttemptId: "rep-9",
+            reason: "candidate_input_ambiguous",
+            explanation: "did not consume exactly one candidate",
+          },
+        ],
+        previewUnavailable: "nothing judged",
+      }),
+    );
+
+    expect(out).toContain("not joined");
+    expect(out).toContain("rep-9");
+    expect(out).toContain("candidate_input_ambiguous");
   });
 
   it("names the next round and what the repair is being asked to fix", () => {
     const out = renderRework(
       report({
-        decision: {
+        wouldDecide: {
           kind: "rework",
           round: 2,
           repairStageId: "script.revise",
@@ -54,8 +107,7 @@ describe("the loop explains where it is", () => {
     // useful reasons argue against the obvious next move. The sentence is the part that does.
     const out = renderRework(
       report({
-        spent: 2,
-        decision: {
+        wouldDecide: {
           kind: "escalate",
           gateId: "script.freeze",
           reason: "regression",
@@ -84,7 +136,7 @@ describe("the loop explains where it is", () => {
     // ranking. 7 then 4 makes sorting observable.
     const out = renderRework(
       report({
-        decision: {
+        wouldDecide: {
           kind: "escalate",
           gateId: "script.freeze",
           reason: "regression",
@@ -106,7 +158,7 @@ describe("the loop explains where it is", () => {
   it("marks an unmeasured candidate rather than showing a count", () => {
     const out = renderRework(
       report({
-        decision: {
+        wouldDecide: {
           kind: "escalate",
           gateId: "script.freeze",
           reason: "bounds_exhausted",
