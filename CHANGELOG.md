@@ -625,6 +625,35 @@ Three things the output is careful about, each pinned by a test:
 <!-- No machine marker: check-breaking-notes reports no surface finding. New exports and one
      optional context option. -->
 
+## 0.2.0-next.50 — 2026-08-27
+
+### Fixed
+
+**`aldus rework status` was unreachable in `0.2.0-next.49`.**
+
+The dispatch passed `argv.slice(1)` where every other command passes `argv`, so the first real
+argument was eaten: `aldus rework status --run <id>` parsed `--run` as the subcommand and refused
+with _"rework --run is not a command"_. **The command shipped and never worked.**
+
+Nothing caught it. The tests written for it exercised `renderRework` with hand-built reports, so
+they could not see the command failing to reach the renderer at all — an assertion that is also true
+when the mechanism is absent, in a new command, hours after the same defect was found by mutation in
+`costs` and a test written to prevent it.
+
+Found by installing `next` from the registry and running the command, which is the release check the
+owner ruling on #247 requires. It would not have been found by any other step in that list.
+
+Also: a flag is no longer read as a subcommand. `aldus rework --run <id>` now behaves like
+`aldus costs --run <id>` and reports status, instead of refusing with a message about the parser
+rather than about anything the operator did. A genuine unknown subcommand still refuses **and names
+what was typed**.
+
+Three tests invoke the CLI end to end, including a control asserting an unknown subcommand is still
+rejected — without it, _"does not say `is not a command`"_ would also hold for a dispatch that
+accepts everything.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. CLI dispatch only. -->
+
 ## Unreleased
 
 Nothing yet.

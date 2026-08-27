@@ -360,7 +360,7 @@ async function dispatch(
     case "artifacts":
       return await runArtifacts(argv, environment);
     case "rework":
-      return await runRework(argv.slice(1), environment);
+      return await runRework(argv, environment);
     case "costs":
       return await runCosts(argv, environment);
     case "release":
@@ -1110,8 +1110,12 @@ async function runCostsAbandon(
  * this release.
  */
 async function runRework(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
-  const [subcommand, ...rest] = argv;
-  if (subcommand !== undefined && subcommand !== "status") {
+  // A flag is not a subcommand. `aldus rework --run <id>` is what an operator types when there is
+  // only one verb, and treating `--run` as the subcommand refused them with a message about the
+  // parser rather than about anything they did — which `costs` already avoids by defaulting.
+  const [first, ...rest] = argv;
+  const subcommand = first?.startsWith("-") === false ? first : undefined;
+  if (first !== undefined && subcommand !== undefined && subcommand !== "status") {
     throw new AldusError(
       "ALDUS_INVALID_REQUEST",
       `"rework ${subcommand}" is not a command. Use status.`,
@@ -1119,7 +1123,7 @@ async function runRework(argv: readonly string[], environment: CliEnvironment): 
     );
   }
 
-  const { options } = parseCommon(subcommand === "status" ? rest : argv, environment);
+  const { options } = parseCommon(subcommand === undefined ? argv : rest, environment);
   const services = servicesFor(options, environment);
   const result = await services.reworkStatus(requireRunId(options, "rework status"));
   return emit(result, options, environment, renderRework);
