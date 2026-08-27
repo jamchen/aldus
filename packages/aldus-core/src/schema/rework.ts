@@ -126,6 +126,18 @@ export const reworkPolicySchemaBase = z
      * cannot be decided is worse than no escalation, because it looks like the loop stopped safely.
      */
     escalateToGateId: nonEmptyString,
+    /**
+     * The artifact kind this loop repairs — the *candidate*, not the evaluator's report.
+     *
+     * Declared because the join cannot be inferred. A repair stage may consume and produce several
+     * artifacts and an evaluator's own output is normally its report, so `outputArtifacts.at(-1)`
+     * identifies whatever happens to be last in an array whose order the contract gives no meaning
+     * to. Reading a round out of array position is not lineage; it is a guess that looks like one.
+     *
+     * Opaque to Core (§4.2) — the adopter names their own kinds. What Core owns is that the loop
+     * refuses a round it cannot join rather than inferring one.
+     */
+    candidateArtifactKind: nonEmptyString,
     /** The decision that authorised this bound (§13). */
     authorizationId: nonEmptyString,
     /**
