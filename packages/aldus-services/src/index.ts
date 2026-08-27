@@ -81,6 +81,12 @@ export {
 } from "./nextaction.js";
 
 export {
+  deriveReworkRounds,
+  type AttemptWithMetadata,
+  type ReworkRoundSource,
+} from "./rework-rounds.js";
+
+export {
   decideRework,
   type ReworkDecision,
   type ReworkInput,

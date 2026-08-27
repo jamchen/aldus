@@ -423,6 +423,43 @@ runtime can answer.
 
 <!-- No machine marker: check-breaking-notes reports no surface finding. Message text only. -->
 
+## 0.2.0-next.48 — 2026-08-27
+
+### Added
+
+**`deriveReworkRounds`** — rework rounds read from the record rather than stored beside it
+(#220 criterion 6, ADR-0055).
+
+Criterion 6 asks each round to carry the digests it read, the findings consumed, the repair
+execution and its output. **All of it is already durable**: a repair is an ordinary stage attempt
+with input and output artifacts, and the evaluation that opened the round carries
+`blockingFindingClasses` and `evaluationEvidence` as of `next.40`.
+
+So a round is a **reading** of two existing records, not a third one. That is the choice this
+codebase makes elsewhere for the same reason — `#pendingObservations` derives rather than stores
+_"so the two cannot drift"_ — and a second record of the same facts is a second place for them to
+disagree, surfacing when someone is already stuck.
+
+It also avoids making `ReworkRound` a stored Core domain type on the strength of a work package
+rather than the contract.
+
+Round ordinals come from position in the record, so a process with no memory of the previous rounds
+derives the same ones. That is criterion 4 as a property of the derivation rather than a claim about
+it.
+
+Four rules, each with a test that fails when it is removed:
+
+- a repair that **failed** is not a round — it consumed no finding and produced no candidate, and
+  counting it would spend an authorised round on work that never happened;
+- each repair pairs with the evaluation that finished **before** it, never a later one — borrowing
+  would attribute a reading to a round that could not have read it;
+- a count that was not measurable stays **absent**, never zero, because a defect count over
+  report-shaped evidence is not a smaller number (#140);
+- a repair whose input digest cannot be established is **skipped**, visible as a gap in the
+  ordinals, rather than reported as a round with a guessed one.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. New exports only. -->
+
 ## Unreleased
 
 Nothing yet.
