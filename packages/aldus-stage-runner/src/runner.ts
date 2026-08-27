@@ -482,6 +482,22 @@ export class StageRunner {
     }
 
     if (status === "running" && !force) {
+      // What this runner can and cannot see, rather than the worst case every time — and the
+      // answer turned out to be less than the first adopter and I both assumed.
+      //
+      // They proposed that the runtime knows, at the moment it refuses, whether the stuck attempt
+      // registered an artifact, so a takeover with nothing registered duplicates nothing. It does
+      // not: **artifacts are written to the attempt when a stage settles**, and a stuck attempt by
+      // definition has not. Reading zero there and reporting "nothing to duplicate" would claim
+      // safety from evidence that cannot exist at that moment — ADR-0030's shape, in the message
+      // that decides whether someone re-runs a paid stage.
+      //
+      // Measured, not reasoned: the first version of this counted `outputArtifacts` and its own
+      // test showed zero for a stage that had recorded two.
+      //
+      // So the message says what it cannot answer and points at what can. §19.1's concern stands
+      // undiminished; what changes is that the operator is no longer left to guess whether it
+      // applies to them.
       throw stageRunnerError(
         StageRunnerErrorCodes.STAGE_STATE_INVALID,
         // Names the operator's flag, not the runner's parameter. `force` is what this function
@@ -492,11 +508,18 @@ export class StageRunner {
         `Stage "${definition.id}" is already running. If the runner that claimed it died, pass ` +
           "`--force` to take over — `aldus run <stage> --run <id> --force`, or `force: true` from " +
           "a program. Deliberate by design, because assuming a running stage is dead would let two " +
-          "runners execute one side-effecting stage at once (contract §19.1).",
+          "runners execute one side-effecting stage at once (contract §19.1). This runner cannot " +
+          "tell what the stuck attempt did: artifacts reach the record when a stage settles and " +
+          "this one has not, and it holds no cost store — so an empty attempt is not evidence that " +
+          "nothing happened. `aldus costs --run <id>` shows what the Run holds.",
         {
           category: "conflict",
           retryable: true,
-          details: { runId, stageId: definition.id, status },
+          details: {
+            runId,
+            stageId: definition.id,
+            status,
+          },
         },
       );
     }
