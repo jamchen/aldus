@@ -193,7 +193,7 @@ Write them before publishing, while you still remember what changed. Cover: what
 changed in a public API, known limitations with issue numbers, and the fact that this is a `next`
 release not yet promoted to `latest`.
 
-### Step 8 — open a pull request, and get the owner's word
+### Step 8 — open a pull request
 
 **`main` is protected and you cannot push to it.** `enforce_admins` is on, so this holds for the
 owner too. The bump goes in a pull request like any other change.
@@ -205,9 +205,37 @@ git push -u origin "release/${VERSION}"
 gh pr create --title "release: ${VERSION}"
 ```
 
-Say in the PR body that merging **will publish**. A release-bearing merge requires the owner's
-explicit authorization in an interactive session — not a GitHub comment, because every agent
-session authenticates as `jamchen` and an `OWNER RULING` marker cannot prove who typed it.
+Say in the PR body that merging **will publish**.
+
+**An ordinary `next` release does not need a fresh owner answer.** The owner ruling on
+[#247](https://github.com/jamchen/aldus/issues/247) grants standing authorization for the successful
+`next` path, _including the merge that triggers it_, when all five of these hold:
+
+1. the PR passed the required review and branch-protection gates;
+2. the workflow publishes only the expected prerelease version to `next`;
+3. the publish set comes from `publish-set.mjs` and is **verified in full** — every package in it,
+   not the ones you happen to list;
+4. the **publish job's own conclusion** is read; a green merge is not proof of publication;
+5. registry verification confirms the intended packages and versions, installs them from npm,
+   **exercises the changed surface**, and confirms `latest` did not move.
+
+Step 5 is not ceremony, and one release proved it: a prerelease shipped a new CLI verb whose
+dispatch made it refuse every invocation. The publish job was green, every package in the set was at
+the right version, and `latest` had not moved — **the first four checks passed on a command that
+could not run**, and only installing it and running it found that.
+
+This supersedes the requirement that previously stood here for an interactive owner authorization on
+every release-bearing merge. That requirement's reasoning — every agent session authenticates as
+`jamchen`, so an `OWNER RULING` marker cannot by itself prove who typed it — is unchanged and still
+why the reserved decisions below stay per-instance.
+
+**Reserved to the owner, per instance, and never inferred from this standing authorization:**
+promotion or movement of `latest`; recovery after a partial publish or registry inconsistency;
+publishing outside this workflow or publish set; paid execution or budget changes; package deletion
+or unpublish; repository or package visibility changes; credential, trusted-publisher or other
+security-setting changes; legal or licensing decisions.
+
+**A partial publish is a reserved decision, not a retry.** If the set is inconsistent, stop and ask.
 
 Tagging is optional and **publishes nothing**. Before ADR-0050 a tag push was the release trigger;
 it is not one now.
