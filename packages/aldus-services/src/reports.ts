@@ -24,6 +24,8 @@ import type {
   ProducerInfo,
 } from "@aldus-runtime/artifact-registry";
 import type { GateStatus } from "@aldus-runtime/gate-engine";
+import type { ReworkDecision } from "./rework.js";
+import type { ReworkRound } from "@aldus-runtime/core";
 import type { BundleStatus, ReconciliationReport, ReleaseOutcome } from "@aldus-runtime/release";
 import type {
   PerformanceScript,
@@ -354,4 +356,35 @@ export interface ReleaseReport {
   pending: ReleaseReceipt[];
   /** Receipts whose status is `failed`. */
   failed: ReleaseReceipt[];
+}
+
+/**
+ * What each declared rework policy would do next (#220 criterion 7).
+ *
+ * Read-only and derived. Nothing in it is stored, and nothing producing it runs a repair or spends
+ * anything — it is the answer to "why is this loop where it is", which is the question an operator
+ * had to reconstruct from eight stage executions before rounds were derivable.
+ */
+export interface ReworkStatusReport {
+  runId: string;
+  loops: ReworkLoopStatus[];
+}
+
+/** One policy's loop, as the record shows it. */
+export interface ReworkLoopStatus {
+  policyId: string;
+  /** The evaluating stage the policy governs. */
+  stageId: string;
+  /** Completed rounds, derived from the record (ADR-0055). */
+  rounds: ReworkRound[];
+  /** How much of the bound is spent. Equal to `rounds.length`, named so a reader need not count. */
+  spent: number;
+  /**
+   * What follows, or absent when the evaluating stage has never run.
+   *
+   * Absent is not "converged". A loop that has not started and a loop that finished clean produce
+   * the same empty round list, and reporting a decision for the first would answer a question
+   * nobody has asked.
+   */
+  decision?: ReworkDecision;
 }
