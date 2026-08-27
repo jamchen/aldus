@@ -219,10 +219,10 @@ Say in the PR body that merging **will publish**.
 5. registry verification confirms the intended packages and versions, installs them from npm,
    **exercises the changed surface**, and confirms `latest` did not move.
 
-Step 5 is not ceremony. `0.2.0-next.49` shipped `aldus rework status` with a dispatch bug that made
-the command refuse every invocation. The publish job was green, all twelve packages were at the
-right version, and `latest` had not moved — **the first four checks passed on a command that could
-not run**, and only running it found that.
+Step 5 is not ceremony, and one release proved it: a prerelease shipped a new CLI verb whose
+dispatch made it refuse every invocation. The publish job was green, every package in the set was at
+the right version, and `latest` had not moved — **the first four checks passed on a command that
+could not run**, and only installing it and running it found that.
 
 This supersedes the requirement that previously stood here for an interactive owner authorization on
 every release-bearing merge. That requirement's reasoning — every agent session authenticates as
