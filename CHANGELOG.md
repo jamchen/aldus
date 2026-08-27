@@ -492,6 +492,109 @@ evaluation is never read as having judged anything.
 
 ### Added
 
+**`aldus rework status`** and `AldusServices.reworkStatus` — the record and the policy preview,
+kept apart (#220; **criterion 7 stays open**).
+
+Criterion 7 asks that output explain the current round, why another is allowed, and why the loop
+stopped. The first adopter reconstructed exactly that by hand from eight stage executions, a bash
+loop and a grep, **and the reconstruction is what went wrong**.
+
+**Nothing executes a declared policy yet, and every line says so.** `recordedRounds` are completed
+repairs the policy's joins establish — observed fact, and _not_ proof that a controller ran them
+under this policy. `wouldDecide` is a preview of what `decideRework` would answer. Presenting the
+second as the first would report a counterfactual as operational status, and an operator reading an
+unlabelled _"stopped"_ would take it as something the runtime did. **Criterion 7 is not complete
+until the executing path can establish that these executions were rounds under this policy.**
+
+Read-only: nothing runs a repair, spends anything, or writes a record. `rework status` is the only
+rework verb — a verb that could _start_ a round is the half that spends money.
+
+`AldusContextOptions.reworkPolicies` supplies declared policies from the composition root, like
+`gates` and `stages` and for the same reason (§4.2). Declaring one still has no effect on execution.
+
+Four things the output is careful about, each pinned by a test:
+
+- the judged subject is the evaluation's **input** candidate, resolved by declared artifact kind —
+  an evaluator's output is its report, so `outputArtifacts.at(-1)` names the wrong thing;
+- a running or failed evaluation is **never** read as the latest verdict, and a policy with no
+  completed evaluation of its candidate gets **no preview and a stated reason**, never `converged`;
+- repairs the record cannot join are **surfaced**, because one missing from the list reads as one
+  that never ran and understates what was spent;
+- candidates are listed in record order, labelled unranked, and an unmeasured one reads
+  _"not measured"_ rather than `0`.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. New exports and one
+     optional context option. -->
+
+## 0.2.0-next.48 — 2026-08-27
+
+### BREAKING
+
+**`ReworkPolicy` requires `candidateArtifactKind`.**
+
+The artifact kind the loop repairs — the _candidate_, not the evaluator's report. Declared because
+the join cannot be inferred: a repair stage may consume and produce several artifacts, an
+evaluator's own output is normally its report, and the contract gives artifact array order no
+meaning. Reading a round out of array position is not lineage.
+
+<!-- No machine marker: `ReworkPolicy` is Zod-inferred, so a newly required member reads identically
+     to an existing one — the blind spot #236 made visible and #238 tracks. check-breaking-notes
+     names the type as unclassifiable; this entry is by hand. -->
+
+### Added
+
+**`deriveReworkRounds`** — the round-history and provenance foundation for #220 criterion 6
+(ADR-0055). **Criterion 6 stays open**: `costIds` is always empty, because attributing a charge to
+a round needs the reservation seam #244 is circling, and cost is one of the fields criterion 6 asks
+for.
+
+Criterion 6 asks each round to carry the digests it read, the findings consumed, the repair
+execution and its output. **All of it is already durable**: a repair is an ordinary stage attempt
+with input and output artifacts, and the evaluation that opened the round carries
+`blockingFindingClasses` and `evaluationEvidence` as of `next.40`.
+
+So a round is a **reading** of two existing records, not a third one. That is the choice this
+codebase makes elsewhere for the same reason — `#pendingObservations` derives rather than stores
+_"so the two cannot drift"_ — and a second record of the same facts is a second place for them to
+disagree, surfacing when someone is already stuck.
+
+It also avoids making `ReworkRound` a stored Core domain type on the strength of a work package
+rather than the contract.
+
+Round ordinals come from position in the record, so a process with no memory of the previous rounds
+derives the same ones. That is criterion 4 as a property of the derivation rather than a claim about
+it.
+
+**Every join is explicit, and a repair it cannot join is refused rather than inferred.**
+
+The candidate is the single artifact of `candidateArtifactKind` on each side — zero or several
+refuses, because picking one would be array position with extra steps. The evaluation that opened a
+round is the completed one whose **inputs** include that same digest, because an evaluator judges
+its input and emits a report as its output. Not the most recent one: a repair run between two
+evaluations, or an evaluation of a different candidate, would otherwise have its findings attributed
+to a round that never read them.
+
+`consumedFindingClasses` comes from the evaluation's recorded **observations** intersected with what
+the policy covers — not from `blockingFindingClasses`. ADR-0056 permits a reviewed policy to cover
+an _advisory_ class, and the first adopter's oracle declares eight advisory channels and no blocking
+ones, so deriving from blocking classes recorded `[]` for a repair that consumed four findings.
+**That is not conservative absence; it is a false statement**, and it was in the code by the author
+of the ADR it contradicts.
+
+Refusals are **surfaced, not dropped**: `deriveReworkRounds` returns `{ rounds, refused }`, and a
+repair silently absent from the round list reads as a repair that never ran — understating what was
+spent, to a reader comparing it against a bound.
+
+Nothing unestablishable is written as an empty or zero value that reads as a fact: an unrecorded
+consumed set refuses the round, an unmeasurable count stays absent, and a running or failed
+evaluation is never read as having judged anything.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. New exports only. -->
+
+## 0.2.0-next.49 — 2026-08-27
+
+### Added
+
 **`aldus rework status`** and `AldusServices.reworkStatus` — the loop explains where it is
 (#220 criterion 7).
 
