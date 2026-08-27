@@ -484,9 +484,15 @@ export class StageRunner {
     if (status === "running" && !force) {
       throw stageRunnerError(
         StageRunnerErrorCodes.STAGE_STATE_INVALID,
+        // Names the operator's flag, not the runner's parameter. `force` is what this function
+        // takes; `--force` is what the person reading this has to type, and the first adopter read
+        // "pass `force`" as naming something the CLI does not expose and filed it as unreachable.
+        // It is reachable — but a remedy an operator cannot act on from the text they are given is
+        // the same defect as one that does not exist, one step earlier.
         `Stage "${definition.id}" is already running. If the runner that claimed it died, pass ` +
-          "`force` to take over — deliberately, because assuming a running stage is dead would " +
-          "let two runners execute one side-effecting stage at once (contract §19.1).",
+          "`--force` to take over — `aldus run <stage> --run <id> --force`, or `force: true` from " +
+          "a program. Deliberate by design, because assuming a running stage is dead would let two " +
+          "runners execute one side-effecting stage at once (contract §19.1).",
         {
           category: "conflict",
           retryable: true,

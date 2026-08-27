@@ -373,6 +373,29 @@ is not the same as the best. Both facts are now on the decision.
 <!-- No machine marker: check-breaking-notes reports no surface finding. `candidates` is a new
      member on a union arm consumers read rather than construct. -->
 
+## 0.2.0-next.46 — 2026-08-27
+
+### Fixed
+
+**The refusal for a stage stuck in `running` now names the flag an operator types.**
+
+It said _"pass `force` to take over"_. `force` is the runner's parameter; `--force` is what the
+person reading the message has to type. The first adopter, whose dispatch was killed by a harness
+timeout and whose stage stayed `running`, read that as naming a capability the CLI does not expose
+and filed it as unreachable.
+
+**It is reachable** — `--force` has been on `aldus run` and `aldus retry` for many releases, and the
+CLI rejects unknown flags, so it was never silently ignored. What was true is that **a remedy
+someone cannot act on from the text they are handed is the same defect as a missing one, one step
+earlier** — the third time this week a message has pointed at something its reader could not use.
+
+The message now reads `--force`, gives the whole command, and names `force: true` for a program.
+Three tests pin the flag's existence on both `run` and `retry`, with a control asserting an unknown
+flag is rejected — without it, _"`--force` was not rejected"_ would be equally true of a parser that
+ignores everything.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. Message text only. -->
+
 ## Unreleased
 
 Nothing yet.
