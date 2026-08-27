@@ -54,6 +54,7 @@ import {
   renderCancelRun,
   renderCleanupPlan,
   renderCosts,
+  renderRework,
   renderGateDecision,
   renderInit,
   renderInspection,
@@ -358,6 +359,8 @@ async function dispatch(
       return await runCancel(argv, environment);
     case "artifacts":
       return await runArtifacts(argv, environment);
+    case "rework":
+      return await runRework(argv.slice(1), environment);
     case "costs":
       return await runCosts(argv, environment);
     case "release":
@@ -1096,6 +1099,30 @@ async function runCostsAbandon(
         " --evidence <what it rests on>",
     ].join("\n"),
   );
+}
+
+/**
+ * `rework status` (#220 criterion 7).
+ *
+ * Read-only, and the only rework verb there is. Nothing here runs a repair or spends anything: it
+ * derives the rounds from what already happened and reports what the declared policy would do next.
+ * A verb that could *start* a round would be the half that spends money, and it is deliberately not
+ * this release.
+ */
+async function runRework(argv: readonly string[], environment: CliEnvironment): Promise<ExitCode> {
+  const [subcommand, ...rest] = argv;
+  if (subcommand !== undefined && subcommand !== "status") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      `"rework ${subcommand}" is not a command. Use status.`,
+      { category: "validation", details: { subcommand } },
+    );
+  }
+
+  const { options } = parseCommon(subcommand === "status" ? rest : argv, environment);
+  const services = servicesFor(options, environment);
+  const result = await services.reworkStatus(requireRunId(options, "rework status"));
+  return emit(result, options, environment, renderRework);
 }
 
 /**

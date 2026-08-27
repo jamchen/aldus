@@ -83,6 +83,8 @@ export {
 export {
   deriveReworkRounds,
   type AttemptWithMetadata,
+  type RefusedRound,
+  type ReworkRoundReading,
   type ReworkRoundSource,
 } from "./rework-rounds.js";
 
@@ -96,6 +98,8 @@ export {
 export { deriveRunState, goalStagesFor, type RunState, type RunStateSource } from "./runstate.js";
 
 export type {
+  ReworkLoopStatus,
+  ReworkStatusReport,
   ArchiveReport,
   ArtifactLineageReport,
   ArtifactReport,

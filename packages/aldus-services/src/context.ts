@@ -15,7 +15,7 @@
 
 import { join } from "node:path";
 
-import type { ActorKind, ActorRef, SpendReservation } from "@aldus-runtime/core";
+import type { ActorKind, ActorRef, ReworkPolicy, SpendReservation } from "@aldus-runtime/core";
 import {
   ArtifactRegistry,
   stageArtifactRecorder,
@@ -113,6 +113,19 @@ export interface AldusContextOptions {
    * #67 and the reason this field exists at all.
    */
   workers?: WorkerRegistry;
+  /**
+   * Declared bounded-rework policies (#220, ADR-0055, ADR-0056).
+   *
+   * Supplied by the composition root like `gates` and `stages`, and for the same reason: a policy
+   * names an adopter's finding classes, repair stage and bound, none of which Core may invent
+   * (§4.2). Absent means no stage has a policy, and every blocking finding is a person's decision —
+   * which is what `decideRework` answers with `no_policy`.
+   *
+   * Declaring one has no effect on execution. Nothing in the runner consults these; they are read
+   * to explain what a loop would do, which is criterion 7 and is deliberately the half that ships
+   * before the half that spends money.
+   */
+  reworkPolicies?: readonly ReworkPolicy[];
   /** Current digests of what gates bind. Defaults to supplying none. */
   subjects?: SubjectsProvider;
   /** Clock, injectable so tests produce reproducible timestamps. */
@@ -177,6 +190,8 @@ export class AldusContext {
   readonly gateRegistry: GateRegistry;
   readonly stageRegistry: StageRegistry;
   readonly gates: GateEngine;
+  /** @see AldusContextOptions.reworkPolicies */
+  readonly reworkPolicies: readonly ReworkPolicy[];
   readonly #gateDecisions: RunStoreGateDecisionStore;
   readonly actor: ActorRef | undefined;
   readonly backend: AgentBackend | undefined;
@@ -205,6 +220,7 @@ export class AldusContext {
   constructor(options: AldusContextOptions) {
     this.workspace = options.workspace;
     this.gateRegistry = options.gates ?? GateRegistry.from([]);
+    this.reworkPolicies = options.reworkPolicies ?? [];
     this.stageRegistry = options.stages ?? new StageRegistry();
     // A graph that cannot be satisfied is refused where it is supplied, not where a Run wedges.
     // Checked here rather than in the CLI's config validation so every consumer benefits, not

@@ -29,6 +29,7 @@ import type {
   ReleaseExecutionReport,
   ReleaseReconciliationReport,
   ReleaseReport,
+  ReworkStatusReport,
   RunReport,
   ScriptReport,
   StageRunReport,
@@ -708,4 +709,95 @@ export function renderCancelRun(report: RunReport): string {
   lines.push("", "Start a new Run to continue this Episode:");
   lines.push("  aldus start --workflow <workflow-id> --workflow-version <version>");
   return lines.join("\n");
+}
+
+/**
+ * Render `rework status` (#220, criterion 7 open).
+ *
+ * **Every line says which kind of statement it is.** Nothing executes a declared policy yet, so
+ * completed repairs are labelled `recorded` and the decision is labelled `would decide` — a
+ * preview, not something the runtime did. An operator reading an unlabelled "stopped" would take it
+ * as runtime-controlled execution that has not happened.
+ *
+ * The stop reason prints its sentence, not only its enumerated name: "bounds_exhausted" says what
+ * state it is in, and the two most useful reasons argue against the obvious next move.
+ */
+export function renderRework(report: ReworkStatusReport): string {
+  if (report.loops.length === 0) {
+    return `No rework policy is declared for run ${report.runId}.`;
+  }
+
+  const lines: string[] = [
+    `Run ${report.runId}`,
+    "",
+    "Nothing executes a rework policy yet. Repairs below are recorded executions the policy's",
+    "joins match; the decision is what the policy would answer, not one anything took.",
+    "",
+  ];
+
+  for (const loop of report.loops) {
+    lines.push(`${loop.policyId}  (${loop.stageId})`);
+    lines.push(`  recorded rounds  ${loop.recordedRounds.length}`);
+    for (const round of loop.recordedRounds) {
+      const counted =
+        round.inputFindingCount === undefined
+          ? "  (not measured)"
+          : `  ${round.inputFindingCount} finding(s)`;
+      lines.push(
+        `    ${round.roundIndex}. ${round.inputDigest.slice(0, 8)} → ` +
+          `${round.outputDigest.slice(0, 8)}${counted}  ${round.repairAttemptId}`,
+      );
+    }
+
+    // Surfaced, never dropped. A repair missing from the list above reads as one that never ran,
+    // and a reader comparing that against a bound concludes there is room left.
+    if (loop.refusedRepairs.length > 0) {
+      lines.push(
+        `  not joined       ${loop.refusedRepairs.length} repair(s) the record cannot place`,
+      );
+      for (const refused of loop.refusedRepairs) {
+        lines.push(`    ${refused.repairAttemptId}  ${refused.reason}: ${refused.explanation}`);
+      }
+    }
+
+    if (loop.wouldDecide === undefined) {
+      // Not "converged", and not a decision. A loop that has not started and one that finished
+      // clean leave the same empty round list, and only one of them is a pass.
+      lines.push(`  no preview       ${loop.previewUnavailable ?? "nothing to decide about"}`);
+      lines.push("");
+      continue;
+    }
+
+    switch (loop.wouldDecide.kind) {
+      case "converged":
+        lines.push("  would decide     converged — nothing blocking and nothing the policy covers");
+        break;
+      case "rework":
+        lines.push(
+          `  would decide     round ${loop.wouldDecide.round}: run ${loop.wouldDecide.repairStageId} ` +
+            `on ${loop.wouldDecide.consumeFindingClasses.join(", ")}`,
+        );
+        break;
+      case "escalate":
+        lines.push(
+          `  would decide     stop (${loop.wouldDecide.reason}) — decide ${loop.wouldDecide.gateId}`,
+        );
+        lines.push(`                   ${loop.wouldDecide.explanation}`);
+        // Every candidate, because the loop carries the newest forward and the newest is not the
+        // best after a regression. Reported, never ranked (ADR-0056).
+        if (loop.wouldDecide.candidates.length > 1) {
+          lines.push("  candidates       (not ranked — fewer findings is not better, it is fewer)");
+          for (const candidate of loop.wouldDecide.candidates) {
+            const counted =
+              candidate.findingCount === undefined
+                ? "  (not measured)"
+                : `  ${candidate.findingCount} finding(s)`;
+            lines.push(`                   ${candidate.digest.slice(0, 8)}${counted}`);
+          }
+        }
+        break;
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
 }

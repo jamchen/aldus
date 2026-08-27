@@ -22,6 +22,28 @@ import {
   validate,
 } from "@aldus-runtime/core";
 import { isArchived, type ArtifactRecord } from "@aldus-runtime/artifact-registry";
+import { decideRework, type ReworkVerdict } from "./rework.js";
+import { deriveReworkRounds, onlyOfKind, type AttemptWithMetadata } from "./rework-rounds.js";
+
+/**
+ * The newest completed evaluation attempt that judged a candidate, and which candidate.
+ *
+ * Its **input**, because an evaluator judges its input and emits a report as its output — so
+ * `outputArtifacts.at(-1)` names the report. Exactly one candidate or the attempt is skipped:
+ * several is as unestablished as none.
+ */
+function latestJudged(
+  attempts: readonly AttemptWithMetadata[],
+  kind: string,
+): { entry: AttemptWithMetadata; digest: string } | undefined {
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    const entry = attempts[index];
+    if (entry === undefined || entry.attempt.status !== "succeeded") continue;
+    const candidate = onlyOfKind(entry.attempt.inputArtifacts, kind);
+    if (candidate !== undefined) return { entry, digest: candidate.sha256 };
+  }
+  return undefined;
+}
 import { initWorkspace } from "@aldus-runtime/file-store";
 import type { GateStatus } from "@aldus-runtime/gate-engine";
 import { operationsOf, type ReleaseBundle, type ReleaseOutcome } from "@aldus-runtime/release";
@@ -72,6 +94,8 @@ import type {
   StageReport,
   StageRunReport,
   StartRunReport,
+  ReworkLoopStatus,
+  ReworkStatusReport,
   StatusReport,
   SynthesisReport,
   TakeDecisionReport,
@@ -1296,6 +1320,117 @@ export class AldusServices {
         details: { runId, ...(error.details ?? {}) },
       });
     }
+  }
+
+  /**
+   * What the record shows about each declared rework policy, and what the policy would decide.
+   *
+   * Read-only. Nothing here runs a repair, spends anything, or writes a record.
+   *
+   * **The two halves are kept apart because they are different kinds of statement.**
+   * `recordedRounds` is observed fact — repairs that happened, joined to the evaluations that
+   * judged what they consumed. `wouldDecide` is a preview: no controller executes a declared policy
+   * yet, so it is what {@link decideRework} *would* answer, not a decision anything took. Reporting
+   * the second as the first would present a counterfactual as operational status.
+   *
+   * A policy with no completed evaluation of its candidate gets **no preview and a reason**, never
+   * a decision. "The loop has not started" and "the loop converged" leave the same empty round
+   * list, and only one of them is a pass.
+   */
+  async reworkStatus(runId: string): Promise<ServiceResult<ReworkStatusReport>> {
+    await this.#requireRun(runId);
+    const runner = this.#context.runnerFor(this.#actorOrSystem());
+    const state = await runner.stageState(runId);
+
+    const attemptsOf = (stageId: string): AttemptWithMetadata[] => {
+      const stored = state.stages.find((entry) => entry.execution.stageId === stageId);
+      if (stored === undefined) return [];
+      return stored.execution.attempts.map((attempt) => {
+        const metadata = stored.metadata[attempt.attemptId];
+        return {
+          attempt,
+          ...(metadata?.observations === undefined
+            ? {}
+            : {
+                observedFindingClasses: metadata.observations.map(
+                  (observation) => observation.findingClass,
+                ),
+              }),
+          ...(metadata?.blockingFindingClasses === undefined
+            ? {}
+            : { blockingFindingClasses: metadata.blockingFindingClasses }),
+          ...(metadata?.evaluationEvidence === undefined
+            ? {}
+            : {
+                enumeratedFindings: metadata.evaluationEvidence.enumeratedFindings,
+                defectCountMeasurable: metadata.evaluationEvidence.defectCountMeasurable,
+              }),
+        };
+      });
+    };
+
+    const loops: ReworkLoopStatus[] = this.#context.reworkPolicies.map((policy) => {
+      const evaluationAttempts = attemptsOf(policy.stageId);
+      const reading = deriveReworkRounds({
+        runId,
+        policy,
+        evaluationAttempts,
+        repairAttempts: attemptsOf(policy.repairStageId),
+      });
+      const base = {
+        policyId: policy.policyId,
+        stageId: policy.stageId,
+        recordedRounds: reading.rounds,
+        refusedRepairs: reading.refused,
+      };
+
+      // The subject is the candidate the newest **completed** evaluation judged — its input, not
+      // its output, because an evaluator emits a report. A running or failed attempt has judged
+      // nothing, and reading one as the latest verdict is the shape `not_evaluated` exists to
+      // keep out.
+      const judged = latestJudged(evaluationAttempts, policy.candidateArtifactKind);
+      if (judged === undefined) {
+        return {
+          ...base,
+          previewUnavailable:
+            `no completed attempt of "${policy.stageId}" has judged a ` +
+            `"${policy.candidateArtifactKind}" artifact, so there is nothing to decide about`,
+        };
+      }
+
+      // An evaluation that ran and recorded no observations is not an empty evaluation. It is the
+      // shape the first adopter hit — the stage did the work and skipped its output contract — and
+      // a decision rendered on it would read as clean.
+      const verdict: ReworkVerdict =
+        judged.entry.observedFindingClasses === undefined
+          ? {
+              kind: "not_evaluated",
+              artifactDigest: judged.digest,
+              reason: `attempt ${judged.entry.attempt.attemptId} of "${policy.stageId}" recorded no observations`,
+            }
+          : {
+              kind: "evaluated",
+              artifactDigest: judged.digest,
+              blockingFindingClasses: judged.entry.blockingFindingClasses ?? [],
+              observedFindingClasses: judged.entry.observedFindingClasses,
+              ...(judged.entry.defectCountMeasurable === true &&
+              judged.entry.enumeratedFindings !== undefined
+                ? { findingCount: judged.entry.enumeratedFindings }
+                : {}),
+            };
+
+      return {
+        ...base,
+        wouldDecide: decideRework({
+          policy,
+          rounds: reading.rounds,
+          verdict,
+          fallbackGateId: policy.escalateToGateId,
+        }),
+      };
+    });
+
+    return ok({ runId, loops });
   }
 
   /** The actor to attribute reads to, when none was configured. */
