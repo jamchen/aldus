@@ -488,6 +488,40 @@ evaluation is never read as having judged anything.
 
 <!-- No machine marker: check-breaking-notes reports no surface finding. New exports only. -->
 
+## 0.2.0-next.49 — 2026-08-27
+
+### Added
+
+**`aldus rework status`** and `AldusServices.reworkStatus` — the loop explains where it is
+(#220 criterion 7).
+
+Criterion 7 asks that output explain the current round, why another is allowed, and why the loop
+stopped. The first adopter reconstructed exactly that by hand from eight stage executions, a bash
+loop and a grep, **and the reconstruction is what went wrong**.
+
+Read-only, and deliberately the half that ships before the half that acts: nothing here runs a
+repair, spends anything, or writes a record. It derives the rounds from what already happened and
+asks `decideRework` what follows.
+
+`AldusContextOptions.reworkPolicies` supplies declared policies from the composition root, like
+`gates` and `stages` and for the same reason — a policy names an adopter's finding classes, repair
+stage and bound, none of which Core may invent (§4.2). **Declaring one still has no effect on
+execution.**
+
+Three things the output is careful about, each pinned by a test:
+
+- a loop whose evaluating stage has **never run** reports _"nothing to decide"_, never _"converged"_
+  — the two produce the same empty round list and only one of them is a pass;
+- an escalation prints the decision's **sentence**, not only its enumerated name. _"bounds_exhausted"_
+  says what state it is in; _"the last repair increased findings from 4 to 7"_ is the fact that makes
+  raising the bound the wrong move;
+- candidates are listed in **record order and labelled unranked**, because the loop carries the
+  newest forward and the newest is not the best after a regression. An unmeasured candidate reads
+  _"not measured"_, never `0`.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. New exports and one
+     optional context option. -->
+
 ## Unreleased
 
 Nothing yet.

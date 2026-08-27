@@ -1,6 +1,6 @@
 {
   "name": "@aldus-runtime/e2e",
-  "version": "0.2.0-next.48",
+  "version": "0.2.0-next.49",
   "private": true,
   "type": "module",
   "description": "Aldus end-to-end composed-stack tests. A test harness, never published.",
@@ -27,17 +27,17 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/artifact-registry": "0.2.0-next.48",
-    "@aldus-runtime/core": "0.2.0-next.48",
-    "@aldus-runtime/file-store": "0.2.0-next.48",
-    "@aldus-runtime/gate-engine": "0.2.0-next.48",
-    "@aldus-runtime/release": "0.2.0-next.48",
-    "@aldus-runtime/services": "0.2.0-next.48",
-    "@aldus-runtime/stage-runner": "0.2.0-next.48",
-    "@aldus-runtime/tts-ledger": "0.2.0-next.48"
+    "@aldus-runtime/artifact-registry": "0.2.0-next.49",
+    "@aldus-runtime/core": "0.2.0-next.49",
+    "@aldus-runtime/file-store": "0.2.0-next.49",
+    "@aldus-runtime/gate-engine": "0.2.0-next.49",
+    "@aldus-runtime/release": "0.2.0-next.49",
+    "@aldus-runtime/services": "0.2.0-next.49",
+    "@aldus-runtime/stage-runner": "0.2.0-next.49",
+    "@aldus-runtime/tts-ledger": "0.2.0-next.49"
   },
   "devDependencies": {
-    "@aldus-runtime/testkit": "0.2.0-next.48",
+    "@aldus-runtime/testkit": "0.2.0-next.49",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

@@ -29,6 +29,7 @@ import type {
   ReleaseExecutionReport,
   ReleaseReconciliationReport,
   ReleaseReport,
+  ReworkStatusReport,
   RunReport,
   ScriptReport,
   StageRunReport,
@@ -708,4 +709,73 @@ export function renderCancelRun(report: RunReport): string {
   lines.push("", "Start a new Run to continue this Episode:");
   lines.push("  aldus start --workflow <workflow-id> --workflow-version <version>");
   return lines.join("\n");
+}
+
+/**
+ * Render `rework status` (#220 criterion 7).
+ *
+ * Three questions an operator had to reconstruct from eight stage executions: which round the loop
+ * is on, why another is allowed, and why it stopped. The stop reason is printed as the sentence the
+ * decision carries rather than the enumerated name, because "bounds_exhausted" tells a reader what
+ * state it is in and not what to do about it — and the two most useful reasons argue *against* the
+ * obvious next move.
+ */
+export function renderRework(report: ReworkStatusReport): string {
+  if (report.loops.length === 0) {
+    return `No rework policy is declared for run ${report.runId}.`;
+  }
+
+  const lines: string[] = [`Run ${report.runId}`, ""];
+  for (const loop of report.loops) {
+    lines.push(`${loop.policyId}  (${loop.stageId})`);
+    lines.push(`  rounds spent  ${loop.spent}`);
+    for (const round of loop.rounds) {
+      // Digests truncated for reading, and both ends shown: an operator comparing a round against
+      // an artifact needs enough to match, not the whole hash.
+      const counted =
+        round.inputFindingCount === undefined ? "" : `  ${round.inputFindingCount} finding(s)`;
+      lines.push(
+        `    ${round.roundIndex}. ${round.inputDigest.slice(0, 8)} → ${round.outputDigest.slice(0, 8)}` +
+          `${counted}  ${round.repairAttemptId}`,
+      );
+    }
+
+    if (loop.decision === undefined) {
+      // Not "converged". A loop that has not started and one that finished clean have the same
+      // empty round list, and saying nothing is the honest reading of the first.
+      lines.push("  next          the evaluating stage has not run, so there is nothing to decide");
+      lines.push("");
+      continue;
+    }
+
+    switch (loop.decision.kind) {
+      case "converged":
+        lines.push("  next          converged — nothing blocking and nothing the policy covers");
+        break;
+      case "rework":
+        lines.push(
+          `  next          round ${loop.decision.round}: run ${loop.decision.repairStageId} on ` +
+            `${loop.decision.consumeFindingClasses.join(", ")}`,
+        );
+        break;
+      case "escalate":
+        lines.push(`  stopped       ${loop.decision.reason} — decide ${loop.decision.gateId}`);
+        lines.push(`                ${loop.decision.explanation}`);
+        // Every candidate, because the loop carries the newest forward and the newest is not the
+        // best after a regression. Reported, never ranked (ADR-0056).
+        if (loop.decision.candidates.length > 1) {
+          lines.push("  candidates    (not ranked — fewer findings is not better, it is fewer)");
+          for (const candidate of loop.decision.candidates) {
+            const counted =
+              candidate.findingCount === undefined
+                ? "  (not measured)"
+                : `  ${candidate.findingCount} finding(s)`;
+            lines.push(`                ${candidate.digest.slice(0, 8)}${counted}`);
+          }
+        }
+        break;
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
 }
