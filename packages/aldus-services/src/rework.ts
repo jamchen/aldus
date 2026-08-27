@@ -146,6 +146,31 @@ export interface ReworkInput {
   rounds: readonly ReworkRound[];
   verdict: ReworkVerdict;
   /**
+   * Artifact digests the escalation gate has approved continuing from.
+   *
+   * **A gate that lets a person overrule a stop cannot overrule one of five causes and not the
+   * rest.** Named by the first adopter, who raised their bound after an escalation and found the
+   * loop still stopped — on a fact about the history, while the person was answering a question
+   * about the next round. A gate that appears to release the loop and does not is worse than one
+   * that never offered.
+   *
+   * So an approval clears whichever of the *continuable* stops fired: the bound being spent, a
+   * regression, an oscillation. The person at that gate was shown the reason and the candidates,
+   * and deciding anyway is what the gate is for.
+   *
+   * It does not clear `no_evaluation`, `unknown_finding_class` or `no_policy`, and the line is
+   * **meaningful versus impossible rather than mild versus severe**: an approval can authorise more
+   * work, and cannot supply an evaluation that was never recorded, a repair instruction for a class
+   * nobody covered, or a policy that does not exist.
+   *
+   * **Digests rather than a count**, and that is the load-bearing part. A count of approvals cannot
+   * say *which* stop was approved: one approval would suppress a regression three rounds later that
+   * nobody had seen. §13 already binds a decision to its subjects, so an approval of the artifact
+   * the loop stopped on authorises continuing **from that artifact** — and it stops applying the
+   * moment the loop produces a different one, without any arithmetic to get wrong.
+   */
+  approvedContinuationDigests?: readonly string[];
+  /**
    * Where an escalation lands when there is no policy to name a gate.
    *
    * Required by the caller rather than defaulted here, because a gate id Core invented would be
@@ -254,6 +279,11 @@ export function decideRework(input: ReworkInput): ReworkDecision {
     };
   }
 
+  // Whether a person has approved continuing from **this** artifact. The three continuable stops
+  // all defer to it, because a gate that clears one of them and not the others appears to release
+  // the loop and does not.
+  const approvedHere = input.approvedContinuationDigests?.includes(digest) === true;
+
   // Getting worse. Checked before oscillation and before the bound, because a loop that is
   // measurably degrading should not spend another authorised round or another paid repair proving
   // it — and unlike oscillation this needs no digest to repeat, so it fires on the first bad round.
@@ -265,7 +295,13 @@ export function decideRework(input: ReworkInput): ReworkDecision {
   const previous = rounds.at(-1);
   const before = previous?.inputFindingCount;
   const now = verdict.findingCount;
-  if (previous !== undefined && before !== undefined && now !== undefined && now > before) {
+  if (
+    !approvedHere &&
+    previous !== undefined &&
+    before !== undefined &&
+    now !== undefined &&
+    now > before
+  ) {
     return {
       kind: "escalate",
       gateId: policy.escalateToGateId,
@@ -289,7 +325,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
   // flow: the artifact a round produced is exactly what the next evaluation judges, so every
   // healthy second round looked like a cycle. Two tests caught it — the round-numbering case and
   // the bound-exhaustion case — before the one it was written for ever ran.
-  if (rounds.some((round) => round.inputDigest === digest)) {
+  if (!approvedHere && rounds.some((round) => round.inputDigest === digest)) {
     return {
       kind: "escalate",
       gateId: policy.escalateToGateId,
@@ -302,7 +338,7 @@ export function decideRework(input: ReworkInput): ReworkDecision {
     };
   }
 
-  if (rounds.length >= policy.maxRounds) {
+  if (!approvedHere && rounds.length >= policy.maxRounds) {
     return {
       kind: "escalate",
       gateId: policy.escalateToGateId,

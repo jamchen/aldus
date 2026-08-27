@@ -584,3 +584,117 @@ describe("an escalation hands over every candidate it produced (#220)", () => {
     expect(decision.candidates).toEqual([{ digest: "a".repeat(64) }]);
   });
 });
+
+describe("an approval at the gate clears the stop it answers (#220)", () => {
+  // Named by the first adopter: "a gate that lets a person overrule a stop cannot overrule one of
+  // five causes and not the rest." They raised their bound after an escalation and the loop still
+  // stopped — on a fact about the history, while the person was answering a question about the next
+  // round. A gate that appears to release the loop and does not is worse than one that never
+  // offered.
+  const stuck = (over: Partial<Parameters<typeof decideRework>[0]> = {}) => ({
+    policy: policy({ maxRounds: 1 }),
+    rounds: [{ ...round(1, "a".repeat(64), "b".repeat(64)), inputFindingCount: 4 }],
+    verdict: verdict({
+      artifactDigest: "b".repeat(64),
+      blockingFindingClasses: [],
+      observedFindingClasses: ["comprehension"],
+      findingCount: 7,
+    }),
+    fallbackGateId: FALLBACK,
+    ...over,
+  });
+
+  it("clears a regression", () => {
+    const first = decideRework(stuck());
+    expect(first.kind === "escalate" ? first.reason : "").toBe("regression");
+    expect(decideRework(stuck({ approvedContinuationDigests: ["b".repeat(64)] })).kind).toBe(
+      "rework",
+    );
+  });
+
+  it("clears an exhausted bound", () => {
+    const base = stuck({
+      verdict: verdict({
+        artifactDigest: "b".repeat(64),
+        blockingFindingClasses: [],
+        observedFindingClasses: ["comprehension"],
+      }),
+    });
+    const before = decideRework(base);
+    expect(before.kind === "escalate" ? before.reason : "").toBe("bounds_exhausted");
+    expect(decideRework({ ...base, approvedContinuationDigests: ["b".repeat(64)] }).kind).toBe(
+      "rework",
+    );
+  });
+
+  it("clears an oscillation", () => {
+    const base = {
+      policy: policy({ maxRounds: 9 }),
+      rounds: [round(1, "a".repeat(64), "b".repeat(64)), round(2, "b".repeat(64), "a".repeat(64))],
+      verdict: verdict({ artifactDigest: "a".repeat(64) }),
+      fallbackGateId: FALLBACK,
+    };
+    const before = decideRework(base);
+    expect(before.kind === "escalate" ? before.reason : "").toBe("oscillation");
+    expect(decideRework({ ...base, approvedContinuationDigests: ["a".repeat(64)] }).kind).toBe(
+      "rework",
+    );
+  });
+
+  it("applies only to the artifact it was given for", () => {
+    // The reason this takes digests rather than a count. An approval is a decision about what the
+    // person was shown; a count would suppress a stop three rounds later that nobody had seen, and
+    // §13 already binds a decision to its subjects.
+    const other = decideRework(stuck({ approvedContinuationDigests: ["c".repeat(64)] }));
+    expect(other.kind === "escalate" ? other.reason : "").toBe("regression");
+  });
+
+  it("does not clear a missing evaluation, which no approval can supply", () => {
+    // The line is meaningful versus impossible, not mild versus severe. An approval authorises more
+    // work; it cannot supply an evaluation that was never recorded.
+    const decision = decideRework({
+      policy: policy(),
+      rounds: [],
+      approvedContinuationDigests: ["a".repeat(64)],
+      verdict: { kind: "not_evaluated", artifactDigest: "a".repeat(64), reason: "no block" },
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("no_evaluation");
+  });
+
+  it("does not clear a finding class the policy never covered", () => {
+    // A repair has no instruction for it. Clearing this would hand the loop an authorisation it
+    // cannot act on.
+    const decision = decideRework({
+      policy: policy({ coversFindingClasses: ["comprehension"] }),
+      rounds: [],
+      approvedContinuationDigests: ["a".repeat(64)],
+      verdict: verdict({
+        blockingFindingClasses: ["legal"],
+        observedFindingClasses: ["legal"],
+      }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("unknown_finding_class");
+  });
+
+  it("does not turn a clean verdict into a round", () => {
+    // An approval buys a repair, not a repair of something that passed. Convergence is checked
+    // before any of this and must stay that way.
+    const decision = decideRework({
+      policy: policy(),
+      rounds: [],
+      approvedContinuationDigests: ["a".repeat(64)],
+      verdict: verdict({ blockingFindingClasses: [], observedFindingClasses: [] }),
+      fallbackGateId: FALLBACK,
+    });
+
+    expect(decision.kind).toBe("converged");
+  });
+});

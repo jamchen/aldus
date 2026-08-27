@@ -654,6 +654,40 @@ accepts everything.
 
 <!-- No machine marker: check-breaking-notes reports no surface finding. CLI dispatch only. -->
 
+## 0.2.0-next.51 — 2026-08-27
+
+### Added
+
+**An approval at the escalation gate clears the stop it answers** —
+`ReworkInput.approvedContinuationDigests` (#220, ADR-0055).
+
+Named by the first adopter: _"a gate that lets a person overrule a stop cannot overrule one of five
+causes and not the rest."_ They raised their bound after an escalation and the loop **still**
+stopped — on a fact about the history, while the person was answering a question about the next
+round. A gate that appears to release the loop and does not is worse than one that never offered.
+
+An approval now clears whichever _continuable_ stop fired: `bounds_exhausted`, `regression`,
+`oscillation`. The person at that gate was shown the reason and the candidates, and deciding anyway
+is what the gate is for.
+
+It does **not** clear `no_evaluation`, `unknown_finding_class` or `no_policy`. The line is
+**meaningful versus impossible, not mild versus severe**: an approval can authorise more work, and
+cannot supply an evaluation that was never recorded, a repair instruction for a class nobody
+covered, or a policy that does not exist. Clearing those would hand the loop an authorisation it
+cannot act on.
+
+**Digests rather than a count, and that is the load-bearing part.** A count cannot say _which_ stop
+was approved — one approval would suppress a regression three rounds later that nobody had seen.
+§13 already binds a decision to its subjects, so an approval of the artifact the loop stopped on
+authorises continuing **from that artifact**, and stops applying the moment the loop produces a
+different one. No arithmetic to get wrong.
+
+Convergence is still checked first: an approval buys a repair, never a repair of something that
+passed.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding. One optional field on
+     `ReworkInput`, which consumers construct rather than receive. -->
+
 ## Unreleased
 
 Nothing yet.
