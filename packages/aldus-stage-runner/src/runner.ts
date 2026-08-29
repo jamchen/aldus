@@ -21,11 +21,14 @@
 
 import {
   assertValid,
+  MAX_ERROR_CODE_LENGTH,
   newEventId as defaultNewEventId,
   newStageAttemptId as defaultNewAttemptId,
   toStructuredError,
   redact,
   SCHEMA_VERSION,
+  truncateErrorMessage,
+  truncateErrorMessages,
   type ActorRef,
   type AldusEvent,
   type ArtifactRef,
@@ -1538,7 +1541,13 @@ export class StageRunner {
       ...(settle.error !== undefined ? { error: settle.error } : {}),
     };
 
-    await this.#record(manifest, definition, final, metadata, {
+    // **The caller is told what was written down, not what was attempted** (#254). When the full
+    // record is refused and a reduced one takes its place, the error the durable record carries
+    // is the reduced one — so returning `settle.error` here would hand `run`'s caller, and every
+    // consumer above it, an error the Run record does not contain and which is in general not
+    // even `structuredErrorSchema`-valid (the LONG_CODE case is exactly that). `#record` reports
+    // the error it persisted; where nothing was reduced it is `settle.error` unchanged.
+    const recorded = await this.#record(manifest, definition, final, metadata, {
       action: actionFor(settle.status),
       previousState: "running",
       invocationKey: settle.invocationKey,
@@ -1552,7 +1561,7 @@ export class StageRunner {
       outputArtifacts: [...final.outputArtifacts],
       ...(settle.output !== undefined ? { output: settle.output } : {}),
       ...(settle.gateId !== undefined ? { gateId: settle.gateId } : {}),
-      ...(settle.error !== undefined ? { error: settle.error } : {}),
+      ...(recorded !== undefined ? { error: recorded } : {}),
     };
   }
 
@@ -1563,6 +1572,11 @@ export class StageRunner {
    * be lost. A crash between the two leaves the log complete and the cache one event behind, which
    * `reconcileStageState` repairs. The opposite order would leave a state change with no audit
    * record, which nothing could repair because nothing would know it happened.
+   *
+   * Returns the error the durable record actually carries — `options.error` unchanged on the
+   * ordinary path, and the reduced one when the full record was refused and a degraded record
+   * took its place. `#terminal` returns that to the caller, so what a consumer branches on and
+   * what the event log holds are the same value rather than two that diverge silently.
    */
   async #record(
     manifest: RunManifest,
@@ -1575,7 +1589,7 @@ export class StageRunner {
       invocationKey: string;
       error?: StructuredError;
     },
-  ): Promise<void> {
+  ): Promise<StructuredError | undefined> {
     const runId = manifest.runId;
     const details: StageLifecycleDetails = {
       attempt,
@@ -1603,16 +1617,90 @@ export class StageRunner {
       details: details as unknown as Record<string, unknown>,
     };
 
-    // A resource of its own, not the Run lock. `FileEventStore.append` takes the Run lock itself
-    // (ADR-0005 assigns the sequence under it), and a file lock is not re-entrant — nesting the
-    // same resource deadlocks until the acquisition deadline. This lock serialises cache writers
-    // among themselves while `append` keeps serialising the log.
+    try {
+      await this.#write(runId, event);
+      return options.error;
+    } catch (thrown) {
+      // **A failure to report a failure must not discard the failure** (#254). The event carries
+      // detail the stage produced — a message, a code, a `details` bag — and the runner did not
+      // size any of it. When that detail is what the schema rejects, the write that reports the
+      // outcome is the one that fails, and the attempt is left reading `running`: from the Run
+      // record alone, indistinguishable from a stage still working, with its cost already
+      // written down.
+      //
+      // Only for a terminal state, and only for a validation refusal. A lock timeout or a full
+      // disk is not repaired by writing less, and a `running` event that will not validate has no
+      // outcome worth preserving — both of those propagate unchanged.
+      const degraded = this.#degrade(event, attempt, details, thrown);
+      if (degraded === undefined) throw thrown;
+      try {
+        await this.#write(runId, degraded);
+      } catch {
+        // The reduced record failed too, so nothing here is recoverable. The original refusal is
+        // the one that explains why, and swallowing it for this one would report the symptom.
+        throw thrown;
+      }
+      return degraded.error;
+    }
+  }
+
+  /**
+   * Append the event, then update the cache — in that order, under the stage-state lock.
+   *
+   * A resource of its own, not the Run lock. `FileEventStore.append` takes the Run lock itself
+   * (ADR-0005 assigns the sequence under it), and a file lock is not re-entrant — nesting the
+   * same resource deadlocks until the acquisition deadline. This lock serialises cache writers
+   * among themselves while `append` keeps serialising the log.
+   */
+  async #write(runId: string, event: AldusEvent): Promise<void> {
     await this.#options.locks.withLock(stageStateLockResource(runId), async () => {
       const stored = await this.#options.events.append(runId, event);
       const path = this.#options.stageStatePath(runId);
       const current = await readStageState(path).catch(() => emptyStageState());
       await writeStageState(path, applyLifecycleEvent(current, stored));
     });
+  }
+
+  /**
+   * The reduced event to write when the full one will not validate, or `undefined` to give up.
+   *
+   * Reduces exactly what the runner did not size: the attempt's `error` becomes a minimal one
+   * saying that the record was reduced and how many paths the refusal named. Everything else — the attempt's identity, its terminal status, its
+   * actor, its artifacts, its timestamps, its metadata — is carried over unchanged. Those were
+   * validated where they were produced, and dropping them to be safe would trade the defect this
+   * repairs for a loss of the execution record it is meant to preserve.
+   *
+   * The reduced error is written into the embedded attempt as well as onto the event. `details`
+   * is an unvalidated bag, so the oversized copy inside it would survive the append — and then
+   * fail `StageExecution` validation on the next read of the stage-state cache, moving the
+   * refusal one layer along instead of removing it.
+   */
+  #degrade(
+    event: AldusEvent,
+    attempt: StageAttempt,
+    details: StageLifecycleDetails,
+    thrown: unknown,
+  ): AldusEvent | undefined {
+    if (attempt.status !== "failed" && attempt.status !== "cancelled") return undefined;
+
+    // Duck-typed through `toStructuredError` rather than `instanceof`: the refusal is raised in
+    // another package, and a category is a value the contract defines (§19.1) where a class
+    // identity is a fact about module resolution.
+    const refusal = toStructuredError(thrown, {
+      code: StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED,
+      category: "internal",
+    });
+    if (refusal.category !== "validation") return undefined;
+
+    const error = degradedError(attempt, refusal);
+    const reduced: StageAttempt = { ...attempt, error };
+    const reducedDetails: StageLifecycleDetails = { ...details, attempt: reduced };
+
+    return {
+      ...event,
+      error,
+      details: reducedDetails as unknown as Record<string, unknown>,
+    };
   }
 
   #iso(): string {
@@ -1668,7 +1756,90 @@ function cancellationError(stageId: string, ordinal: number): StructuredError {
 
 /** Redact a structured error before it reaches a durable record (contract §19.2). */
 function redactError(error: StructuredError): StructuredError {
-  return redact(error) as unknown as StructuredError;
+  // Truncation comes after redaction, not before: a redaction substitutes a placeholder for a
+  // secret and can lengthen the message it rewrites, so a value truncated first could come back
+  // over the cap. Both are construction-time constraints on a durable record (§19.1, §19.2).
+  return truncateErrorMessages(redact(error) as unknown as StructuredError);
+}
+
+/**
+ * The minimal failure written in place of one the schema refused (#254).
+ *
+ * Says three things and no more: that the attempt failed, what it said before the refusal, and
+ * how many paths the refusal named. **Not which paths** — see `withheldPathCount` below.
+ */
+function degradedError(attempt: StageAttempt, refusal: StructuredError): StructuredError {
+  const original = attempt.error;
+  const withheld = validationIssuePaths(refusal).length;
+  const where =
+    withheld === 0 ? "" : ` ${withheld} rejected path${withheld === 1 ? "" : "s"} withheld.`;
+  return {
+    code: StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED,
+    category: original?.category ?? "internal",
+    message: truncateErrorMessage(
+      `Attempt ${attempt.attempt} of stage "${attempt.stageId}" ended as "${attempt.status}", ` +
+        "and its full record could not be written: " +
+        refusal.message +
+        where +
+        (original === undefined
+          ? ""
+          : ` The attempt reported code "${truncateCode(original.code)}": ${original.message}`),
+    ),
+    retryable: original?.retryable ?? false,
+    details: {
+      degraded: true,
+      ...(original !== undefined ? { originalCode: truncateCode(original.code) } : {}),
+      refusalCode: refusal.code,
+      ...(withheld > 0 ? { withheldPathCount: withheld } : {}),
+    },
+  };
+}
+
+/**
+ * How many failing paths a validation refusal reported, where it carries them in the documented
+ * shape.
+ *
+ * Only the count leaves this function, and the paths themselves are read solely to produce it
+ * (#255). The runner cannot establish where a path came from: `StageRunnerOptions.events` is any
+ * `EventStore` (`packages/aldus-file-store/src/ports.ts:115`), whose `append` promises to store
+ * an `AldusEvent` and promises nothing about the shape, the vocabulary, or the provenance of the
+ * error it rejects with. So a conforming store may reject with `details.issues[].path` taken from
+ * a key the *caller* supplied — a stage's `error.details` bag is caller-keyed and unvalidated —
+ * and any test that distinguishes a schema field from such a key by its shape can be defeated by
+ * naming the key after a field.
+ *
+ * An earlier version of this file did exactly that: it reasoned from Core's own schema topology
+ * that no reachable `z.record` could raise an issue, and kept a segment-shape guard behind that
+ * reasoning. Both halves are true of Core's `eventSchema` and neither is a fact about the port,
+ * so the argument proved nothing about the object actually validating here.
+ *
+ * The fail-safe reading is the only one the port supports: no rejected path is persisted or
+ * quoted, and the count is what tells a reader the list is absent because it was withheld rather
+ * than because the refusal was empty.
+ */
+function validationIssuePaths(refusal: StructuredError): string[] {
+  const issues = refusal.details?.["issues"];
+  if (!Array.isArray(issues)) return [];
+  return issues.flatMap((issue) =>
+    typeof issue === "object" &&
+    issue !== null &&
+    typeof (issue as { path?: unknown }).path === "string"
+      ? [(issue as { path: string }).path]
+      : [],
+  );
+}
+
+/**
+ * Fit a foreign code into the schema's own bound (§19.1).
+ *
+ * Only ever applied to a code being quoted *inside* a degraded record, never to one a consumer
+ * will branch on — a degraded record that reproduced the refusal it exists to survive would be
+ * worse than none.
+ */
+function truncateCode(code: string): string {
+  return code.length <= MAX_ERROR_CODE_LENGTH
+    ? code
+    : `${code.slice(0, MAX_ERROR_CODE_LENGTH - 1)}…`;
 }
 
 /** Gate a stage execution is parked on, if any. */

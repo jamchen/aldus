@@ -490,18 +490,38 @@ describe("a stage stuck in running says what it cannot see (#244)", () => {
   async function stuckRunning(artifacts: number): Promise<void> {
     // The stage never returns, so the attempt stays `running` — which is what a killed process
     // leaves behind and what no completed test can produce.
+    //
+    // Synchronised on the stage being entered, never on a timer. `#record` for `attempt.started`
+    // is awaited before `execute` is called and nothing between them touches the disk, so
+    // reaching this resolver proves the event **and** the `stages.json` write it wraps are both
+    // durable. A sleep proved neither, and the difference is not academic: `stageExecution`
+    // reconciles from the event log, which `#write` appends *before* the cache write it holds the
+    // same lock for. On a loaded runner the refusal below was therefore satisfied from the
+    // appended event while the cache rename was still in flight, `afterEach` removed the temp
+    // root under it, and the run this test deliberately abandons rejected with `ENOENT` after the
+    // test had passed. That is the #255 CI failure exactly: 194 assertions green, one unhandled
+    // rejection, suite red.
+    //
+    // The abandoned run is deliberately left unguarded by a `.catch`. Swallowing it would remove
+    // the only mechanism that reported this, and a write after cleanup is a real finding whether
+    // it comes from a test's synchronisation or from the runner.
+    let entered!: () => void;
+    const running = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     harness.registry.register(
       aStage({
         execute: async (context) => {
           for (let index = 0; index < artifacts; index += 1) {
             context.recordOutput(anArtifact({ artifactId: `artifact-${index}` }) as never);
           }
+          entered();
           return await new Promise<never>(() => {});
         },
       }),
     );
     void harness.runner.run(harness.manifest.runId, "stage-a", {});
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await running;
   }
 
   it("says an empty attempt is not evidence that nothing happened", async () => {

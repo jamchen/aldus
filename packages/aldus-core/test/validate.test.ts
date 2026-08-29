@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 import { SCHEMA_VERSION } from "../src/schema-version.js";
 import { z } from "zod";
 
-import { AldusError, CoreErrorCodes } from "../src/errors.js";
+import { AldusError, CoreErrorCodes, structuredErrorSchema } from "../src/errors.js";
+import { knowledgePackRefSchema } from "../src/schema/common.js";
 import {
   assertValid,
   assertValidRecord,
@@ -273,5 +274,90 @@ describe("validateWith", () => {
     if (failed.ok) return;
     expect(failed.error.code).toBe("ADOPTER_BAD_INPUT");
     expect(failed.error.message).toContain("Thing");
+  });
+});
+
+describe("the summary a refusal leads with (#254, #255)", () => {
+  it("says how many issues there were and not where they were", () => {
+    const result = validate("EpisodeRef", { ...episode, schemaVersion: "nope" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toBe("EpisodeRef failed schema validation (1 issue).");
+    expect(result.error.message).not.toContain("schemaVersion");
+  });
+
+  it("still says where in details.issues, which is the surface that carries paths", () => {
+    // The narrowing is to the summary line only. `ValidationIssue.path` is unchanged, so nothing
+    // a consumer reads for diagnosis was taken away — it was never the line a CLI prints.
+    const result = validate("EpisodeRef", { ...episode, schemaVersion: "nope" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.details?.["issues"]).toEqual([
+      expect.objectContaining({ path: "schemaVersion" }),
+    ]);
+  });
+
+  it("does not put a caller-supplied record key into the message, however field-like it reads", () => {
+    // The blocking finding on #255. A `z.record` reports the offending **key** as the path, and a
+    // key is caller-controlled: this one is shaped exactly like a field name, so no shape test
+    // discriminates it. It is deliberately **not** also present as a value, which is what makes
+    // it invisible to the §19.2 scrub — `collectInputStrings` walks `Object.values`, so a key is
+    // never harvested and `scrubMessage` cannot see it. Shape is not provenance.
+    const key = "AKIAABCDEFGHIJKLMNOP";
+    const result = validateWith(z.record(z.string(), z.number()), { [key]: "not a number" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).not.toContain(key);
+    expect(result.error.message).toBe("Value failed schema validation (1 issue).");
+  });
+
+  it("does not leak a caller-supplied key from a bounded-key record either", () => {
+    // `KnowledgePackRef.scope` is the live instance in Core's own schemas: a `z.record` whose key
+    // and value both carry bounds, so an over-long value raises an issue whose last path segment
+    // is the adopter's key. Reached through the record schema rather than a synthetic one, so the
+    // case expires if that field stops being a record.
+    const key = "AKIAABCDEFGHIJKLMNOP";
+    const result = validateWith(knowledgePackRefSchema, {
+      packId: "pack-a",
+      version: "1",
+      authority: "advisory",
+      scope: { [key]: "x".repeat(513) },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).not.toContain(key);
+    expect(result.error.details?.["issues"]).toEqual([
+      expect.objectContaining({ path: `scope.${key}` }),
+    ]);
+  });
+
+  it("obeys the same §19.2 scrub as the detail it summarises", () => {
+    // The subject is caller-supplied and reaches the summary, so the summary is scrubbed against
+    // harvested input values exactly as an issue message is.
+    const shared = "sk-live-9f3b2c8ad41e7605bb92aa17ce4408d2";
+    const result = validateWith(
+      z.object({ token: z.number() }),
+      { token: shared },
+      {
+        subject: shared,
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).not.toContain(shared);
+    expect(result.error.message).toContain("withheld");
+  });
+
+  it("keeps the summary itself inside the message cap", () => {
+    const result = validateWith(z.string(), 42, { subject: "s".repeat(8000) });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(structuredErrorSchema.safeParse(result.error).success).toBe(true);
   });
 });

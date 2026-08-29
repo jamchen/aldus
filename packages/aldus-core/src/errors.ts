@@ -48,6 +48,28 @@ export type ErrorCategory = (typeof ERROR_CATEGORIES)[number];
 export const MAX_ERROR_CAUSE_DEPTH = 4;
 
 /**
+ * Maximum length of a `message` that will be constructed or validated.
+ *
+ * The cap is the same constraint as {@link MAX_ERROR_CAUSE_DEPTH}: an unbounded string in a
+ * durable event log is a denial-of-service vector on everything that persists or renders it. Both
+ * are enforced at construction rather than by rejection, for the same reason — an error too long
+ * to store is still an error that happened, and refusing to record it discards the outcome of the
+ * operation that failed while keeping its cost (#254).
+ */
+export const MAX_ERROR_MESSAGE_LENGTH = 4000;
+
+/**
+ * Maximum length of a `code`.
+ *
+ * Unlike a message, a code is **not** truncated at construction: consumers branch on it (§19.1),
+ * and a shortened code is a different code that no branch matches. A producer that exceeds this
+ * has a defect in its code vocabulary, and the schema saying so is the right outcome. Exported so
+ * a caller building a record that must not be refused can fit a foreign code into the bound
+ * deliberately, rather than reproducing the number.
+ */
+export const MAX_ERROR_CODE_LENGTH = 200;
+
+/**
  * Structured error (contract §19.1).
  *
  * `message` and `details` MUST already be safe to persist and log. Producers pass untrusted
@@ -76,12 +98,16 @@ export interface StructuredError {
  *
  * Depth is not enforced by the schema — JSON Schema cannot express "at most N levels of
  * recursion" — so {@link truncateCauses} enforces it at construction time instead.
+ *
+ * The `message` cap is expressible here and is still enforced at construction as well, by
+ * {@link truncateErrorMessages}. Validation is the wrong place to discover an oversized message:
+ * the value being validated is the record of a failure, and rejecting it loses the failure (#254).
  */
 export const structuredErrorSchema: z.ZodType<StructuredError> = z
   .object({
-    code: z.string().min(1).max(200),
+    code: z.string().min(1).max(MAX_ERROR_CODE_LENGTH),
     category: z.enum(ERROR_CATEGORIES),
-    message: z.string().max(4000),
+    message: z.string().max(MAX_ERROR_MESSAGE_LENGTH),
     retryable: z.boolean(),
     details: z.record(z.string(), z.unknown()).optional(),
     get causes() {
@@ -95,7 +121,9 @@ export const structuredErrorSchema: z.ZodType<StructuredError> = z
     description:
       "A redacted, safe-to-persist failure record (architecture contract §19.1). `message` and " +
       "`details` are already redacted by the producer. Cause chains are bounded to " +
-      `${MAX_ERROR_CAUSE_DEPTH} levels at construction time, a constraint JSON Schema cannot express.`,
+      `${MAX_ERROR_CAUSE_DEPTH} levels at construction time, a constraint JSON Schema cannot ` +
+      `express, and a message longer than ${MAX_ERROR_MESSAGE_LENGTH} characters is truncated ` +
+      "with a marker at construction rather than rejected.",
   });
 
 /**
@@ -177,7 +205,9 @@ export class AldusError extends Error {
     this.category = options.category;
     this.retryable = options.retryable ?? DEFAULT_RETRYABLE[options.category];
     this.details = options.details;
-    this.causes = options.causes ? truncateCauses(options.causes) : undefined;
+    this.causes = options.causes
+      ? truncateCauses(options.causes).map(truncateErrorMessages)
+      : undefined;
     this.occurredAt = options.occurredAt;
   }
 
@@ -186,7 +216,7 @@ export class AldusError extends Error {
     const error: StructuredError = {
       code: this.code,
       category: this.category,
-      message: this.message,
+      message: truncateErrorMessage(this.message),
       retryable: this.retryable,
     };
     if (this.details !== undefined) error.details = this.details;
@@ -219,7 +249,7 @@ export function toStructuredError(
     return {
       code: fallback.code,
       category: fallback.category,
-      message: thrown.message,
+      message: truncateErrorMessage(thrown.message),
       retryable: DEFAULT_RETRYABLE[fallback.category],
       details: { errorName: thrown.name },
     };
@@ -227,8 +257,50 @@ export function toStructuredError(
   return {
     code: fallback.code,
     category: fallback.category,
-    message: typeof thrown === "string" ? thrown : "Non-error value was thrown.",
+    message:
+      typeof thrown === "string" ? truncateErrorMessage(thrown) : "Non-error value was thrown.",
     retryable: DEFAULT_RETRYABLE[fallback.category],
+  };
+}
+
+/**
+ * Trim a message to {@link MAX_ERROR_MESSAGE_LENGTH}, leaving a marker that says what was lost.
+ *
+ * The marker is part of the record rather than a courtesy: a silently shortened message reads as
+ * the whole message, and a reader diagnosing the failure would take a sentence cut mid-clause for
+ * everything the producer had to say. It names the original length so the reader knows the scale
+ * of what is missing without having to guess.
+ *
+ * Deterministic in its input, so two runs of the same failure produce the same record.
+ */
+export function truncateErrorMessage(message: string): string {
+  if (message.length <= MAX_ERROR_MESSAGE_LENGTH) return message;
+  const marker = ` … [truncated: message was ${message.length} characters]`;
+  const keep = Math.max(0, MAX_ERROR_MESSAGE_LENGTH - marker.length);
+  return message.slice(0, keep) + marker;
+}
+
+/**
+ * Apply {@link truncateErrorMessage} to an error and every message in its cause chain.
+ *
+ * Applied wherever a {@link StructuredError} is constructed from content the producer did not
+ * size — a thrown native `Error`, a provider's refusal — so the value reaching a durable record
+ * already satisfies the schema. Contract §19.2 makes this a construction-time concern: the record
+ * is durable, and the write that reports a failure must not be the one that fails.
+ */
+export function truncateErrorMessages(error: StructuredError): StructuredError {
+  const message = truncateErrorMessage(error.message);
+  const causes = error.causes?.map(truncateErrorMessages);
+  if (
+    message === error.message &&
+    (causes === undefined || causes.every((cause, index) => cause === error.causes?.[index]))
+  ) {
+    return error;
+  }
+  return {
+    ...error,
+    message,
+    ...(causes !== undefined ? { causes } : {}),
   };
 }
 

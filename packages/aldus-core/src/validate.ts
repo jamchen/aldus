@@ -13,7 +13,12 @@
 
 import type { z } from "zod";
 
-import { AldusError, CoreErrorCodes, type StructuredError } from "./errors.js";
+import {
+  AldusError,
+  CoreErrorCodes,
+  truncateErrorMessage,
+  type StructuredError,
+} from "./errors.js";
 import {
   assertSchemaVersionReadable,
   checkSchemaVersion,
@@ -125,11 +130,33 @@ export function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
   return rendered;
 }
 
-/** Convert validator issues into value-free {@link ValidationIssue}s. */
-function toValidationIssues(error: z.ZodError, data: unknown): ValidationIssue[] {
-  const inputStrings = new Set<string>();
-  collectInputStrings(data, inputStrings, 0, new WeakSet());
+/*
+ * Why the summary counts the failing issues and does not name them.
+ *
+ * Naming them was tried and withdrawn (#254, #255). A rendered path is *normally* schema
+ * content, but a segment can be a **key taken from the validated value** — a `z.record` reports
+ * the offending key as the path, and Core validates against a schema supplied by its caller, so
+ * it has no way to tell one from the other. `KnowledgePackRef.scope`
+ * (`packages/aldus-core/src/schema/common.ts:168`) is a live instance: a `z.record` whose key
+ * schema and value schema both have bounds, so an over-long value raises an issue whose last
+ * path segment is the caller's key.
+ *
+ * Shape is not provenance. A key that reads exactly like a field name — `AKIAABCDEFGHIJKLMNOP`
+ * — passes any identifier test there is, and this message is written into `events.jsonl` and
+ * printed by a CLI. {@link scrubMessage} does not cover it either: it harvests input *values*,
+ * and a record key is not a value.
+ *
+ * So the summary says how many, and `details.issues` says where — unchanged, and the place a
+ * reader was always meant to look. Deciding this generically would need the schema's own
+ * structure, which Core does not introspect, and a caller that knows its schema can name paths
+ * itself: `StageRunner` does exactly that for `AldusEvent`.
+ */
 
+/** Convert validator issues into value-free {@link ValidationIssue}s. */
+function toValidationIssues(
+  error: z.ZodError,
+  inputStrings: ReadonlySet<string>,
+): ValidationIssue[] {
   return error.issues.map((issue) => ({
     path: formatIssuePath(issue.path),
     code: issue.code,
@@ -150,11 +177,24 @@ function toValidationError(
   error: z.ZodError,
   data: unknown,
 ): StructuredError {
-  const issues = toValidationIssues(error, data);
+  const inputStrings = new Set<string>();
+  collectInputStrings(data, inputStrings, 0, new WeakSet());
+  const issues = toValidationIssues(error, inputStrings);
+
+  // No path names here — see the note above `toValidationIssues`. `subject` is caller-supplied
+  // and so goes through the same scrub an issue message does (contract §19.2), then through the
+  // schema's own length bound, because a summary is not exempt from the rules the detail obeys.
+  const message = truncateErrorMessage(
+    scrubMessage(
+      `${subject} failed schema validation (${issues.length} issue${issues.length === 1 ? "" : "s"}).`,
+      inputStrings,
+    ),
+  );
+
   return {
     code,
     category: "validation",
-    message: `${subject} failed schema validation (${issues.length} issue${issues.length === 1 ? "" : "s"}).`,
+    message,
     retryable: false,
     details: { subject, issues },
   };
