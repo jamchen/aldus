@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ActorRef, ArtifactRef, RunManifest } from "@aldus-runtime/core";
-import { openWorkspace, type FileWorkspace } from "@aldus-runtime/file-store";
+import { openWorkspace, type EventStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import { builders, createTestContext, type TestContext } from "@aldus-runtime/testkit";
 import { z } from "zod";
 
@@ -80,6 +80,16 @@ export interface TempRunOptions {
    * your own to assert what was recorded.
    */
   paidDispatch?: PaidDispatchController | false;
+  /**
+   * Replace the event store the runner appends through.
+   *
+   * `StageRunnerOptions.events` is the port, not the file store, and a caller may satisfy it with
+   * any conforming implementation. A test about what the runner may conclude from a store's
+   * refusal has to supply that store, because the file store's refusals all come from Core's own
+   * `eventSchema` and so cannot exhibit the case (#255). Receives the workspace's real store, so
+   * a double can delegate whatever it is not about.
+   */
+  events?: (real: EventStore) => EventStore;
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -102,7 +112,7 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
 
   const runner = new StageRunner({
     runs: workspace.runs,
-    events: workspace.events,
+    events: options.events === undefined ? workspace.events : options.events(workspace.events),
     locks: workspace.locks,
     stageStatePath: (runId) => stageStatePathFor(workspace, runId),
     registry,

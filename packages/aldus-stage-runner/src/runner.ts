@@ -1665,7 +1665,7 @@ export class StageRunner {
    * The reduced event to write when the full one will not validate, or `undefined` to give up.
    *
    * Reduces exactly what the runner did not size: the attempt's `error` becomes a minimal one
-   * naming the failing paths. Everything else — the attempt's identity, its terminal status, its
+   * saying that the record was reduced and how many paths the refusal named. Everything else — the attempt's identity, its terminal status, its
    * actor, its artifacts, its timestamps, its metadata — is carried over unchanged. Those were
    * validated where they were produced, and dropping them to be safe would trade the defect this
    * repairs for a loss of the execution record it is meant to preserve.
@@ -1762,30 +1762,17 @@ function redactError(error: StructuredError): StructuredError {
   return truncateErrorMessages(redact(error) as unknown as StructuredError);
 }
 
-/** How many failing paths the degraded record names before it stops listing them. */
-const DEGRADED_ISSUE_PATHS = 10;
-
 /**
  * The minimal failure written in place of one the schema refused (#254).
  *
  * Says three things and no more: that the attempt failed, what it said before the refusal, and
- * where the full record was rejected. The last is the part a reader cannot reconstruct — a
- * refusal counted without naming a path is what made the original defect cost a reproduction to
- * identify, and the paths are in hand at the moment of the refusal.
+ * how many paths the refusal named. **Not which paths** — see `withheldPathCount` below.
  */
 function degradedError(attempt: StageAttempt, refusal: StructuredError): StructuredError {
   const original = attempt.error;
-  const reported = validationIssuePaths(refusal);
-  const owned = reported.filter(isSchemaOwnedEventPath);
-  const paths = owned.slice(0, DEGRADED_ISSUE_PATHS);
-  const withheld = reported.length - owned.length;
+  const withheld = validationIssuePaths(refusal).length;
   const where =
-    paths.length === 0
-      ? withheld === 0
-        ? ""
-        : ` ${withheld} rejected path${withheld === 1 ? "" : "s"} withheld.`
-      : ` Rejected at: ${paths.join(", ")}.` +
-        (withheld === 0 ? "" : ` ${withheld} further path${withheld === 1 ? "" : "s"} withheld.`);
+    withheld === 0 ? "" : ` ${withheld} rejected path${withheld === 1 ? "" : "s"} withheld.`;
   return {
     code: StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED,
     category: original?.category ?? "internal",
@@ -1803,13 +1790,33 @@ function degradedError(attempt: StageAttempt, refusal: StructuredError): Structu
       degraded: true,
       ...(original !== undefined ? { originalCode: truncateCode(original.code) } : {}),
       refusalCode: refusal.code,
-      ...(paths.length > 0 ? { rejectedPaths: paths } : {}),
       ...(withheld > 0 ? { withheldPathCount: withheld } : {}),
     },
   };
 }
 
-/** Failing paths carried by a validation refusal, where it carries them in the documented shape. */
+/**
+ * How many failing paths a validation refusal reported, where it carries them in the documented
+ * shape.
+ *
+ * Only the count leaves this function, and the paths themselves are read solely to produce it
+ * (#255). The runner cannot establish where a path came from: `StageRunnerOptions.events` is any
+ * `EventStore` (`packages/aldus-file-store/src/ports.ts:115`), whose `append` promises to store
+ * an `AldusEvent` and promises nothing about the shape, the vocabulary, or the provenance of the
+ * error it rejects with. So a conforming store may reject with `details.issues[].path` taken from
+ * a key the *caller* supplied — a stage's `error.details` bag is caller-keyed and unvalidated —
+ * and any test that distinguishes a schema field from such a key by its shape can be defeated by
+ * naming the key after a field.
+ *
+ * An earlier version of this file did exactly that: it reasoned from Core's own schema topology
+ * that no reachable `z.record` could raise an issue, and kept a segment-shape guard behind that
+ * reasoning. Both halves are true of Core's `eventSchema` and neither is a fact about the port,
+ * so the argument proved nothing about the object actually validating here.
+ *
+ * The fail-safe reading is the only one the port supports: no rejected path is persisted or
+ * quoted, and the count is what tells a reader the list is absent because it was withheld rather
+ * than because the refusal was empty.
+ */
 function validationIssuePaths(refusal: StructuredError): string[] {
   const issues = refusal.details?.["issues"];
   if (!Array.isArray(issues)) return [];
@@ -1819,51 +1826,6 @@ function validationIssuePaths(refusal: StructuredError): string[] {
     typeof (issue as { path?: unknown }).path === "string"
       ? [(issue as { path: string }).path]
       : [],
-  );
-}
-
-/** A rendered path segment that reads as a field name, or an array index. */
-const PATH_SEGMENT = /^(?:[A-Za-z_$][A-Za-z0-9_$]*|\[\d+\])$/;
-
-/**
- * Keys whose *contents* are supplied by whoever built the record, not by the schema.
- *
- * `AldusEvent.details` and `StructuredError.details` are both `z.record(z.string(), z.unknown())`
- * (`packages/aldus-core/src/schema/event.ts:111`, `packages/aldus-core/src/errors.ts:112`).
- * Nothing below either can fail today — the value schema is `z.unknown()`, which accepts
- * everything — so this guard is expected never to fire, and is here so that a later narrowing of
- * those value schemas cannot start putting a caller's key into a durable record silently.
- */
-const CALLER_KEYED_SEGMENTS = new Set(["details"]);
-
-/**
- * Whether a rejected path is provably made of `AldusEvent` field names.
- *
- * Core's own summary no longer names paths at all, because Core validates against a schema its
- * caller supplied and so cannot tell a schema field from a `z.record` key taken out of the value
- * (#255). The runner is in the position Core is not: the records it writes here are `AldusEvent`
- * and the `StageExecution` cache derived from it, both of which it can read.
- *
- * The evidence, checked in the schemas rather than assumed: neither record reaches a `z.record`
- * whose key or value can raise an issue. `AldusEvent`'s own fields are a fixed list
- * (`packages/aldus-core/src/schema/event.ts:26`), its `details` and `StructuredError.details`
- * take `z.unknown()` values, and `KnowledgePackRef.scope` — the one bounded-key record in Core
- * (`packages/aldus-core/src/schema/common.ts:168`) — hangs off `RunManifest`, which is not
- * reachable from either.
- *
- * That evidence expires if a schema changes, so the shape test stands behind it rather than in
- * place of it: a segment must read as a field name, and nothing below a caller-keyed bag is
- * shown. Withheld paths are counted, never dropped silently — the count is what tells a reader
- * the list is short because something was held back rather than because the refusal was small.
- */
-function isSchemaOwnedEventPath(path: string): boolean {
-  if (path === "") return false;
-  const segments = path.replace(/\[(\d+)\]/g, ".[$1]").split(".");
-  for (const segment of segments) {
-    if (!PATH_SEGMENT.test(segment)) return false;
-  }
-  return !segments.some(
-    (segment, index) => index < segments.length - 1 && CALLER_KEYED_SEGMENTS.has(segment),
   );
 }
 

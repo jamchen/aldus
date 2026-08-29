@@ -17,6 +17,7 @@
 import { readFile } from "node:fs/promises";
 
 import { AldusError, MAX_ERROR_MESSAGE_LENGTH, structuredErrorSchema } from "@aldus-runtime/core";
+import type { EventStore } from "@aldus-runtime/file-store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { recordingSpendController } from "../src/doubles.js";
@@ -230,7 +231,7 @@ describe("an event the schema refuses for a reason truncation cannot repair", ()
     expect(state.stages[0]?.execution.attempts[0]?.status).toBe("failed");
   });
 
-  it("says the record is reduced, and where the full one was rejected", async () => {
+  it("says the record is reduced, and how much of it was rejected", async () => {
     await harness.runner.run(harness.manifest.runId, "stage-a", {});
 
     const { events } = await harness.workspace.events.read(harness.manifest.runId);
@@ -238,9 +239,10 @@ describe("an event the schema refuses for a reason truncation cannot repair", ()
 
     expect(failed?.error?.code).toBe(StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED);
     expect(failed?.error?.details?.["degraded"]).toBe(true);
-    // §19.2's field path, which is the part a reader cannot reconstruct — `(1 issue)` with no
-    // path is what made the original defect cost a reproduction to identify.
-    expect(failed?.error?.details?.["rejectedPaths"]).toEqual(["error.code"]);
+    // How much was rejected, never where: the runner cannot prove a path's provenance through
+    // the `EventStore` port, so no path is persisted (#255).
+    expect(failed?.error?.details?.["rejectedPaths"]).toBeUndefined();
+    expect(failed?.error?.details?.["withheldPathCount"]).toBe(1);
     expect(failed?.error?.message).toContain("the stage refused");
   });
 
@@ -266,6 +268,17 @@ describe("an event the schema refuses for a reason truncation cannot repair", ()
     expect(result.error).toEqual(cached);
   });
 
+  it("does not inherit a path from the summary it quotes", async () => {
+    // The degraded message embeds the refusal's own message verbatim, so Core naming a path there
+    // would reach a durable record through this line whatever this function withheld.
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    const { events } = await harness.workspace.events.read(harness.manifest.runId);
+    const failed = events.find((event) => event.action === STAGE_EVENT_ACTIONS.attemptFailed);
+
+    expect(failed?.error?.message).toContain("AldusEvent failed schema validation (1 issue).");
+  });
+
   it("keeps what the attempt reported, quoted inside the bound", async () => {
     await harness.runner.run(harness.manifest.runId, "stage-a", {});
 
@@ -276,23 +289,84 @@ describe("an event the schema refuses for a reason truncation cannot repair", ()
   });
 });
 
-describe("the paths a degraded record is allowed to name (#255)", () => {
-  /** Same real refusal as above: a code past the cap, deliberately never truncated. */
-  const LONG_CODE = `ALDUS_${"X".repeat(300)}`;
-
+describe("a rejected path the runner cannot prove came from a schema (#255)", () => {
   /**
-   * Shaped exactly like a field name, and supplied by the caller rather than by any schema — the
-   * case a shape test cannot discriminate, which is why Core's summary stopped naming paths at
-   * all (#255). The runner may still name them because it can read the schema of the record it
-   * is writing; this pins that it names only what that schema owns.
+   * The blocker this pins. `StageRunnerOptions.events` is the `EventStore` port
+   * (`packages/aldus-file-store/src/ports.ts:115`), not `FileEventStore`, and the port says
+   * nothing about where a refusal's `details.issues[].path` comes from. So a conforming store may
+   * reject with a path lifted from a key its *caller* supplied — a stage's `error.details` bag is
+   * caller-keyed and unvalidated — and an identifier-shaped key is indistinguishable from a
+   * schema field by shape. An earlier fix filtered by shape plus an argument about Core's schema
+   * topology; neither is a fact about the port, so this store defeats both.
    */
   const CALLER_KEY = "AKIAABCDEFGHIJKLMNOP";
 
-  beforeEach(() => {
-    harness.registry.register(
+  /** The refusal message a store may emit, generic in the way Core's summary now is (#255). */
+  const REFUSAL_MESSAGE = "AldusEvent failed schema validation (1 issue).";
+
+  /**
+   * A store that refuses the first event carrying an error, naming a path it took from that
+   * error's own caller-supplied `details` bag, and then accepts the reduced event.
+   *
+   * Conforming on both counts: `append` stores an `AldusEvent` and returns it with a sequence,
+   * and it rejects with a Core `StructuredError` of category `validation` in the documented
+   * `details.issues[].path` shape. Nothing in the port forbids the path it chooses.
+   */
+  function rejectingStore(real: EventStore): EventStore {
+    let refused = false;
+    return {
+      async append(runId, event) {
+        if (!refused && event.error !== undefined) {
+          refused = true;
+          const key = Object.keys(event.error.details ?? {}).find((name) => name !== "degraded");
+          throw new AldusError("ALDUS_EVENT_INVALID", REFUSAL_MESSAGE, {
+            category: "validation",
+            details: { issues: [{ path: key ?? CALLER_KEY, code: "too_big" }] },
+          });
+        }
+        return real.append(runId, event);
+      },
+      read: (runId, options) => real.read(runId, options),
+      nextSequence: (runId) => real.nextSequence(runId),
+    };
+  }
+
+  let temp: TempRun;
+  let spend: ReturnType<typeof recordingSpendController>;
+
+  beforeEach(async () => {
+    spend = recordingSpendController();
+    const workers = new WorkerRegistry();
+    workers.register(
+      recordingWorker({
+        execute: () =>
+          Promise.resolve({
+            output: { ok: true },
+            costs: [
+              {
+                provider: "provider-a",
+                operation: "render",
+                billingStatus: "charged" as const,
+                actual: { amount: "1.0931", currency: "USD" },
+              },
+            ],
+          }),
+      }),
+    );
+    temp = await makeTempRun({ workers, paidDispatch: spend, events: rejectingStore });
+    temp.registry.register(
       aStage({
-        execute: async () => {
-          throw new AldusError(LONG_CODE, "the stage refused", {
+        execute: async (context) => {
+          await context.runWorker({
+            workerId: "worker-a",
+            workerVersion: "1",
+            input: {},
+            effect: { kind: "none" },
+            spend: {
+              expectation: { kind: "estimated", amount: { amount: "2.0000", currency: "USD" } },
+            },
+          } as never);
+          throw new AldusError("ALDUS_STAGE_REFUSED", "the stage refused", {
             category: "policy",
             details: { [CALLER_KEY]: "y".repeat(6000) },
           });
@@ -301,24 +375,60 @@ describe("the paths a degraded record is allowed to name (#255)", () => {
     );
   });
 
-  it("names no path a caller supplied, only fields AldusEvent owns", async () => {
-    await harness.runner.run(harness.manifest.runId, "stage-a", {});
-
-    const { events } = await harness.workspace.events.read(harness.manifest.runId);
-    const failed = events.find((event) => event.action === STAGE_EVENT_ACTIONS.attemptFailed);
-
-    expect(failed?.error?.details?.["rejectedPaths"]).toEqual(["error.code"]);
-    expect(failed?.error?.message).not.toContain(CALLER_KEY);
+  afterEach(async () => {
+    await temp.cleanup();
   });
 
-  it("does not inherit a path from the summary it quotes", async () => {
-    // The degraded message embeds the refusal's own message verbatim, so Core naming a path there
-    // would reach a durable record through this line whatever this function withheld.
-    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+  it("persists no rejected path at all, only a count of what it withheld", async () => {
+    await temp.runner.run(temp.manifest.runId, "stage-a", {});
 
-    const { events } = await harness.workspace.events.read(harness.manifest.runId);
+    const { events } = await temp.workspace.events.read(temp.manifest.runId);
     const failed = events.find((event) => event.action === STAGE_EVENT_ACTIONS.attemptFailed);
 
-    expect(failed?.error?.message).toContain("AldusEvent failed schema validation (1 issue).");
+    expect(failed?.error?.code).toBe(StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED);
+    expect(failed?.error?.details?.["degraded"]).toBe(true);
+    expect(failed?.error?.details?.["rejectedPaths"]).toBeUndefined();
+    expect(failed?.error?.details?.["withheldPathCount"]).toBe(1);
+    expect(failed?.error?.message).toContain(REFUSAL_MESSAGE);
+    expect(failed?.error?.message).toContain("1 rejected path withheld.");
+  });
+
+  it("lets the caller's key reach neither the message nor the details, anywhere durable", async () => {
+    const result = await temp.runner.run(temp.manifest.runId, "stage-a", {});
+
+    // Whole records, not the two fields a fix happened to touch: the key was in the attempt's own
+    // `error.details`, which the reduced record replaces, and a leak that reappeared through the
+    // embedded attempt or the cache would still be a leak.
+    const { events } = await temp.workspace.events.read(temp.manifest.runId);
+    const raw = await readFile(temp.stageStatePath(temp.manifest.runId), "utf8");
+
+    expect(JSON.stringify(events)).not.toContain(CALLER_KEY);
+    expect(raw).not.toContain(CALLER_KEY);
+    expect(JSON.stringify(result.error)).not.toContain(CALLER_KEY);
+  });
+
+  it("still reports the attempt as terminally failed, with its charge intact", async () => {
+    const result = await temp.runner.run(temp.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe(StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED);
+    expect(() => structuredErrorSchema.parse(result.error)).not.toThrow();
+    // The charge that made #254 costly: money recorded against a stage the record left running.
+    expect(spend.written.map((record) => record.actual?.amount)).toEqual(["1.0931"]);
+
+    const state = await persisted(temp);
+    expect(state.stages[0]?.execution.status).toBe("failed");
+    expect(state.stages[0]?.execution.attempts[0]?.status).toBe("failed");
+  });
+
+  it("returns exactly the error it persisted, in both places it persisted one", async () => {
+    const result = await temp.runner.run(temp.manifest.runId, "stage-a", {});
+
+    const { events } = await temp.workspace.events.read(temp.manifest.runId);
+    const failed = events.find((event) => event.action === STAGE_EVENT_ACTIONS.attemptFailed);
+    const state = await persisted(temp);
+
+    expect(result.error).toEqual(failed?.error);
+    expect(result.error).toEqual(state.stages[0]?.execution.attempts[0]?.error);
   });
 });

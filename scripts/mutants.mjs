@@ -324,4 +324,30 @@ export const cases = [
     wantExit: 1,
     wantOutput: "does not inherit a path from the summary it quotes",
   },
+  {
+    // The runner's own half of the same rule (#255). An interim fix persisted the rejected paths
+    // it judged schema-owned by their shape; the port it appends through guarantees no such
+    // provenance, so a conforming store can name a caller-supplied key. This puts the withdrawn
+    // behaviour back and asserts the regression that forbids it actually catches it.
+    name: "runner: persisting a rejected path in a degraded record must fail the case that forbids it",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-stage-runner/src/runner.ts",
+          "      ...(withheld > 0 ? { withheldPathCount: withheld } : {}),",
+          "      ...(withheld > 0 ? { rejectedPaths: validationIssuePaths(refusal) } : {}),\n      ...(withheld > 0 ? { withheldPathCount: withheld } : {}),",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-stage-runner",
+      "test/oversized-error.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "lets the caller's key reach neither the message nor the details",
+  },
 ];

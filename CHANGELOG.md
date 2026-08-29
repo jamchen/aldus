@@ -34,24 +34,31 @@ record is bounded by contract §19.1 and always was.
 Truncation covers the case that was reported; it cannot cover every field a stage populates. Where
 the full event still will not validate, the runner now writes a reduced one — the same terminal
 status, and a minimal error under `ALDUS_STAGE_TERMINAL_RECORD_DEGRADED` carrying
-`details.rejectedPaths`, `details.originalCode` and what the attempt said. Only for a terminal
+`details.withheldPathCount`, `details.originalCode` and what the attempt said. Only for a terminal
 attempt, and only for a validation refusal: a lock timeout or a full disk is not repaired by
 writing less, and both still propagate unchanged. A degraded record beats a wrong one.
 
-**A degraded record names the failing paths; a generic validation summary still does not.**
+**No durable record names a rejected path it cannot prove is a schema field.**
 
 `AldusEvent failed schema validation (1 issue).` says how many and not which, so identifying the
-field cost a reproduction. Naming the paths in that summary was tried and withdrawn before
-release: Core validates against a schema its **caller** supplied, so it cannot tell a schema field
-from a `z.record` key lifted out of the value being validated, and a key shaped exactly like a
-field name — `AKIAABCDEFGHIJKLMNOP` — defeats any test of shape. `KnowledgePackRef.scope` is a
-live instance of such a record. The summary therefore still counts the issues and does not name
-them, and `ValidationIssue.path` in `details.issues` is unchanged, which is where a path always
-was.
+field cost a reproduction. Naming the paths was tried and withdrawn before release, in both places
+it was tried, and for the same reason.
 
-Where the paths **are** named is `ALDUS_STAGE_TERMINAL_RECORD_DEGRADED`, above: the stage runner
-knows the record it is writing is an `AldusEvent`, so it can show what that schema owns and
-withhold anything else, counting what it withheld in `details.withheldPathCount`.
+In Core's validation summary: Core validates against a schema its **caller** supplied, so it
+cannot tell a schema field from a `z.record` key lifted out of the value being validated, and a
+key shaped exactly like a field name — `AKIAABCDEFGHIJKLMNOP` — defeats any test of shape.
+`KnowledgePackRef.scope` is a live instance of such a record.
+
+In the degraded stage record: an interim version named the paths there on the argument that the
+runner knows it is writing an `AldusEvent` and can read that schema. It cannot. The runner appends
+through the `EventStore` **port**, which any caller may implement, and the port promises nothing
+about where a refusal's `details.issues[].path` comes from — so a conforming store may reject with
+a path taken from a caller-supplied key, and the shape test and the schema-topology argument
+behind it both fail on it. `ALDUS_STAGE_TERMINAL_RECORD_DEGRADED` therefore persists and quotes
+**no** rejected path, and reports only `details.withheldPathCount`, which is what tells a reader
+the list is absent because it was withheld rather than because the refusal was empty.
+
+`ValidationIssue.path` in `details.issues` is unchanged, which is where a path always was.
 
 **What changes for an adopter:** nothing that shipped. `StructuredError.message` for a validation
 failure keeps the wording it has had — do not parse it for field names; read `details.issues`.
