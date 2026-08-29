@@ -279,4 +279,49 @@ export const cases = [
     wantExit: 0,
     wantOutput: "no occurrences",
   },
+  {
+    // Not a check on `scripts/` but on a value-safety rule, because the rule is the kind that
+    // fails silently: a summary naming a `z.record` key leaks it into `events.jsonl` and a CLI
+    // line, and nothing goes red. This puts the withdrawn behaviour back and asserts the case
+    // that forbids it actually catches it (#255).
+    name: "validate: naming the failing path in a summary must fail the case that forbids it",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/validate.ts",
+          'failed schema validation (${issues.length} issue${issues.length === 1 ? "" : "s"}).`,',
+          'failed schema validation (${issues.length} issue${issues.length === 1 ? "" : "s"}): ${issues.map((issue) => issue.path).join(", ")}.`,',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-core", "test/validate.test.ts"],
+    wantExit: 1,
+    wantOutput: "does not put a caller-supplied record key into the message",
+  },
+  {
+    // The same mutation, measured in another package: the runner quotes the refusal's message
+    // verbatim into a durable degraded record, so Core naming a path there reaches the record
+    // whatever the runner's own filter withholds. Measured across the package boundary, which is
+    // what makes the rebuild guard load-bearing for this case.
+    name: "validate: a path in Core's summary reaches the runner's degraded record",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/validate.ts",
+          'failed schema validation (${issues.length} issue${issues.length === 1 ? "" : "s"}).`,',
+          'failed schema validation (${issues.length} issue${issues.length === 1 ? "" : "s"}): ${issues.map((issue) => issue.path).join(", ")}.`,',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-stage-runner",
+      "test/oversized-error.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "does not inherit a path from the summary it quotes",
+  },
 ];

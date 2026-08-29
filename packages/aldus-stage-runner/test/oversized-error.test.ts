@@ -235,3 +235,50 @@ describe("an event the schema refuses for a reason truncation cannot repair", ()
     expect(error?.message).toContain("ALDUS_XXX");
   });
 });
+
+describe("the paths a degraded record is allowed to name (#255)", () => {
+  /** Same real refusal as above: a code past the cap, deliberately never truncated. */
+  const LONG_CODE = `ALDUS_${"X".repeat(300)}`;
+
+  /**
+   * Shaped exactly like a field name, and supplied by the caller rather than by any schema — the
+   * case a shape test cannot discriminate, which is why Core's summary stopped naming paths at
+   * all (#255). The runner may still name them because it can read the schema of the record it
+   * is writing; this pins that it names only what that schema owns.
+   */
+  const CALLER_KEY = "AKIAABCDEFGHIJKLMNOP";
+
+  beforeEach(() => {
+    harness.registry.register(
+      aStage({
+        execute: async () => {
+          throw new AldusError(LONG_CODE, "the stage refused", {
+            category: "policy",
+            details: { [CALLER_KEY]: "y".repeat(6000) },
+          });
+        },
+      }),
+    );
+  });
+
+  it("names no path a caller supplied, only fields AldusEvent owns", async () => {
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    const { events } = await harness.workspace.events.read(harness.manifest.runId);
+    const failed = events.find((event) => event.action === STAGE_EVENT_ACTIONS.attemptFailed);
+
+    expect(failed?.error?.details?.["rejectedPaths"]).toEqual(["error.code"]);
+    expect(failed?.error?.message).not.toContain(CALLER_KEY);
+  });
+
+  it("does not inherit a path from the summary it quotes", async () => {
+    // The degraded message embeds the refusal's own message verbatim, so Core naming a path there
+    // would reach a durable record through this line whatever this function withheld.
+    await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    const { events } = await harness.workspace.events.read(harness.manifest.runId);
+    const failed = events.find((event) => event.action === STAGE_EVENT_ACTIONS.attemptFailed);
+
+    expect(failed?.error?.message).toContain("AldusEvent failed schema validation (1 issue).");
+  });
+});

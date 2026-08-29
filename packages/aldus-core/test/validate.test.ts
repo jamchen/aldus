@@ -8,6 +8,7 @@ import { SCHEMA_VERSION } from "../src/schema-version.js";
 import { z } from "zod";
 
 import { AldusError, CoreErrorCodes, structuredErrorSchema } from "../src/errors.js";
+import { knowledgePackRefSchema } from "../src/schema/common.js";
 import {
   assertValid,
   assertValidRecord,
@@ -276,43 +277,75 @@ describe("validateWith", () => {
   });
 });
 
-describe("the summary a refusal leads with (#254)", () => {
-  it("names the failing path, not only how many there were", () => {
-    // `(1 issue)` and nothing else cost an adopter a reproduction to identify which field the
-    // runner's own event had failed on. The paths are in hand at the moment of the refusal.
+describe("the summary a refusal leads with (#254, #255)", () => {
+  it("says how many issues there were and not where they were", () => {
     const result = validate("EpisodeRef", { ...episode, schemaVersion: "nope" });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.message).toContain("(1 issue): schemaVersion.");
+    expect(result.error.message).toBe("EpisodeRef failed schema validation (1 issue).");
+    expect(result.error.message).not.toContain("schemaVersion");
   });
 
-  it("labels an issue at the root rather than naming an empty path", () => {
-    const result = validateWith(z.string(), 42);
+  it("still says where in details.issues, which is the surface that carries paths", () => {
+    // The narrowing is to the summary line only. `ValidationIssue.path` is unchanged, so nothing
+    // a consumer reads for diagnosis was taken away — it was never the line a CLI prints.
+    const result = validate("EpisodeRef", { ...episode, schemaVersion: "nope" });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.message).toContain("(1 issue): (root).");
+    expect(result.error.details?.["issues"]).toEqual([
+      expect.objectContaining({ path: "schemaVersion" }),
+    ]);
   });
 
-  it("stops listing after ten and says how many are left", () => {
-    const shape = Object.fromEntries(
-      Array.from({ length: 12 }, (_unused, index) => [`f${String(index)}`, z.string()]),
-    );
-    const result = validateWith(z.object(shape), {});
+  it("does not put a caller-supplied record key into the message, however field-like it reads", () => {
+    // The blocking finding on #255. A `z.record` reports the offending **key** as the path, and a
+    // key is caller-controlled: this one is shaped exactly like a field name, so no shape test
+    // discriminates it. It is deliberately **not** also present as a value, which is what makes
+    // it invisible to the §19.2 scrub — `collectInputStrings` walks `Object.values`, so a key is
+    // never harvested and `scrubMessage` cannot see it. Shape is not provenance.
+    const key = "AKIAABCDEFGHIJKLMNOP";
+    const result = validateWith(z.record(z.string(), z.number()), { [key]: "not a number" });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.message).toContain("(12 issues): f0, f1,");
-    expect(result.error.message).toContain("and 2 more.");
+    expect(result.error.message).not.toContain(key);
+    expect(result.error.message).toBe("Value failed schema validation (1 issue).");
+  });
+
+  it("does not leak a caller-supplied key from a bounded-key record either", () => {
+    // `KnowledgePackRef.scope` is the live instance in Core's own schemas: a `z.record` whose key
+    // and value both carry bounds, so an over-long value raises an issue whose last path segment
+    // is the adopter's key. Reached through the record schema rather than a synthetic one, so the
+    // case expires if that field stops being a record.
+    const key = "AKIAABCDEFGHIJKLMNOP";
+    const result = validateWith(knowledgePackRefSchema, {
+      packId: "pack-a",
+      version: "1",
+      authority: "advisory",
+      scope: { [key]: "x".repeat(513) },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).not.toContain(key);
+    expect(result.error.details?.["issues"]).toEqual([
+      expect.objectContaining({ path: `scope.${key}` }),
+    ]);
   });
 
   it("obeys the same §19.2 scrub as the detail it summarises", () => {
-    // The residual case the shape check does not cover: an identifier-shaped key that is also a
-    // string value in the input, so it is harvested and the whole summary is withheld. Losing the
-    // summary is the correct trade — §19.2 is a guarantee, and a path is a convenience.
-    const shared = "identifierlikekey";
-    const result = validateWith(z.record(z.string(), z.number()), { [shared]: shared });
+    // The subject is caller-supplied and reaches the summary, so the summary is scrubbed against
+    // harvested input values exactly as an issue message is.
+    const shared = "sk-live-9f3b2c8ad41e7605bb92aa17ce4408d2";
+    const result = validateWith(
+      z.object({ token: z.number() }),
+      { token: shared },
+      {
+        subject: shared,
+      },
+    );
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -320,24 +353,8 @@ describe("the summary a refusal leads with (#254)", () => {
     expect(result.error.message).toContain("withheld");
   });
 
-  it("does not put a path that fails to read as a field name into the summary", () => {
-    // A `z.record` reports the offending **key** as the path, so the line a CLI prints can carry
-    // a value the caller supplied. A narrowing rather than a guarantee: the key is still in
-    // `details.issues[].path`, where it was before, and an identifier-shaped key still passes.
-    const credential = "sk-live-9f3b2c8ad41e7605bb92aa17ce4408d2";
-    const result = validateWith(z.record(z.string(), z.number()), { [credential]: "not a number" });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.message).toContain("(1 issue): (withheld).");
-    expect(result.error.message).not.toContain(credential);
-  });
-
   it("keeps the summary itself inside the message cap", () => {
-    const shape = Object.fromEntries(
-      Array.from({ length: 200 }, (_unused, index) => [`field_${String(index)}`, z.string()]),
-    );
-    const result = validateWith(z.object(shape), {});
+    const result = validateWith(z.string(), 42, { subject: "s".repeat(8000) });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;

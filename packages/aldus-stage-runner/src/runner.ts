@@ -1763,7 +1763,17 @@ const DEGRADED_ISSUE_PATHS = 10;
  */
 function degradedError(attempt: StageAttempt, refusal: StructuredError): StructuredError {
   const original = attempt.error;
-  const paths = validationIssuePaths(refusal).slice(0, DEGRADED_ISSUE_PATHS);
+  const reported = validationIssuePaths(refusal);
+  const owned = reported.filter(isSchemaOwnedEventPath);
+  const paths = owned.slice(0, DEGRADED_ISSUE_PATHS);
+  const withheld = reported.length - owned.length;
+  const where =
+    paths.length === 0
+      ? withheld === 0
+        ? ""
+        : ` ${withheld} rejected path${withheld === 1 ? "" : "s"} withheld.`
+      : ` Rejected at: ${paths.join(", ")}.` +
+        (withheld === 0 ? "" : ` ${withheld} further path${withheld === 1 ? "" : "s"} withheld.`);
   return {
     code: StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED,
     category: original?.category ?? "internal",
@@ -1771,7 +1781,7 @@ function degradedError(attempt: StageAttempt, refusal: StructuredError): Structu
       `Attempt ${attempt.attempt} of stage "${attempt.stageId}" ended as "${attempt.status}", ` +
         "and its full record could not be written: " +
         refusal.message +
-        (paths.length === 0 ? "" : ` Rejected at: ${paths.join(", ")}.`) +
+        where +
         (original === undefined
           ? ""
           : ` The attempt reported code "${truncateCode(original.code)}": ${original.message}`),
@@ -1782,6 +1792,7 @@ function degradedError(attempt: StageAttempt, refusal: StructuredError): Structu
       ...(original !== undefined ? { originalCode: truncateCode(original.code) } : {}),
       refusalCode: refusal.code,
       ...(paths.length > 0 ? { rejectedPaths: paths } : {}),
+      ...(withheld > 0 ? { withheldPathCount: withheld } : {}),
     },
   };
 }
@@ -1796,6 +1807,51 @@ function validationIssuePaths(refusal: StructuredError): string[] {
     typeof (issue as { path?: unknown }).path === "string"
       ? [(issue as { path: string }).path]
       : [],
+  );
+}
+
+/** A rendered path segment that reads as a field name, or an array index. */
+const PATH_SEGMENT = /^(?:[A-Za-z_$][A-Za-z0-9_$]*|\[\d+\])$/;
+
+/**
+ * Keys whose *contents* are supplied by whoever built the record, not by the schema.
+ *
+ * `AldusEvent.details` and `StructuredError.details` are both `z.record(z.string(), z.unknown())`
+ * (`packages/aldus-core/src/schema/event.ts:111`, `packages/aldus-core/src/errors.ts:112`).
+ * Nothing below either can fail today — the value schema is `z.unknown()`, which accepts
+ * everything — so this guard is expected never to fire, and is here so that a later narrowing of
+ * those value schemas cannot start putting a caller's key into a durable record silently.
+ */
+const CALLER_KEYED_SEGMENTS = new Set(["details"]);
+
+/**
+ * Whether a rejected path is provably made of `AldusEvent` field names.
+ *
+ * Core's own summary no longer names paths at all, because Core validates against a schema its
+ * caller supplied and so cannot tell a schema field from a `z.record` key taken out of the value
+ * (#255). The runner is in the position Core is not: the records it writes here are `AldusEvent`
+ * and the `StageExecution` cache derived from it, both of which it can read.
+ *
+ * The evidence, checked in the schemas rather than assumed: neither record reaches a `z.record`
+ * whose key or value can raise an issue. `AldusEvent`'s own fields are a fixed list
+ * (`packages/aldus-core/src/schema/event.ts:26`), its `details` and `StructuredError.details`
+ * take `z.unknown()` values, and `KnowledgePackRef.scope` — the one bounded-key record in Core
+ * (`packages/aldus-core/src/schema/common.ts:168`) — hangs off `RunManifest`, which is not
+ * reachable from either.
+ *
+ * That evidence expires if a schema changes, so the shape test stands behind it rather than in
+ * place of it: a segment must read as a field name, and nothing below a caller-keyed bag is
+ * shown. Withheld paths are counted, never dropped silently — the count is what tells a reader
+ * the list is short because something was held back rather than because the refusal was small.
+ */
+function isSchemaOwnedEventPath(path: string): boolean {
+  if (path === "") return false;
+  const segments = path.replace(/\[(\d+)\]/g, ".[$1]").split(".");
+  for (const segment of segments) {
+    if (!PATH_SEGMENT.test(segment)) return false;
+  }
+  return !segments.some(
+    (segment, index) => index < segments.length - 1 && CALLER_KEYED_SEGMENTS.has(segment),
   );
 }
 
