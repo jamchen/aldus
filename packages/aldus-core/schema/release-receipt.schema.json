@@ -147,7 +147,7 @@
         "retryable"
       ],
       "title": "StructuredError",
-      "description": "A redacted, safe-to-persist failure record (architecture contract §19.1). `message` and `details` are already redacted by the producer. Cause chains are bounded to 4 levels at construction time, a constraint JSON Schema cannot express."
+      "description": "A redacted, safe-to-persist failure record (architecture contract §19.1). `message` and `details` are already redacted by the producer. Cause chains are bounded to 4 levels at construction time, a constraint JSON Schema cannot express, and a message longer than 4000 characters is truncated with a marker at construction rather than rejected."
     }
   }
 }

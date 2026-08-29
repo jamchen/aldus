@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { SCHEMA_VERSION } from "../src/schema-version.js";
 import { z } from "zod";
 
-import { AldusError, CoreErrorCodes } from "../src/errors.js";
+import { AldusError, CoreErrorCodes, structuredErrorSchema } from "../src/errors.js";
 import {
   assertValid,
   assertValidRecord,
@@ -273,5 +273,74 @@ describe("validateWith", () => {
     if (failed.ok) return;
     expect(failed.error.code).toBe("ADOPTER_BAD_INPUT");
     expect(failed.error.message).toContain("Thing");
+  });
+});
+
+describe("the summary a refusal leads with (#254)", () => {
+  it("names the failing path, not only how many there were", () => {
+    // `(1 issue)` and nothing else cost an adopter a reproduction to identify which field the
+    // runner's own event had failed on. The paths are in hand at the moment of the refusal.
+    const result = validate("EpisodeRef", { ...episode, schemaVersion: "nope" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("(1 issue): schemaVersion.");
+  });
+
+  it("labels an issue at the root rather than naming an empty path", () => {
+    const result = validateWith(z.string(), 42);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("(1 issue): (root).");
+  });
+
+  it("stops listing after ten and says how many are left", () => {
+    const shape = Object.fromEntries(
+      Array.from({ length: 12 }, (_unused, index) => [`f${String(index)}`, z.string()]),
+    );
+    const result = validateWith(z.object(shape), {});
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("(12 issues): f0, f1,");
+    expect(result.error.message).toContain("and 2 more.");
+  });
+
+  it("obeys the same §19.2 scrub as the detail it summarises", () => {
+    // The residual case the shape check does not cover: an identifier-shaped key that is also a
+    // string value in the input, so it is harvested and the whole summary is withheld. Losing the
+    // summary is the correct trade — §19.2 is a guarantee, and a path is a convenience.
+    const shared = "identifierlikekey";
+    const result = validateWith(z.record(z.string(), z.number()), { [shared]: shared });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).not.toContain(shared);
+    expect(result.error.message).toContain("withheld");
+  });
+
+  it("does not put a path that fails to read as a field name into the summary", () => {
+    // A `z.record` reports the offending **key** as the path, so the line a CLI prints can carry
+    // a value the caller supplied. A narrowing rather than a guarantee: the key is still in
+    // `details.issues[].path`, where it was before, and an identifier-shaped key still passes.
+    const credential = "sk-live-9f3b2c8ad41e7605bb92aa17ce4408d2";
+    const result = validateWith(z.record(z.string(), z.number()), { [credential]: "not a number" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("(1 issue): (withheld).");
+    expect(result.error.message).not.toContain(credential);
+  });
+
+  it("keeps the summary itself inside the message cap", () => {
+    const shape = Object.fromEntries(
+      Array.from({ length: 200 }, (_unused, index) => [`field_${String(index)}`, z.string()]),
+    );
+    const result = validateWith(z.object(shape), {});
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(structuredErrorSchema.safeParse(result.error).success).toBe(true);
   });
 });

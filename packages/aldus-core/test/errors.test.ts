@@ -5,10 +5,14 @@ import {
   CoreErrorCodes,
   ERROR_CATEGORIES,
   MAX_ERROR_CAUSE_DEPTH,
+  MAX_ERROR_CODE_LENGTH,
+  MAX_ERROR_MESSAGE_LENGTH,
   type StructuredError,
   structuredErrorSchema,
   toStructuredError,
   truncateCauses,
+  truncateErrorMessage,
+  truncateErrorMessages,
 } from "../src/errors.js";
 
 const minimal: StructuredError = {
@@ -181,5 +185,82 @@ describe("CoreErrorCodes", () => {
   it("has no duplicate values", () => {
     const values = Object.values(CoreErrorCodes);
     expect(new Set(values).size).toBe(values.length);
+  });
+});
+
+describe("a message longer than the schema allows (#254)", () => {
+  const oversized = "PROBE ".repeat(1400);
+
+  it("is truncated rather than rejected, because the failure still happened", () => {
+    const truncated = truncateErrorMessage(oversized);
+
+    expect(truncated.length).toBeLessThanOrEqual(MAX_ERROR_MESSAGE_LENGTH);
+    expect(truncated.startsWith("PROBE PROBE")).toBe(true);
+  });
+
+  it("carries a marker naming the original length", () => {
+    // Without it a shortened message reads as the whole message, and the reader takes a sentence
+    // cut mid-clause for everything the producer had to say.
+    expect(truncateErrorMessage(oversized)).toContain(
+      `truncated: message was ${String(oversized.length)} characters`,
+    );
+  });
+
+  it("leaves a message within the cap untouched, including one exactly at it", () => {
+    const exact = "x".repeat(MAX_ERROR_MESSAGE_LENGTH);
+    expect(truncateErrorMessage(exact)).toBe(exact);
+    expect(truncateErrorMessage("short")).toBe("short");
+  });
+
+  it("is deterministic, so one failure records the same way twice", () => {
+    expect(truncateErrorMessage(oversized)).toBe(truncateErrorMessage(oversized));
+  });
+
+  it("produces a value the schema accepts, from a native throw", () => {
+    const structured = toStructuredError(new Error(oversized));
+
+    expect(structuredErrorSchema.safeParse(structured).success).toBe(true);
+  });
+
+  it("produces a value the schema accepts, from a thrown string", () => {
+    expect(structuredErrorSchema.safeParse(toStructuredError(oversized)).success).toBe(true);
+  });
+
+  it("truncates an AldusError's projection while leaving the throwable intact", () => {
+    const error = new AldusError("ALDUS_EXAMPLE_FAILURE", oversized, { category: "io" });
+
+    // The full message stays available in process — the cap is a property of the durable record,
+    // not of the exception the catch block sees.
+    expect(error.message).toBe(oversized);
+    expect(error.toStructuredError().message.length).toBeLessThanOrEqual(MAX_ERROR_MESSAGE_LENGTH);
+    expect(structuredErrorSchema.safeParse(error.toStructuredError()).success).toBe(true);
+  });
+
+  it("reaches messages nested in a cause chain", () => {
+    const error = new AldusError("ALDUS_EXAMPLE_FAILURE", "outer", {
+      category: "io",
+      causes: [{ ...minimal, message: oversized, causes: [{ ...minimal, message: oversized }] }],
+    });
+
+    expect(structuredErrorSchema.safeParse(error.toStructuredError()).success).toBe(true);
+  });
+
+  it("returns the same object when nothing needed truncating", () => {
+    expect(truncateErrorMessages(minimal)).toBe(minimal);
+  });
+});
+
+describe("MAX_ERROR_CODE_LENGTH", () => {
+  it("is the bound the schema enforces, so a caller need not reproduce the number", () => {
+    const tooLong = { ...minimal, code: "A".repeat(MAX_ERROR_CODE_LENGTH + 1) };
+    const atBound = { ...minimal, code: "A".repeat(MAX_ERROR_CODE_LENGTH) };
+
+    expect(structuredErrorSchema.safeParse(tooLong).success).toBe(false);
+    expect(structuredErrorSchema.safeParse(atBound).success).toBe(true);
+  });
+
+  it("is not truncated at construction, because consumers branch on a code", () => {
+    const code = "A".repeat(MAX_ERROR_CODE_LENGTH + 1);
+    expect(new AldusError(code, "m", { category: "io" }).toStructuredError().code).toBe(code);
   });
 });

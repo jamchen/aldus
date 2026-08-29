@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import type { AgentBackend, AgentCapabilities } from "../src/backend.js";
 import { recordingSpendController } from "../src/doubles.js";
+import type { PaidDispatchController } from "../src/paid-dispatch.js";
 import type {
   ArtifactRecorder,
   StageDefinition,
@@ -74,8 +75,11 @@ export interface TempRunOptions {
   manifest?: { runId?: string; episodeId?: string };
   /** Workers a stage may invoke (ADR-0035). Omitted so the unwired refusal stays testable. */
   workers?: WorkerRegistry;
-  /** Pass `false` to omit the spend controller, exercising the unwired refusal. */
-  paidDispatch?: false;
+  /**
+   * Pass `false` to omit the spend controller, exercising the unwired refusal, or a controller of
+   * your own to assert what was recorded.
+   */
+  paidDispatch?: PaidDispatchController | false;
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -110,7 +114,7 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
     // durable to go (#107). Supplied by default because these tests are about other things; the
     // refusal when one is absent has its own test.
     ...(options.workers !== undefined && options.paidDispatch !== false
-      ? { paidDispatch: recordingSpendController() }
+      ? { paidDispatch: options.paidDispatch ?? recordingSpendController() }
       : {}),
     now: () => {
       clock += 1000;

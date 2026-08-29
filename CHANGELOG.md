@@ -8,6 +8,54 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.52 — 2026-08-29
+
+### Changed
+
+**A stage failure too long to store no longer leaves the attempt `running`.**
+
+A stage that threw with a message longer than `StructuredError.message` allows produced a
+`stage.attempt.failed` event that failed schema validation. The append was refused, the CLI exited
+with `ALDUS_SCHEMA_VALIDATION_FAILED`, and `stages.json` kept the attempt at `status: "running"` —
+a stage that had stopped, recorded as one still working, with its cost already written down. On a
+paid attempt that meant a charge recorded as `charged` beside no outcome at all.
+
+An oversized message is now **truncated at construction** with a marker naming the original
+length, the way a cause chain has always been trimmed rather than rejected. An error too long to
+store is still an error that happened.
+
+**What changes for an adopter:** a `message` over 4000 characters now ends with
+`… [truncated: message was N characters]` instead of failing the write. Nothing that fit before is
+altered. If your stage relies on the full text, keep it in the stage's own notes — the durable
+record is bounded by contract §19.1 and always was.
+
+**A terminal attempt survives an event the schema refuses for any other reason.**
+
+Truncation covers the case that was reported; it cannot cover every field a stage populates. Where
+the full event still will not validate, the runner now writes a reduced one — the same terminal
+status, and a minimal error under `ALDUS_STAGE_TERMINAL_RECORD_DEGRADED` carrying
+`details.rejectedPaths`, `details.originalCode` and what the attempt said. Only for a terminal
+attempt, and only for a validation refusal: a lock timeout or a full disk is not repaired by
+writing less, and both still propagate unchanged. A degraded record beats a wrong one.
+
+**A validation refusal names the failing paths in its own message.**
+
+`AldusEvent failed schema validation (1 issue).` said how many and not which, so identifying the
+field cost a reproduction. The summary now reads `(1 issue): error.message.`, listing up to ten
+paths and then how many remain. A path that does not read as a field name is shown as
+`(withheld)` — a `z.record` reports the offending key as the path, and the summary is the line a
+CLI prints.
+
+### Added
+
+**`truncateErrorMessage`, `truncateErrorMessages`, `MAX_ERROR_MESSAGE_LENGTH`,
+`MAX_ERROR_CODE_LENGTH`** on `@aldus-runtime/core` — the bounds `structuredErrorSchema` enforces
+and the construction-time trim that keeps a record inside them. A `code` is deliberately **not**
+truncated: consumers branch on it, and a shortened code is a different code that no branch
+matches.
+
+Reported by the first adopter (#254), from a paid agent stage whose answer became unrecoverable.
+
 ## 0.2.0-next.36 — 2026-08-27
 
 ### BREAKING

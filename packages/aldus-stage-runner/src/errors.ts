@@ -177,6 +177,19 @@ export const StageRunnerErrorCodes = {
    * cannot be decided is worse than no escalation, because it reads as having stopped safely.
    */
   GATE_REQUIRED_UNKNOWN_GATE: "ALDUS_GATE_REQUIRED_UNKNOWN_GATE",
+  /**
+   * A terminal attempt was recorded with a reduced record because the full one would not validate.
+   *
+   * The attempt's own status is unaffected — it is `failed` or `cancelled`, durably, which is the
+   * whole point. What this code says is that the detail beside it is not everything the runner
+   * had: the full event was rejected, so a minimal one carrying the terminal state, a truncated
+   * message and the failing paths was written instead.
+   *
+   * A degraded record beats a wrong one (#254). The failure it replaces left the attempt reading
+   * `running` forever — indistinguishable, from the Run record alone, from a stage still working,
+   * and with the attempt's cost already written down.
+   */
+  STAGE_TERMINAL_RECORD_DEGRADED: "ALDUS_STAGE_TERMINAL_RECORD_DEGRADED",
 } as const;
 
 /** @see StageRunnerErrorCodes */

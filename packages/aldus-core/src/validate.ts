@@ -13,7 +13,12 @@
 
 import type { z } from "zod";
 
-import { AldusError, CoreErrorCodes, type StructuredError } from "./errors.js";
+import {
+  AldusError,
+  CoreErrorCodes,
+  truncateErrorMessage,
+  type StructuredError,
+} from "./errors.js";
 import {
   assertSchemaVersionReadable,
   checkSchemaVersion,
@@ -125,11 +130,41 @@ export function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
   return rendered;
 }
 
-/** Convert validator issues into value-free {@link ValidationIssue}s. */
-function toValidationIssues(error: z.ZodError, data: unknown): ValidationIssue[] {
-  const inputStrings = new Set<string>();
-  collectInputStrings(data, inputStrings, 0, new WeakSet());
+/**
+ * How many failing paths the summary message names before it says how many are left.
+ *
+ * The summary exists so a reader knows *where* the value failed without opening `details.issues`
+ * — the case that produced it was a one-line CLI exit reading `(1 issue)` and nothing else, which
+ * cost a reproduction to identify (#254). Ten is enough to locate a fault and short enough that
+ * the summary stays a summary.
+ */
+const SUMMARISED_ISSUE_PATHS = 10;
 
+/** Path shown for an issue at the root of the validated value. */
+const ROOT_PATH_LABEL = "(root)";
+
+/** Shown in place of a path segment that does not read as a field name. */
+const WITHHELD_PATH_LABEL = "(withheld)";
+
+/**
+ * A rendered path made only of identifier-shaped segments and numeric indices.
+ *
+ * A path is normally schema content, but a segment can be a **key taken from the validated
+ * value** — a `z.record` reports the offending key as the path. The summary is the line a CLI
+ * prints, so a key that does not read as a field name is not put there.
+ *
+ * A narrowing, not a guarantee, and worth stating as such: an identifier-shaped key still passes,
+ * and this changes nothing about `ValidationIssue.path` itself, which carries the key as the
+ * validator reported it. The mechanical §19.2 guarantee is {@link scrubMessage} over harvested
+ * input *values*; keys are outside it, here and before this line existed.
+ */
+const PATH_SHAPED = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[\d+\])*$/;
+
+/** Convert validator issues into value-free {@link ValidationIssue}s. */
+function toValidationIssues(
+  error: z.ZodError,
+  inputStrings: ReadonlySet<string>,
+): ValidationIssue[] {
   return error.issues.map((issue) => ({
     path: formatIssuePath(issue.path),
     code: issue.code,
@@ -150,11 +185,34 @@ function toValidationError(
   error: z.ZodError,
   data: unknown,
 ): StructuredError {
-  const issues = toValidationIssues(error, data);
+  const inputStrings = new Set<string>();
+  collectInputStrings(data, inputStrings, 0, new WeakSet());
+  const issues = toValidationIssues(error, inputStrings);
+
+  const shown = issues.slice(0, SUMMARISED_ISSUE_PATHS).map((issue) => {
+    if (issue.path === "") return ROOT_PATH_LABEL;
+    return PATH_SHAPED.test(issue.path) ? issue.path : WITHHELD_PATH_LABEL;
+  });
+  const remaining = issues.length - shown.length;
+  const where =
+    shown.length === 0
+      ? ""
+      : `: ${shown.join(", ")}${remaining > 0 ? `, and ${remaining} more` : ""}`;
+
+  // The paths are field names from the schema, but a path segment can be a key taken from the
+  // validated value, so the composed summary goes through the same scrub as an issue message
+  // (contract §19.2). A summary is not exempt from the rule the detail obeys.
+  const message = truncateErrorMessage(
+    scrubMessage(
+      `${subject} failed schema validation (${issues.length} issue${issues.length === 1 ? "" : "s"})${where}.`,
+      inputStrings,
+    ),
+  );
+
   return {
     code,
     category: "validation",
-    message: `${subject} failed schema validation (${issues.length} issue${issues.length === 1 ? "" : "s"}).`,
+    message,
     retryable: false,
     details: { subject, issues },
   };

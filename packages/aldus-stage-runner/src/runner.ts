@@ -21,11 +21,14 @@
 
 import {
   assertValid,
+  MAX_ERROR_CODE_LENGTH,
   newEventId as defaultNewEventId,
   newStageAttemptId as defaultNewAttemptId,
   toStructuredError,
   redact,
   SCHEMA_VERSION,
+  truncateErrorMessage,
+  truncateErrorMessages,
   type ActorRef,
   type AldusEvent,
   type ArtifactRef,
@@ -1603,16 +1606,89 @@ export class StageRunner {
       details: details as unknown as Record<string, unknown>,
     };
 
-    // A resource of its own, not the Run lock. `FileEventStore.append` takes the Run lock itself
-    // (ADR-0005 assigns the sequence under it), and a file lock is not re-entrant — nesting the
-    // same resource deadlocks until the acquisition deadline. This lock serialises cache writers
-    // among themselves while `append` keeps serialising the log.
+    try {
+      await this.#write(runId, event);
+      return;
+    } catch (thrown) {
+      // **A failure to report a failure must not discard the failure** (#254). The event carries
+      // detail the stage produced — a message, a code, a `details` bag — and the runner did not
+      // size any of it. When that detail is what the schema rejects, the write that reports the
+      // outcome is the one that fails, and the attempt is left reading `running`: from the Run
+      // record alone, indistinguishable from a stage still working, with its cost already
+      // written down.
+      //
+      // Only for a terminal state, and only for a validation refusal. A lock timeout or a full
+      // disk is not repaired by writing less, and a `running` event that will not validate has no
+      // outcome worth preserving — both of those propagate unchanged.
+      const degraded = this.#degrade(event, attempt, details, thrown);
+      if (degraded === undefined) throw thrown;
+      try {
+        await this.#write(runId, degraded);
+      } catch {
+        // The reduced record failed too, so nothing here is recoverable. The original refusal is
+        // the one that explains why, and swallowing it for this one would report the symptom.
+        throw thrown;
+      }
+    }
+  }
+
+  /**
+   * Append the event, then update the cache — in that order, under the stage-state lock.
+   *
+   * A resource of its own, not the Run lock. `FileEventStore.append` takes the Run lock itself
+   * (ADR-0005 assigns the sequence under it), and a file lock is not re-entrant — nesting the
+   * same resource deadlocks until the acquisition deadline. This lock serialises cache writers
+   * among themselves while `append` keeps serialising the log.
+   */
+  async #write(runId: string, event: AldusEvent): Promise<void> {
     await this.#options.locks.withLock(stageStateLockResource(runId), async () => {
       const stored = await this.#options.events.append(runId, event);
       const path = this.#options.stageStatePath(runId);
       const current = await readStageState(path).catch(() => emptyStageState());
       await writeStageState(path, applyLifecycleEvent(current, stored));
     });
+  }
+
+  /**
+   * The reduced event to write when the full one will not validate, or `undefined` to give up.
+   *
+   * Reduces exactly what the runner did not size: the attempt's `error` becomes a minimal one
+   * naming the failing paths. Everything else — the attempt's identity, its terminal status, its
+   * actor, its artifacts, its timestamps, its metadata — is carried over unchanged. Those were
+   * validated where they were produced, and dropping them to be safe would trade the defect this
+   * repairs for a loss of the execution record it is meant to preserve.
+   *
+   * The reduced error is written into the embedded attempt as well as onto the event. `details`
+   * is an unvalidated bag, so the oversized copy inside it would survive the append — and then
+   * fail `StageExecution` validation on the next read of the stage-state cache, moving the
+   * refusal one layer along instead of removing it.
+   */
+  #degrade(
+    event: AldusEvent,
+    attempt: StageAttempt,
+    details: StageLifecycleDetails,
+    thrown: unknown,
+  ): AldusEvent | undefined {
+    if (attempt.status !== "failed" && attempt.status !== "cancelled") return undefined;
+
+    // Duck-typed through `toStructuredError` rather than `instanceof`: the refusal is raised in
+    // another package, and a category is a value the contract defines (§19.1) where a class
+    // identity is a fact about module resolution.
+    const refusal = toStructuredError(thrown, {
+      code: StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED,
+      category: "internal",
+    });
+    if (refusal.category !== "validation") return undefined;
+
+    const error = degradedError(attempt, refusal);
+    const reduced: StageAttempt = { ...attempt, error };
+    const reducedDetails: StageLifecycleDetails = { ...details, attempt: reduced };
+
+    return {
+      ...event,
+      error,
+      details: reducedDetails as unknown as Record<string, unknown>,
+    };
   }
 
   #iso(): string {
@@ -1668,7 +1744,72 @@ function cancellationError(stageId: string, ordinal: number): StructuredError {
 
 /** Redact a structured error before it reaches a durable record (contract §19.2). */
 function redactError(error: StructuredError): StructuredError {
-  return redact(error) as unknown as StructuredError;
+  // Truncation comes after redaction, not before: a redaction substitutes a placeholder for a
+  // secret and can lengthen the message it rewrites, so a value truncated first could come back
+  // over the cap. Both are construction-time constraints on a durable record (§19.1, §19.2).
+  return truncateErrorMessages(redact(error) as unknown as StructuredError);
+}
+
+/** How many failing paths the degraded record names before it stops listing them. */
+const DEGRADED_ISSUE_PATHS = 10;
+
+/**
+ * The minimal failure written in place of one the schema refused (#254).
+ *
+ * Says three things and no more: that the attempt failed, what it said before the refusal, and
+ * where the full record was rejected. The last is the part a reader cannot reconstruct — a
+ * refusal counted without naming a path is what made the original defect cost a reproduction to
+ * identify, and the paths are in hand at the moment of the refusal.
+ */
+function degradedError(attempt: StageAttempt, refusal: StructuredError): StructuredError {
+  const original = attempt.error;
+  const paths = validationIssuePaths(refusal).slice(0, DEGRADED_ISSUE_PATHS);
+  return {
+    code: StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED,
+    category: original?.category ?? "internal",
+    message: truncateErrorMessage(
+      `Attempt ${attempt.attempt} of stage "${attempt.stageId}" ended as "${attempt.status}", ` +
+        "and its full record could not be written: " +
+        refusal.message +
+        (paths.length === 0 ? "" : ` Rejected at: ${paths.join(", ")}.`) +
+        (original === undefined
+          ? ""
+          : ` The attempt reported code "${truncateCode(original.code)}": ${original.message}`),
+    ),
+    retryable: original?.retryable ?? false,
+    details: {
+      degraded: true,
+      ...(original !== undefined ? { originalCode: truncateCode(original.code) } : {}),
+      refusalCode: refusal.code,
+      ...(paths.length > 0 ? { rejectedPaths: paths } : {}),
+    },
+  };
+}
+
+/** Failing paths carried by a validation refusal, where it carries them in the documented shape. */
+function validationIssuePaths(refusal: StructuredError): string[] {
+  const issues = refusal.details?.["issues"];
+  if (!Array.isArray(issues)) return [];
+  return issues.flatMap((issue) =>
+    typeof issue === "object" &&
+    issue !== null &&
+    typeof (issue as { path?: unknown }).path === "string"
+      ? [(issue as { path: string }).path]
+      : [],
+  );
+}
+
+/**
+ * Fit a foreign code into the schema's own bound (§19.1).
+ *
+ * Only ever applied to a code being quoted *inside* a degraded record, never to one a consumer
+ * will branch on — a degraded record that reproduced the refusal it exists to survive would be
+ * worse than none.
+ */
+function truncateCode(code: string): string {
+  return code.length <= MAX_ERROR_CODE_LENGTH
+    ? code
+    : `${code.slice(0, MAX_ERROR_CODE_LENGTH - 1)}…`;
 }
 
 /** Gate a stage execution is parked on, if any. */
