@@ -16,7 +16,7 @@
 
 import { readFile } from "node:fs/promises";
 
-import { AldusError, MAX_ERROR_MESSAGE_LENGTH } from "@aldus-runtime/core";
+import { AldusError, MAX_ERROR_MESSAGE_LENGTH, structuredErrorSchema } from "@aldus-runtime/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { recordingSpendController } from "../src/doubles.js";
@@ -116,7 +116,7 @@ describe("a stage whose failure exceeds the message cap", () => {
 });
 
 describe("an ordinary failure", () => {
-  it("is recorded exactly as thrown", async () => {
+  beforeEach(() => {
     harness.registry.register(
       aStage({
         execute: async () => {
@@ -124,11 +124,29 @@ describe("an ordinary failure", () => {
         },
       }),
     );
+  });
 
+  it("is recorded exactly as thrown", async () => {
     const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
 
     expect(result.error?.message).toBe("the lint stage found 3 problems");
     expect(result.error?.message).not.toContain("truncated");
+  });
+
+  it("returns the same error it persisted, with nothing reduced", async () => {
+    // The other side of the rule: routing the returned error through what was recorded must not
+    // change an error that recorded cleanly. No `degraded` marker, no substituted code.
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.error?.code).toBe(StageRunnerErrorCodes.STAGE_EXECUTION_FAILED);
+    expect(result.error?.details?.["degraded"]).toBeUndefined();
+
+    const { events } = await harness.workspace.events.read(harness.manifest.runId);
+    const failed = events.find((event) => event.action === STAGE_EVENT_ACTIONS.attemptFailed);
+    const state = await persisted();
+
+    expect(result.error).toEqual(failed?.error);
+    expect(result.error).toEqual(state.stages[0]?.execution.attempts[0]?.error);
   });
 });
 
@@ -224,6 +242,28 @@ describe("an event the schema refuses for a reason truncation cannot repair", ()
     // path is what made the original defect cost a reproduction to identify.
     expect(failed?.error?.details?.["rejectedPaths"]).toEqual(["error.code"]);
     expect(failed?.error?.message).toContain("the stage refused");
+  });
+
+  it("returns the error that was written down, not the one the schema refused", async () => {
+    // The blocking half of #254 that survived the first fix: the reduced record reached the event
+    // log and the cache, and `run` still returned the original — an error carrying a code no
+    // schema accepts, handed to services, the CLI and MCP, and disagreeing with the Run record
+    // they would read to explain it.
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("failed");
+    expect(() => structuredErrorSchema.parse(result.error)).not.toThrow();
+    expect(result.error?.code).toBe(StageRunnerErrorCodes.STAGE_TERMINAL_RECORD_DEGRADED);
+    expect(result.error?.code).not.toBe(LONG_CODE);
+
+    const { events } = await harness.workspace.events.read(harness.manifest.runId);
+    const failed = events.find((event) => event.action === STAGE_EVENT_ACTIONS.attemptFailed);
+    const state = await persisted();
+    const cached = state.stages[0]?.execution.attempts[0]?.error;
+
+    // Exactly the persisted error, in both places it is persisted — not merely the same code.
+    expect(result.error).toEqual(failed?.error);
+    expect(result.error).toEqual(cached);
   });
 
   it("keeps what the attempt reported, quoted inside the bound", async () => {

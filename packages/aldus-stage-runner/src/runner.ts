@@ -1541,7 +1541,13 @@ export class StageRunner {
       ...(settle.error !== undefined ? { error: settle.error } : {}),
     };
 
-    await this.#record(manifest, definition, final, metadata, {
+    // **The caller is told what was written down, not what was attempted** (#254). When the full
+    // record is refused and a reduced one takes its place, the error the durable record carries
+    // is the reduced one — so returning `settle.error` here would hand `run`'s caller, and every
+    // consumer above it, an error the Run record does not contain and which is in general not
+    // even `structuredErrorSchema`-valid (the LONG_CODE case is exactly that). `#record` reports
+    // the error it persisted; where nothing was reduced it is `settle.error` unchanged.
+    const recorded = await this.#record(manifest, definition, final, metadata, {
       action: actionFor(settle.status),
       previousState: "running",
       invocationKey: settle.invocationKey,
@@ -1555,7 +1561,7 @@ export class StageRunner {
       outputArtifacts: [...final.outputArtifacts],
       ...(settle.output !== undefined ? { output: settle.output } : {}),
       ...(settle.gateId !== undefined ? { gateId: settle.gateId } : {}),
-      ...(settle.error !== undefined ? { error: settle.error } : {}),
+      ...(recorded !== undefined ? { error: recorded } : {}),
     };
   }
 
@@ -1566,6 +1572,11 @@ export class StageRunner {
    * be lost. A crash between the two leaves the log complete and the cache one event behind, which
    * `reconcileStageState` repairs. The opposite order would leave a state change with no audit
    * record, which nothing could repair because nothing would know it happened.
+   *
+   * Returns the error the durable record actually carries — `options.error` unchanged on the
+   * ordinary path, and the reduced one when the full record was refused and a degraded record
+   * took its place. `#terminal` returns that to the caller, so what a consumer branches on and
+   * what the event log holds are the same value rather than two that diverge silently.
    */
   async #record(
     manifest: RunManifest,
@@ -1578,7 +1589,7 @@ export class StageRunner {
       invocationKey: string;
       error?: StructuredError;
     },
-  ): Promise<void> {
+  ): Promise<StructuredError | undefined> {
     const runId = manifest.runId;
     const details: StageLifecycleDetails = {
       attempt,
@@ -1608,7 +1619,7 @@ export class StageRunner {
 
     try {
       await this.#write(runId, event);
-      return;
+      return options.error;
     } catch (thrown) {
       // **A failure to report a failure must not discard the failure** (#254). The event carries
       // detail the stage produced — a message, a code, a `details` bag — and the runner did not
@@ -1629,6 +1640,7 @@ export class StageRunner {
         // the one that explains why, and swallowing it for this one would report the symptom.
         throw thrown;
       }
+      return degraded.error;
     }
   }
 
