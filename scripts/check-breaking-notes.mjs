@@ -45,6 +45,8 @@ import { join } from "node:path";
 import {
   breakingFindings,
   declarationSurface,
+  emptyDeclarationSurface,
+  mergeDeclarationSurface,
   parseWaivers,
   selectSection,
   uncoveredFindings,
@@ -60,25 +62,21 @@ const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: "utf8",
 
 /** Every exported symbol, and the required members of each exported type, from built `.d.ts`. */
 function surfaceOf(root) {
-  const surface = new Map();
-  // Exported interfaces whose bodies are Zod-inferred: present, and deliberately unclassifiable.
-  const opaque = new Map();
-  const declarations = new Map();
+  // Accumulated by union — `mergeDeclarationSurface`, never `Map.set` per file. A package's export
+  // surface is the union of its emitted `.d.ts` files, and one symbol's legal type/value merge can
+  // land in two of them.
+  const whole = emptyDeclarationSurface();
   const pkgDir = join(root, "packages");
-  if (!existsSync(pkgDir)) return { surface, opaque, declarations };
+  if (!existsSync(pkgDir)) return whole;
   const dts = sh("bash", [
     "-c",
     `find ${JSON.stringify(pkgDir)} -path '*/dist/*.d.ts' -not -path '*/node_modules/*' | sort`,
   ]);
   for (const file of dts.split("\n").filter(Boolean)) {
     const pkg = file.slice(pkgDir.length + 1).split("/")[0];
-    const text = readFileSync(file, "utf8");
-    const found = declarationSurface(text, pkg);
-    for (const [key, members] of found.surface) surface.set(key, members);
-    for (const [key, kind] of found.declarations) declarations.set(key, kind);
-    for (const [key, digest] of found.opaque) opaque.set(key, digest);
+    mergeDeclarationSurface(whole, declarationSurface(readFileSync(file, "utf8"), pkg));
   }
-  return { surface, opaque, declarations };
+  return whole;
 }
 
 const repoRoot = sh("git", ["rev-parse", "--show-toplevel"]);

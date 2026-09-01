@@ -9,7 +9,17 @@
  */
 import { createHash } from "node:crypto";
 
-/** Extract the declarations relevant to the breaking-notes check from one built `.d.ts`. */
+/**
+ * Extract the declarations relevant to the breaking-notes check from one built `.d.ts`.
+ *
+ * `declarations` maps each key to the **set** of declaration kinds seen for it, never to the last
+ * one. TypeScript legally admits the same exported name in the type and the value namespace —
+ * `export interface Foo {…}` beside `export declare const Foo: …` — so a scalar makes the result
+ * depend on which declaration the emitter happened to print second. Both directions were reachable:
+ * an unchanged interface followed by a same-named `const` read as a kind change that never
+ * happened, and an interface replaced by a union alias while the `const` survived read as no change
+ * at all, which is the silent omission this detector exists to close.
+ */
 export function declarationSurface(text, pkg) {
   const surface = new Map();
   const declarations = new Map();
@@ -19,8 +29,10 @@ export function declarationSurface(text, pkg) {
     /^export (?:declare )?(?:abstract )?(class|interface|type|function|const|enum) ([A-Za-z_$][\w$]*)/gm,
   )) {
     const key = `${pkg}:${match[2]}`;
-    surface.set(key, new Set());
-    declarations.set(key, match[1]);
+    if (!surface.has(key)) surface.set(key, new Set());
+    const kinds = declarations.get(key) ?? new Set();
+    kinds.add(match[1]);
+    declarations.set(key, kinds);
   }
 
   // A Zod-inferred alias carries no shape of its own. Digest the declaration it points at so the
@@ -57,6 +69,35 @@ export function declarationSurface(text, pkg) {
   return { surface, declarations, opaque };
 }
 
+/**
+ * Fold one file's extracted declarations into an accumulating whole-tree surface.
+ *
+ * Union, never overwrite, for the same reason the kinds are a set one level down: a package emits
+ * many `.d.ts` files, and a symbol declared as an interface in one and as a value in another is the
+ * same legal merge spread across two files. `Map.set` there loses whichever half was read first —
+ * the members if the value file sorts later, the `interface` kind if it sorts earlier — and the
+ * second of those silences the detector exactly as the scalar did.
+ */
+export function mergeDeclarationSurface(whole, part) {
+  for (const [key, members] of part.surface) {
+    const into = whole.surface.get(key) ?? new Set();
+    for (const member of members) into.add(member);
+    whole.surface.set(key, into);
+  }
+  for (const [key, kinds] of part.declarations) {
+    const into = whole.declarations.get(key) ?? new Set();
+    for (const kind of kinds) into.add(kind);
+    whole.declarations.set(key, into);
+  }
+  for (const [key, digest] of part.opaque) whole.opaque.set(key, digest);
+  return whole;
+}
+
+/** An empty accumulator for {@link mergeDeclarationSurface}. */
+export function emptyDeclarationSurface() {
+  return { surface: new Map(), declarations: new Map(), opaque: new Map() };
+}
+
 /** Mechanical breaking findings between two extracted declaration surfaces. */
 export function breakingFindings(base, head, baseDeclarations, headDeclarations) {
   const findings = [];
@@ -69,10 +110,12 @@ export function breakingFindings(base, head, baseDeclarations, headDeclarations)
     // Detection should be monotone with disruption: replacing a member-bearing interface with an
     // untracked declaration must not be less visible than adding one required member. The Zod case
     // in #236 remains a named blind spot; this mechanically classifiable case must not be silent.
+    // Interface **presence**, not the recorded kind: a same-named value declaration is a legal
+    // merge partner, not a replacement, so it neither creates nor conceals a break.
     if (
       members.size > 0 &&
-      baseDeclarations.get(key) === "interface" &&
-      headDeclarations.get(key) !== "interface"
+      baseDeclarations.get(key)?.has("interface") === true &&
+      headDeclarations.get(key)?.has("interface") !== true
     ) {
       findings.push(`declaration kind changed: ${key}`);
       continue;

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   breakingFindings,
   declarationSurface,
+  emptyDeclarationSurface,
+  mergeDeclarationSurface,
   parseWaivers,
   selectSection,
   uncoveredFindings,
@@ -105,6 +107,210 @@ describe("breakingFindings", () => {
     expect(after.opaque.get("aldus-core:ReworkPolicy")).not.toBe(
       before.opaque.get("aldus-core:ReworkPolicy"),
     );
+  });
+
+  /**
+   * A symbol legally occupies the type and the value namespace at once. Both orders are emitted in
+   * practice, and a scalar "last declaration kind" made the detector's answer depend on which one
+   * `tsc` printed second — a false positive in one order and a silent miss in the other.
+   */
+  describe("a legal type/value namespace merge", () => {
+    const VALUE = "export declare const ReworkVerdict: (input: unknown) => ReworkVerdict;\n";
+    const UNION = `export type ReworkVerdict =
+  | { kind: "evaluated"; findingCount: number }
+  | { kind: "not_evaluated"; reason: string };
+`;
+    const orders: readonly [string, (declaration: string) => string][] = [
+      ["type first", (declaration) => `${declaration}${VALUE}`],
+      ["value first", (declaration) => `${VALUE}${declaration}`],
+    ];
+
+    it.each(orders)("stays silent for an unchanged merged interface (%s)", (_order, merge) => {
+      expect(findingsFor(merge(MEMBER_INTERFACE), merge(MEMBER_INTERFACE))).toEqual([]);
+    });
+
+    it.each(orders)(
+      "still reports a newly required member on a merged interface (%s)",
+      (_order, merge) => {
+        expect(
+          findingsFor(
+            merge(MEMBER_INTERFACE),
+            merge(
+              MEMBER_INTERFACE.replace(
+                "    findingCount: number;",
+                "    findingCount: number;\n    kind: string;",
+              ),
+            ),
+          ),
+        ).toEqual(["newly required member: aldus-core:ReworkVerdict.kind"]);
+      },
+    );
+
+    it.each(orders)(
+      "reports the kind change when the interface becomes a union and the value survives (%s)",
+      (_order, merge) => {
+        expect(findingsFor(merge(MEMBER_INTERFACE), merge(UNION))).toEqual([
+          "declaration kind changed: aldus-core:ReworkVerdict",
+        ]);
+      },
+    );
+
+    it.each(orders)(
+      "reports the kind change for a plain alias with a surviving value (%s)",
+      (_order, merge) => {
+        expect(
+          findingsFor(merge(MEMBER_INTERFACE), merge("export type ReworkVerdict = Evaluated;\n")),
+        ).toEqual(["declaration kind changed: aldus-core:ReworkVerdict"]);
+      },
+    );
+
+    it.each(orders)(
+      "reports removal once, never also as a kind change, when the merge is gone (%s)",
+      (_order, merge) => {
+        expect(
+          findingsFor(merge(MEMBER_INTERFACE), "export type SomethingElse = string;\n"),
+        ).toEqual(["removed export: aldus-core:ReworkVerdict"]);
+      },
+    );
+
+    it.each(orders)(
+      "does not infer a kind break from an empty merged base interface (%s)",
+      (_order, merge) => {
+        expect(findingsFor(merge("export interface ReworkVerdict {\n}\n"), merge(UNION))).toEqual(
+          [],
+        );
+      },
+    );
+
+    it.each(orders)(
+      "leaves the #236 Zod blind spot silent when merged with a value (%s)",
+      (_order, merge) => {
+        const zod = `export interface ReworkVerdict {\n    findingCount: z.ZodNumber;\n}\n`;
+        expect(findingsFor(merge(zod), merge(UNION))).toEqual([]);
+      },
+    );
+
+    // The false-positive half, and the one a symmetric case cannot reach: the merge partner is
+    // *added* (or dropped) between the two trees, so a scalar kind disagrees across them while the
+    // interface itself never moved.
+    it.each(orders)(
+      "does not report a kind change when a same-named value is added beside an unchanged interface (%s)",
+      (_order, merge) => {
+        expect(findingsFor(MEMBER_INTERFACE, merge(MEMBER_INTERFACE))).toEqual([]);
+      },
+    );
+
+    it.each(orders)(
+      "does not report a kind change when a same-named value is dropped from beside an unchanged interface (%s)",
+      (_order, merge) => {
+        expect(findingsFor(merge(MEMBER_INTERFACE), MEMBER_INTERFACE)).toEqual([]);
+      },
+    );
+
+    it.each(orders)(
+      "still reports a newly required member when the value is added in the same release (%s)",
+      (_order, merge) => {
+        expect(
+          findingsFor(
+            MEMBER_INTERFACE,
+            merge(
+              MEMBER_INTERFACE.replace(
+                "    findingCount: number;",
+                "    findingCount: number;\n    kind: string;",
+              ),
+            ),
+          ),
+        ).toEqual(["newly required member: aldus-core:ReworkVerdict.kind"]);
+      },
+    );
+
+    it.each(orders)(
+      "still reports the kind change when the value is added in the same release (%s)",
+      (_order, merge) => {
+        expect(findingsFor(MEMBER_INTERFACE, merge(UNION))).toEqual([
+          "declaration kind changed: aldus-core:ReworkVerdict",
+        ]);
+      },
+    );
+
+    it("records every kind it saw, in either order", () => {
+      const typeFirst = declarationSurface(`${MEMBER_INTERFACE}${VALUE}`, "aldus-core");
+      const valueFirst = declarationSurface(`${VALUE}${MEMBER_INTERFACE}`, "aldus-core");
+      const expected = new Set(["interface", "const"]);
+      expect(typeFirst.declarations.get("aldus-core:ReworkVerdict")).toEqual(expected);
+      expect(valueFirst.declarations.get("aldus-core:ReworkVerdict")).toEqual(expected);
+      expect(typeFirst.surface.get("aldus-core:ReworkVerdict")).toEqual(
+        new Set(["blockingFindingClasses", "findingCount"]),
+      );
+      expect(valueFirst.surface.get("aldus-core:ReworkVerdict")).toEqual(
+        new Set(["blockingFindingClasses", "findingCount"]),
+      );
+    });
+
+    it.each(orders)("is idempotent across repeated evaluation (%s)", (_order, merge) => {
+      const base = declarationSurface(merge(MEMBER_INTERFACE), "aldus-core");
+      const head = declarationSurface(merge(UNION), "aldus-core");
+      const evaluate = (): string[] =>
+        breakingFindings(base.surface, head.surface, base.declarations, head.declarations);
+      expect(evaluate()).toEqual(evaluate());
+      expect(evaluate()).toEqual(["declaration kind changed: aldus-core:ReworkVerdict"]);
+    });
+  });
+
+  /**
+   * The same merge one level up: a package emits many `.d.ts` files, so the two halves of a legal
+   * merge can arrive from different files. Folding them with `Map.set` loses whichever half is read
+   * first — which is the scalar defect, re-created by the caller.
+   */
+  describe("merging the per-file surfaces of one package", () => {
+    const VALUE_FILE = "export declare const ReworkVerdict: (input: unknown) => ReworkVerdict;\n";
+
+    const foldedFindings = (baseFiles: string[], headFiles: string[]): string[] => {
+      const fold = (files: string[]): ReturnType<typeof emptyDeclarationSurface> =>
+        files.reduce(
+          (whole, text) => mergeDeclarationSurface(whole, declarationSurface(text, "aldus-core")),
+          emptyDeclarationSurface(),
+        );
+      const base = fold(baseFiles);
+      const head = fold(headFiles);
+      return breakingFindings(base.surface, head.surface, base.declarations, head.declarations);
+    };
+
+    it.each([
+      ["interface file first", [MEMBER_INTERFACE, VALUE_FILE]],
+      ["value file first", [VALUE_FILE, MEMBER_INTERFACE]],
+    ])("keeps an unchanged cross-file merge silent (%s)", (_order, files) => {
+      expect(foldedFindings(files, files)).toEqual([]);
+    });
+
+    it.each([
+      ["interface file first", (declaration: string): string[] => [declaration, VALUE_FILE]],
+      ["value file first", (declaration: string): string[] => [VALUE_FILE, declaration]],
+    ])("reports a cross-file interface-to-alias change (%s)", (_order, files) => {
+      expect(
+        foldedFindings(files(MEMBER_INTERFACE), files("export type ReworkVerdict = Evaluated;\n")),
+      ).toEqual(["declaration kind changed: aldus-core:ReworkVerdict"]);
+    });
+
+    it.each([
+      ["interface file first", [MEMBER_INTERFACE, VALUE_FILE]],
+      ["value file first", [VALUE_FILE, MEMBER_INTERFACE]],
+    ])("does not report a kind change when a value file is added (%s)", (_order, files) => {
+      expect(foldedFindings([MEMBER_INTERFACE], files)).toEqual([]);
+    });
+
+    it("keeps the members contributed by whichever file declared them", () => {
+      const whole = [VALUE_FILE, MEMBER_INTERFACE].reduce(
+        (into, text) => mergeDeclarationSurface(into, declarationSurface(text, "aldus-core")),
+        emptyDeclarationSurface(),
+      );
+      expect(whole.surface.get("aldus-core:ReworkVerdict")).toEqual(
+        new Set(["blockingFindingClasses", "findingCount"]),
+      );
+      expect(whole.declarations.get("aldus-core:ReworkVerdict")).toEqual(
+        new Set(["interface", "const"]),
+      );
+    });
   });
 
   it("produces the same finding on repeated evaluation without mutating either surface", () => {
