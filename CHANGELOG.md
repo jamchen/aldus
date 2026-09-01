@@ -8,6 +8,80 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.54 — 2026-09-01
+
+### Changed
+
+**BREAKING: `ReworkVerdict` and `ReworkDecision` each gain a member, so an exhaustive `switch` over
+either needs a new case.**
+
+<!-- breaking: aldus-services:ReworkVerdict -->
+<!-- breaking: aldus-services:ReworkDecision -->
+
+A fourth controller state, named by the first adopter after a harness timeout killed a dispatch: _an
+attempt stuck in `running` is neither converged nor a finding nor an absent evaluation — it is a
+round that started and cannot be said to have happened or not happened._ `no_evaluation` is the
+nearest existing arm and asserts something different: _nothing ran_. Here something may have run to
+completion and died before writing anything down.
+
+`ReworkVerdict` gains `RunningAttemptVerdict` (`kind: "attempt_running"`) and `ReworkDecision` gains
+`kind: "reconciliation_required"`. **Neither is a `ReworkStopReason` and neither escalates to a
+gate** — the remedy is for someone to establish whether the process is dead, which is fact-finding
+rather than a judgement, so routing it to a gate would hand an approver a question their approval
+cannot answer. `REWORK_STOP_REASONS` is unchanged. ADR-0057 records the boundary.
+
+**Migration.** A caller that only _produces_ a verdict, or reads a decision non-exhaustively, needs
+no change. A caller with an exhaustive `switch` over `ReworkVerdict["kind"]` or
+`ReworkDecision["kind"]` — including one relying on a `never` exhaustiveness check — gains one case
+each. `reconciliation_required` carries `stageId`, `attemptId`, `artifactDigest`, `explanation`, and
+the optional `recordedCostIds` / `recordedArtifactDigests`; render the `explanation` as given.
+
+Stated as a break rather than left to a green check: `check-breaking-notes.mjs` compares built
+`.d.ts` for removed exports and newly required members, and **does not detect union widening**.
+
+**What does not change.** Every existing input decides exactly as it did — not-evaluated, ambiguous,
+clean, blocking, oscillation, regression, bounds-exhausted, no-policy. Nothing here probes a process,
+kills one, forces a takeover, or spends anything: the decision **names** the `--force` recovery path
+from `next.46` and never invokes it.
+
+**`aldus rework status` no longer says "nothing to decide about" for a Run holding a killed
+evaluation.**
+
+`reworkStatus` skipped every non-succeeded attempt, so a Run whose evaluator was killed reported _no
+completed attempt of "<stage>" has judged a "<kind>" artifact, so there is nothing to decide about_ —
+true about completed attempts and wrong about the Run, because there is something to reconcile. Worse
+in one shape: a Run holding a stuck attempt **beside** an older clean evaluation previewed
+`converged`, which is the arm that releases the next stage, across a window whose paid effects are
+unknown.
+
+An attempt recorded `running` now takes precedence over every completed one and previews
+`reconciliation_required`, carrying the exact attempt identity, the candidate it is judging, and the
+cost records and artifacts the record already attributes to that attempt.
+
+**Evidence is reported, never read as an outcome.** Both legal timings — killed with nothing written
+down, and killed a second later with a charge and an artifact already recorded — produce the same
+class and the same explanation. A count of either establishes nothing about whether the evaluation
+finished, and the rendered line says so.
+
+**The wording is part of the contract here.** A healthy in-flight evaluation reaches the same arm,
+because the runtime cannot tell a live dispatch from an abandoned one — the same limit `costs`
+already records for a `reserved` reservation holding an execution. So the explanation states what is
+unestablished and never that the attempt is dead or that a takeover is safe.
+
+### Added
+
+- `runningEvaluation(attempts, kind)` in `@aldus-runtime/services` — the counterpart to `judgedBy`:
+  the newest attempt of an evaluating stage recorded `running`, with the candidate it is judging.
+  The digest is absent when the attempt does not consume exactly one artifact of that kind, and the
+  caller must not turn that absence into a decision — `reworkStatus` reports no preview and says a
+  running attempt still stands.
+- Validation on the new verdict: a `attempt_running` verdict without a usable `stageId`, `attemptId`
+  or `artifactDigest`, or with a mistyped evidence list, is refused with `ALDUS_INVALID_REQUEST`
+  rather than answered with a reconciliation notice about an attempt nobody can find. The error
+  carries the failing path and issue code only, never the received value (§19.2).
+- ADR-0057, and a cross-reference from ADR-0055's stop-reason list so a reader looking for the
+  missing case is not invited to add it there.
+
 ## 0.2.0-next.53 — 2026-09-01
 
 ### Changed

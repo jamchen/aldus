@@ -19,7 +19,11 @@ import {
   type StageAttempt,
 } from "@aldus-runtime/core";
 
-import { deriveReworkRounds, type AttemptWithMetadata } from "../src/rework-rounds.js";
+import {
+  deriveReworkRounds,
+  runningEvaluation,
+  type AttemptWithMetadata,
+} from "../src/rework-rounds.js";
 
 const ACTOR = { kind: "agent" as const, id: "agent-a" };
 const CANDIDATE = "script-candidate";
@@ -281,5 +285,84 @@ describe("what the reading refuses stays visible", () => {
     });
 
     expect(reading.rounds[0]?.inputFindingCount).toBeUndefined();
+  });
+});
+
+/**
+ * Reading the running attempt out of the record (#220, ADR-0057).
+ *
+ * `judgedBy` and `latestJudged` both skip a non-succeeded attempt, which is right for deriving a
+ * round and is why a Run holding a killed evaluation had nothing to report. This is the counterpart.
+ */
+describe("runningEvaluation", () => {
+  it("finds the attempt recorded running and the candidate it is judging", () => {
+    const reading = runningEvaluation(
+      [evaluation("att-9", A), evaluation("att-10", B, {}, { status: "running" })],
+      CANDIDATE,
+    );
+
+    expect(reading?.entry.attempt.attemptId).toBe("att-10");
+    expect(reading?.digest).toBe(B);
+  });
+
+  it("returns the newest running attempt, which is the one an operator has to reconcile", () => {
+    const reading = runningEvaluation(
+      [
+        evaluation("att-9", A, {}, { status: "running" }),
+        evaluation("att-10", B, {}, { status: "running" }),
+      ],
+      CANDIDATE,
+    );
+
+    expect(reading?.entry.attempt.attemptId).toBe("att-10");
+  });
+
+  it("stays silent when every attempt has settled", () => {
+    // The negative control. Without it the cases above pass for a reading that answers for a
+    // succeeded attempt too, which would put every clean Run into reconciliation.
+    expect(
+      runningEvaluation([evaluation("att-9", A), evaluation("att-10", B)], CANDIDATE),
+    ).toBeUndefined();
+  });
+
+  it("does not read a failed or queued attempt as running", () => {
+    for (const status of ["failed", "queued", "cancelled"] as const) {
+      expect(
+        runningEvaluation([evaluation("att-9", A, {}, { status })], CANDIDATE),
+      ).toBeUndefined();
+    }
+  });
+
+  it("reports the running attempt without a digest when the candidate is not established", () => {
+    // Zero and several are the same answer, for `onlyOfKind`'s reason. The attempt is still
+    // reported, because a running attempt is the fact an operator needs even when its subject
+    // cannot be named — what must not happen is a notice about a candidate nobody can check.
+    const none = runningEvaluation(
+      [evaluation("att-10", A, {}, { status: "running", inputArtifacts: [] })],
+      CANDIDATE,
+    );
+    expect(none?.entry.attempt.attemptId).toBe("att-10");
+    expect(none?.digest).toBeUndefined();
+
+    const several = runningEvaluation(
+      [
+        evaluation(
+          "att-10",
+          A,
+          {},
+          { status: "running", inputArtifacts: [art(CANDIDATE, A), art(CANDIDATE, B)] },
+        ),
+      ],
+      CANDIDATE,
+    );
+    expect(several?.digest).toBeUndefined();
+  });
+
+  it("does not answer for an artifact of another kind", () => {
+    const reading = runningEvaluation(
+      [evaluation("att-10", A, {}, { status: "running", inputArtifacts: [art(REPORT, A)] })],
+      CANDIDATE,
+    );
+    expect(reading?.digest).toBeUndefined();
   });
 });

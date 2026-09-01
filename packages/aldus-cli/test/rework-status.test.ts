@@ -172,6 +172,83 @@ describe("the loop explains where it is", () => {
     expect(out).toContain("not measured");
   });
 
+  /**
+   * The running-attempt arm (#220, ADR-0057).
+   *
+   * The line an operator acts on. It must name the attempt, say what is unestablished, point at the
+   * bounded remedy, and never read as an escalation — there is no gate here and no candidate to
+   * choose.
+   */
+  describe("an attempt recorded running", () => {
+    const reconcile = (
+      over: Partial<
+        Extract<
+          NonNullable<ReworkStatusReport["loops"][number]["wouldDecide"]>,
+          { kind: "reconciliation_required" }
+        >
+      > = {},
+    ): string =>
+      renderRework(
+        report({
+          recordedRounds: [],
+          wouldDecide: {
+            kind: "reconciliation_required",
+            stageId: "script.oracle",
+            attemptId: "att-10",
+            artifactDigest: A,
+            explanation:
+              'Attempt "att-10" of "script.oracle" is recorded as running, so round 1 can neither ' +
+              "be said to have happened nor not happened. Reconcile it — `--force` takes the " +
+              "stage over. This is not a statement that the attempt is dead, and not a statement " +
+              "that a takeover is safe.",
+            ...over,
+          },
+        }),
+      );
+
+    it("names the attempt, the uncertainty and the remedy", () => {
+      const out = reconcile();
+
+      expect(out).toContain("reconcile");
+      expect(out).toContain("att-10");
+      expect(out).toContain("script.oracle");
+      expect(out).toContain("neither be said to have happened nor not happened");
+      expect(out).toContain("--force");
+    });
+
+    it("does not read as an escalation or a convergence", () => {
+      const out = reconcile();
+
+      expect(out).not.toContain("stop (");
+      expect(out).not.toContain("decide script.freeze");
+      expect(out).not.toContain("converged");
+      expect(out).not.toContain("candidates");
+    });
+
+    it("labels recorded evidence as establishing nothing about completion", () => {
+      // Both timings from the ruling print the same qualifier. A count on its own reads as a
+      // completion signal in exactly the direction the record cannot support.
+      const quiet = reconcile({ recordedCostIds: [], recordedArtifactDigests: [] });
+      const charged = reconcile({
+        recordedCostIds: ["cost-a"],
+        recordedArtifactDigests: [B],
+      });
+
+      expect(quiet).toContain("0 cost record(s), 0 artifact(s)");
+      expect(charged).toContain("1 cost record(s), 1 artifact(s)");
+      for (const out of [quiet, charged]) {
+        expect(out).toContain("neither establishes whether the evaluation finished");
+      }
+    });
+
+    it("carries the disclaimer through unaltered rather than summarising it", () => {
+      const out = reconcile();
+
+      expect(out).toContain("not a statement that the attempt is dead");
+      expect(out).toContain("not a statement that a takeover is safe");
+    });
+  });
+
   it("says so when no policy is declared", () => {
     const out = renderRework({ runId: "run-a", loops: [] });
 

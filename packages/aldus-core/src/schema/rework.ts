@@ -80,6 +80,12 @@ export const REWORK_STOP_REASONS = [
    * attempt that never evaluated, a report that could not be parsed. An absent evaluation is not a
    * passing one, and the remedy differs: an ambiguous verdict needs a person to read it, and a
    * missing one needs the evaluation to happen.
+   *
+   * **Not an attempt durably recorded as `running`** (ADR-0057, #220). This arm asserts that
+   * nothing ran; a running attempt's whole content is that whether anything ran is unknown, and its
+   * remedy is for someone to establish whether the process is dead rather than for anyone to
+   * decide. That state is deliberately absent from this list: it terminates in no gate, so it is
+   * not a stop reason. Adding it here is the alternative ADR-0057 rejects.
    */
   "no_evaluation",
   /** No policy covers this stage, so every blocking finding is a person's decision. */
