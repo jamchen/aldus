@@ -661,4 +661,147 @@ export const cases = [
     wantExit: 1,
     wantOutput: "still refuses without --force, and still takes over with it",
   },
+  /* ---------------------------------------------------------------------------------------------
+   * The post-publish dist-tag assertion.
+   *
+   * Every case here switches off one guard the shipped false green needed. Release run
+   * 33470723600 published twelve packages as 0.2.0-next.53 and the assertion went green while
+   * printing `next: 0.2.0-next.52` for two of them, so the cases assert the **distinguishing**
+   * verdict of the test they kill rather than a substring the others also satisfy.
+   * ------------------------------------------------------------------------------------------ */
+  {
+    // The fault itself: `next` printed and never compared. Without this clause the shipped state
+    // of run 33470723600 reads as a successful release, which is what happened.
+    name: "dist-tags: dropping the next comparison lets run 33470723600's state read as green",
+    setup: [
+      {
+        replace: [
+          "scripts/dist-tags-check.mjs",
+          "    if (nowNext !== expectedVersion) {",
+          "    if (false /* mutant */ && nowNext !== expectedVersion) {",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-e2e",
+      "test/dist-tags.test.ts",
+      "-t",
+      "refuses run 33470723600's state instead of reporting it green",
+    ],
+    wantExit: 1,
+    wantOutput: "refuses run 33470723600's state instead of reporting it green",
+  },
+  {
+    // One lagging package among twelve is the whole shape of the failure. A rule that judges the
+    // first package it is handed passes on a set whose eleventh and twelfth never arrived, and
+    // the alphabetical first is the one most likely to have converged.
+    name: "dist-tags: judging only the first package passes a set with two stale ones",
+    setup: [
+      {
+        replace: [
+          "scripts/dist-tags-check.mjs",
+          "    results = expected.map((entry) =>",
+          "    results = expected.slice(0, 1).map((entry) => /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-e2e",
+      "test/dist-tags.test.ts",
+      "-t",
+      "refuses run 33470723600's state instead of reporting it green",
+    ],
+    wantExit: 1,
+    wantOutput: "refuses run 33470723600's state instead of reporting it green",
+  },
+  {
+    // npm's HTTP cache serves the previous document, and a cached stale `next` is indistinguishable
+    // from a fresh one at the point of comparison. The check would then confirm the very staleness
+    // it exists to detect, and no assertion downstream could tell.
+    name: "dist-tags: dropping --prefer-online lets a cached document answer for the registry",
+    setup: [
+      {
+        replace: [
+          "scripts/dist-tags-check.mjs",
+          'return ["view", name, "dist-tags", "name", "--json", "--prefer-online"];',
+          'return ["view", name, "dist-tags", "name", "--json"]; /* mutant */',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-e2e",
+      "test/dist-tags.test.ts",
+      "-t",
+      "asks for a fresh, self-identifying read on every call",
+    ],
+    wantExit: 1,
+    wantOutput: "asks for a fresh, self-identifying read on every call",
+  },
+  {
+    // Weakened, not removed: compare `latest` only when both sides are present. That still catches
+    // a move between two versions and silently permits a `latest` **created** by this publish —
+    // which is exactly the 0.1.0 bootstrap deviation ADR-0023 decision 4 was written for, so the
+    // check would pass on the one case it was built to catch.
+    name: "dist-tags: skipping the latest comparison when either side is absent permits the bootstrap deviation",
+    setup: [
+      {
+        replace: [
+          "scripts/dist-tags-check.mjs",
+          "    if (nowLatest !== wasLatest) {",
+          "    if (wasLatest !== null && nowLatest !== null && nowLatest !== wasLatest) {",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-e2e",
+      "test/dist-tags.test.ts",
+      "-t",
+      "fails an undeclared latest created by a first publish, the ADR-0023 bootstrap case",
+    ],
+    wantExit: 1,
+    wantOutput: "fails an undeclared latest created by a first publish",
+  },
+  {
+    // The retry budget. A release job that re-reads a permanently stale registry until something
+    // else kills it is not a check — it is a hang, and a hang in a publish job reads as a broken
+    // runner rather than as a failed release.
+    name: "dist-tags: an unbounded round count outlives its own deadline diagnostic",
+    setup: [
+      {
+        replace: [
+          "scripts/dist-tags-check.mjs",
+          "  const maxRounds = Math.max(1, Math.ceil(deadlineMs / intervalMs));",
+          "  const maxRounds = Number.POSITIVE_INFINITY; /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-e2e",
+      "test/dist-tags.test.ts",
+      "-t",
+      "exhausts the deadline on permanent staleness rather than retrying forever",
+    ],
+    wantExit: 1,
+    wantOutput: "exhausts the deadline on permanent staleness rather than retrying forever",
+  },
 ];
