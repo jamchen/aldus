@@ -638,7 +638,8 @@ Five things the output is careful about, each pinned by a test:
 - the judged subject is the evaluation's **input** candidate, resolved by declared artifact kind —
   an evaluator's output is its report, so `outputArtifacts.at(-1)` names the wrong thing;
 - a running or failed evaluation is **never** read as the latest verdict, and a policy with no
-  completed evaluation of its candidate gets **no preview and a stated reason**, never `converged`;
+  completed evaluation of its candidate gets **no preview and a stated reason**, never `converged`
+  — the two produce the same empty round list and only one of them is a pass;
 - repairs the record cannot join are **surfaced**, because one missing from the list reads as one
   that never ran and understates what was spent;
 - an escalation prints the decision's **sentence**, not only its enumerated name. _"bounds_exhausted"_
