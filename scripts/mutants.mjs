@@ -80,6 +80,84 @@ export const cases = [
     wantOutput: "aldus-core:ReworkPolicy",
   },
   {
+    name: "breaking-notes: the interface kind-change regression kills a disabled detector",
+    setup: [
+      {
+        replace: [
+          "scripts/breaking-coverage.mjs",
+          // A pattern, not a literal. The literal pinned here was the scalar comparison
+          // `baseDeclarations.get(key) === "interface"`, and the fix that made kinds a set
+          // rewrote that expression — so the case refused before running anything, on the very
+          // commit it was meant to guard. A case is a claim too, and this one expired in one
+          // commit.
+          /baseDeclarations\.get\(key\)\??\.?has\("interface"\) === true|baseDeclarations\.get\(key\) === "interface"/,
+          'false /* mutant */ && baseDeclarations.get(key)?.has("interface") === true',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/breaking-coverage.test.ts",
+      "-t",
+      "reports the ReworkVerdict interface-to-discriminated-union change",
+    ],
+    wantExit: 1,
+    wantOutput: "reports the ReworkVerdict interface-to-discriminated-union change",
+  },
+  {
+    // The scalar this replaced was declaration-order dependent, and its two failure modes point
+    // opposite ways: an unchanged interface followed by a same-named value read as a kind change
+    // that never happened, and an interface replaced by an alias while the value survived read as
+    // no change at all. Both are legal TypeScript, so the case has to reach the aggregation itself.
+    name: "breaking-notes: removing the kind aggregation is caught by the merged-declaration cases",
+    setup: [
+      {
+        replace: [
+          "scripts/breaking-coverage.mjs",
+          /const kinds = declarations\.get\(key\)[\s\S]*?declarations\.set\(key, kinds\);/,
+          "declarations.set(key, new Set([match[1]]));",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/breaking-coverage.test.ts",
+      "-t",
+      "a legal type/value namespace merge",
+    ],
+    wantExit: 1,
+    wantOutput: "records every kind it saw, in either order",
+  },
+  {
+    // The same defect one level up, in the caller. A package emits many `.d.ts` files, so the two
+    // halves of a legal merge can arrive from different ones; folding them with `Map.set` loses
+    // whichever half is read first and re-creates the scalar's silence from outside the extractor.
+    name: "breaking-notes: folding per-file surfaces with set() instead of union is caught",
+    setup: [
+      {
+        replace: [
+          "scripts/breaking-coverage.mjs",
+          /const into = whole\.declarations\.get\(key\)[\s\S]*?whole\.declarations\.set\(key, into\);/,
+          "whole.declarations.set(key, kinds);",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/breaking-coverage.test.ts",
+      "-t",
+      "merging the per-file surfaces of one package",
+    ],
+    wantExit: 1,
+    wantOutput: "reports a cross-file interface-to-alias change",
+  },
+  {
     name: "version-bump: a src/ change to a published package must fire",
     setup: [{ append: ["packages/aldus-core/src/schema-version.ts", "// mutant"] }],
     command: ["node", "scripts/check-version-bump.mjs", "{{BASE}}"],
