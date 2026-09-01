@@ -847,7 +847,7 @@ export const cases = [
         replace: [
           "packages/aldus-services/src/rework.ts",
           '      kind: "reconciliation_required",',
-          '      kind: "converged" /* mutant */,',
+          '      kind: "converged" as unknown as "reconciliation_required", /* mutant */',
         ],
       },
     ],
@@ -865,7 +865,7 @@ export const cases = [
         replace: [
           "packages/aldus-services/src/rework.ts",
           '      kind: "reconciliation_required",',
-          '      kind: "rework", round: 1, repairStageId: "x", consumeFindingClasses: [], inputDigest: digest /* mutant */,',
+          '      kind: "rework" as unknown as "reconciliation_required", /* mutant */',
         ],
       },
     ],
@@ -874,15 +874,16 @@ export const cases = [
     wantOutput: "reaches reconciliation_required when killed before anything was written down",
   },
   {
-    // A gate escalation: the mapping ADR-0057 rejects by name, because an approval cannot establish
-    // that a process is dead and `approvedContinuationDigests` would appear to clear it.
-    name: "rework-running: escalating a running attempt to a gate asks for a decision nobody can make",
+    // A gate escalation, under the reason a reader might think fits: the mapping ADR-0057 rejects
+    // by name, because an approval cannot establish that a process is dead and
+    // `approvedContinuationDigests` would then appear to clear it.
+    name: "rework-running: escalating a running attempt to a gate as an ambiguous verdict asks for a decision nobody can make",
     setup: [
       {
         replace: [
           "packages/aldus-services/src/rework.ts",
-          '      kind: "reconciliation_required",',
-          '      kind: "escalate", gateId: "g", reason: "no_evaluation", candidates: [] /* mutant */,',
+          '      kind: "reconciliation_required",\n      stageId: verdict.stageId,',
+          '      ...({ kind: "escalate", gateId: policy?.escalateToGateId ?? input.fallbackGateId, reason: "ambiguous_verdict", candidates } as unknown as { kind: "reconciliation_required" }), /* mutant */\n      stageId: verdict.stageId,',
         ],
       },
     ],
@@ -892,22 +893,15 @@ export const cases = [
       "never converges, reworks or escalates when killed before anything was written down",
   },
   {
-    // Folding it into `no_evaluation`, which asserts *nothing ran* — a statement about the world the
-    // record does not hold. Two edits, because the arm has to be unreachable before the fold shows.
+    // Folding it into `no_evaluation`, which asserts *nothing ran* — a statement about the world
+    // the record does not hold, and the nearest arm a maintainer would reach for.
     name: "rework-running: folding a running attempt into no_evaluation asserts nothing ran",
     setup: [
       {
         replace: [
           "packages/aldus-services/src/rework.ts",
-          '  if (verdict.kind === "attempt_running") {',
-          "  if (false /* mutant */) {",
-        ],
-      },
-      {
-        replace: [
-          "packages/aldus-services/src/rework.ts",
-          '  if (verdict.kind === "not_evaluated") {',
-          '  if (verdict.kind === "not_evaluated" || verdict.kind === "attempt_running") {',
+          '      kind: "reconciliation_required",\n      stageId: verdict.stageId,',
+          '      ...({ kind: "escalate", gateId: policy?.escalateToGateId ?? input.fallbackGateId, reason: "no_evaluation", candidates } as unknown as { kind: "reconciliation_required" }), /* mutant */\n      stageId: verdict.stageId,',
         ],
       },
     ],
@@ -1017,7 +1011,7 @@ export const cases = [
         replace: [
           "packages/aldus-services/src/services.ts",
           "      const running = runningEvaluation(evaluationAttempts, policy.candidateArtifactKind);",
-          "      const running = undefined; /* mutant */",
+          "      const running = runningEvaluation([], policy.candidateArtifactKind); /* mutant */",
         ],
       },
     ],
@@ -1039,9 +1033,9 @@ export const cases = [
     setup: [
       {
         replace: [
-          "packages/aldus-services/src/services.ts",
-          "        if (running.digest === undefined) {",
-          "        if (false /* mutant */) {",
+          "packages/aldus-services/src/rework-rounds.ts",
+          "    return { entry, ...(candidate === undefined ? {} : { digest: candidate.sha256 }) };",
+          '    return { entry, digest: candidate?.sha256 ?? entry.attempt.inputArtifacts[0]?.sha256 ?? "" }; /* mutant */',
         ],
       },
     ],
