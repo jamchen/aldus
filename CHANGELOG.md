@@ -644,7 +644,8 @@ Five things the output is careful about, each pinned by a test:
 - an escalation prints the decision's **sentence**, not only its enumerated name. _"bounds_exhausted"_
   says what state it is in; _"the last repair increased findings from 4 to 7"_ is the fact that makes
   raising the bound the wrong move;
-- candidates are listed in record order, labelled unranked, and an unmeasured one reads
+- candidates are listed in record order and labelled unranked, because the loop carries the newest
+  forward and the newest is not the best after a regression; an unmeasured one reads
   _"not measured"_ rather than `0`.
 
 <!-- No machine marker: check-breaking-notes reports no surface finding. New exports and one
