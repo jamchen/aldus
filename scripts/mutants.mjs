@@ -244,11 +244,82 @@ export const cases = [
     // checker: "no-shipped-change holds for this PR" is false on any branch touching `src`, and it
     // failed for that reason rather than for a defect. A case whose answer depends on where it is
     // run is a case that will be red for the wrong reason and then ignored.
+    //
+    // The fragment expired once already, in the direction this file warns about: it read
+    // `unknown claim`, which was the whole of the old bare message, and the PR that routed this
+    // gate through `declined.mjs` changed the wording without changing the behaviour. Asserting
+    // the DECLINED framing rather than the old phrasing is what the case was always about.
     name: "claim-scope: an unknown claim must refuse rather than be satisfied",
     setup: [{ append: ["docs/adr/README.md", ""] }],
     command: ["node", "scripts/check-claim-scope.mjs", "{{BASE}}", "not-a-real-claim"],
     wantExit: 2,
-    wantOutput: "unknown claim",
+    wantOutput: 'does not know the claim "not-a-real-claim"',
+  },
+  {
+    // The mutant that SURVIVED PR #264's independent review, now killed. Moving the declined
+    // guard below the `publish-dirs.mjs` call makes the gate do real work before deciding it has
+    // no arguments, and every test that existed still passed, because they all ran in the
+    // repository root where that call succeeds. `gate-declined.test.ts` runs the gate from a
+    // directory holding the scripts and nothing else, which is where the two differ.
+    name: "version-bump: moving the declined guard below the work must be killed",
+    setup: [
+      {
+        replace: [
+          "scripts/check-version-bump.mjs",
+          /if \(base === undefined\) declineMissingBaseRef\("check-version-bump\.mjs", "origin\/main"\);/,
+          "/* mutant: guard moved below the work */",
+        ],
+      },
+      {
+        replace: [
+          "scripts/check-version-bump.mjs",
+          /const changed = git\("diff", "--name-only",/,
+          'if (base === undefined) declineMissingBaseRef("check-version-bump.mjs", "origin/main");\n\nconst changed = git("diff", "--name-only",',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/gate-declined.test.ts",
+      "-t",
+      "check-version-bump.mjs declines with no repository at all",
+    ],
+    wantExit: 1,
+    wantOutput: "Failed Tests 1",
+  },
+  {
+    // The same property for the gate PR #265 routed through `declined.mjs`. Written as its own
+    // case rather than trusted to the one above, because a guard is only tested when its result
+    // comes from the mechanism under test — two guards were once confirmed by a third.
+    name: "claim-scope: moving the declined guards below the work must be killed",
+    setup: [
+      {
+        replace: [
+          "scripts/check-claim-scope.mjs",
+          /if \(base === undefined\) decline\("<base-ref>"\);/,
+          "/* mutant: guards moved below the work */",
+        ],
+      },
+      {
+        replace: [
+          "scripts/check-claim-scope.mjs",
+          /const changed = execFileSync\("git", \["diff", "--name-only",/,
+          'if (base === undefined) decline("<base-ref>");\n\nconst changed = execFileSync("git", ["diff", "--name-only",',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/gate-declined.test.ts",
+      "-t",
+      "check-claim-scope.mjs declines with no repository at all",
+    ],
+    wantExit: 1,
+    wantOutput: "Failed Tests 1",
   },
   {
     name: "claim-scope: docs-only is false for a PR carrying a script",
