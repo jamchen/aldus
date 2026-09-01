@@ -424,3 +424,67 @@ export function reduceReservations(
   }
   return [...byId.values()];
 }
+
+/* -------------------------------------------------------------------------------------------
+ * Dispatch evidence — what a stuck stage's reservations establish (ADR-0044, #244)
+ * ---------------------------------------------------------------------------------------- */
+
+/**
+ * What a Run's reservation store establishes about whether a stage began a provider call
+ * (ADR-0044; `docs/design/spend-reservation-store.md` §5).
+ *
+ * Three values because there are three answers, and the third is not a variant of the other two.
+ * `indeterminate` is *"could not establish"* — a free stage, an unwired store and a stream that
+ * refused to be read are all it, and folding any of them into `reserved_never_dispatched` would
+ * claim safety from a measurement nobody took (§19.2, ADR-0030).
+ */
+export type StageDispatchEvidence =
+  /** Every active reservation for the stage is `reserved` and none records a dispatch. */
+  | "reserved_never_dispatched"
+  /** At least one active reservation records a transition past `reserved`. */
+  | "dispatch_possible"
+  /** Nothing was established. Never read as evidence that nothing was spent. */
+  | "indeterminate";
+
+/**
+ * Apply §5's row 2 / row 3 distinction to one stage's active reservations (ADR-0044, #244).
+ *
+ * **Stage-scoped, never attempt-scoped.** `SpendService.reserve` resolves idempotency on
+ * `effectKey`, so a reservation keeps the `attemptId` of the attempt that *first* reserved that
+ * effect: on attempt 10 of a retried stage, a dispatched reservation still reads `attempt 1`, and
+ * an attempt-keyed query returns nothing while real money stands committed. `(runId, stageId)` is
+ * the only join that does not lie, which is why `transitions` is expected to be every grant's
+ * stream aggregated — a stage may hold reservations in more than one grant, and one grant's
+ * silence is not the stage's.
+ *
+ * **The rule is stated as an exclusion.** A reservation is possibly dispatched *unless* its entire
+ * stream is the single `reservation.reserved`. Enumerating the kinds that mean dispatch would make
+ * a kind added later default to "safe" until someone remembered to list it; this way it fails
+ * closed by construction. `dispatch_identified` is a legal successor of `reserved` with no
+ * `dispatch_prepared` between, and it leaves the projection's `execution` field `undefined` — so
+ * the raw stream is the source here and `reservation.execution` is not a safe substitute.
+ *
+ * Zero matching active reservations is `indeterminate`, never the safe row: it is what a free
+ * stage, an empty store and a grant nobody could read all look like from here.
+ */
+export function stageDispatchEvidence(
+  transitions: readonly SpendReservationTransition[],
+  scope: { runId: string; stageId: string },
+): StageDispatchEvidence {
+  const relevant = reduceReservations(transitions).filter(
+    (reservation) =>
+      reservation.runId === scope.runId &&
+      reservation.stageId === scope.stageId &&
+      reservationIsActive(reservation),
+  );
+  if (relevant.length === 0) return "indeterminate";
+
+  for (const reservation of relevant) {
+    const own = transitions.filter(
+      (transition) => transition.reservationId === reservation.reservationId,
+    );
+    const reservedOnly = own.length === 1 && own[0]?.kind === "reservation.reserved";
+    if (!reservedOnly) return "dispatch_possible";
+  }
+  return "reserved_never_dispatched";
+}

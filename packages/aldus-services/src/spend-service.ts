@@ -10,6 +10,7 @@
 import {
   isLegalSuccessor,
   reduceReservations,
+  stageDispatchEvidence,
   newSpendReservationId,
   SCHEMA_VERSION,
   type BillingStatus,
@@ -20,6 +21,7 @@ import {
   type Money,
   type SpendReservation,
   type SpendReservationTransition,
+  type StageDispatchEvidence,
   type SpendTransitionKind,
 } from "@aldus-runtime/core";
 import {
@@ -901,6 +903,34 @@ export class SpendService {
         ...(unresolvedReason === undefined ? {} : { unresolvedReason }),
       };
     });
+  }
+
+  /**
+   * What this workspace's reservation store establishes about a stuck stage's dispatch window
+   * (ADR-0044; `docs/design/spend-reservation-store.md` §5; #244).
+   *
+   * Reads **every** grant stream this Run touches and applies the Core rule to the aggregate. Two
+   * reasons it cannot be narrower: `reserve` resolves idempotency per grant stream, so one
+   * `effectKey` may hold a reservation in each of two grants; and a reservation keeps the
+   * `attemptId` of the attempt that first reserved the effect, so the stuck attempt's id is not a
+   * key that finds it.
+   *
+   * **Throws on an unreadable or corrupt stream, deliberately.** Answering "no reservations" for a
+   * store this could not read is the failure the whole distinction exists to prevent, so what a
+   * failed read means is the caller's decision to make and not a value this returns.
+   *
+   * @throws {AldusError} when a grant stream cannot be read or is corrupt.
+   */
+  async stageDispatchEvidence(runId: string, stageId: string): Promise<StageDispatchEvidence> {
+    const reservations = await this.#store.listByRun(runId);
+    // Sorted so the aggregate stream is the same on every read of an unchanged store; the rule is
+    // order-independent, and an answer that depends on directory order is not one worth trusting.
+    const grantIds = [...new Set(reservations.map((reservation) => reservation.grantId))].sort();
+    const transitions: SpendReservationTransition[] = [];
+    for (const grantId of grantIds) {
+      transitions.push(...(await this.#store.readGrant(grantId)).transitions);
+    }
+    return stageDispatchEvidence(transitions, { runId, stageId });
   }
 
   /**
