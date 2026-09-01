@@ -6,11 +6,34 @@
  * forbids casting around strictness rather than respecting it.
  */
 
-/** The CHANGELOG section a tree's notes must live in. */
-export declare function selectSection(
-  changelog: string,
-  version: string,
-): { heading: string | undefined; body: string };
+/** One `## ` section of a CHANGELOG, with the 1-based line its heading is on. */
+export interface ChangelogSection {
+  heading: string;
+  body: string;
+  line: number;
+}
+
+/** Every `## ` section, in file order — a list, so duplicate headings survive as duplicates. */
+export declare function changelogSections(changelog: string): ChangelogSection[];
+
+/**
+ * The CHANGELOG section a tree's notes must live in, or a refusal.
+ *
+ * A discriminated union rather than an optional heading: zero matching sections and more than one
+ * are both outcomes the caller must handle, and a shape that can express "the last of several"
+ * is a shape in which last-write-wins is representable.
+ */
+export type SectionSelection =
+  | { ok: true; heading: string; body: string }
+  | {
+      ok: false;
+      reason: "no-section" | "duplicate-section";
+      matches: { heading: string; line: number }[];
+      diagnostic: string;
+    };
+
+/** Bind a version to exactly one CHANGELOG section, or refuse with a diagnostic. */
+export declare function selectSection(changelog: string, version: string): SectionSelection;
 
 /** Waivers declared in one section, and any that are waiver-shaped but malformed. */
 export declare function parseWaivers(sectionBody: string): {

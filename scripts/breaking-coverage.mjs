@@ -134,23 +134,84 @@ const headingMatchesVersion = (heading, version) =>
   heading === version || heading.startsWith(`${version} `) || heading.startsWith(`${version}\t`);
 
 /**
- * Select the CHANGELOG section the notes for this tree must live in.
+ * Every `## ` section of a CHANGELOG, in file order, each with the 1-based line of its heading.
+ *
+ * A **list**, never a `Map` keyed by heading. A `Map` answers "which section" with whichever
+ * duplicate was inserted last and destroys the evidence that there was more than one — and this
+ * repository's CHANGELOG carried two `0.2.0-next.48` sections and two *different* `0.2.0-next.49`
+ * sections, introduced by one merge (`d1f553c`) and unnoticed by every check since. The line number
+ * is kept because a diagnostic naming two identical headings and not where they are cannot be
+ * acted on.
+ *
+ * The heading key is trimmed, so a CRLF file and a heading with trailing whitespace read the same
+ * as their LF and untrimmed equivalents; the body is the raw text after `## `, unchanged.
+ */
+export function changelogSections(changelog) {
+  const parts = changelog.split(/^## /m);
+  const sections = [];
+  let line = 1;
+  for (const [index, part] of parts.entries()) {
+    if (index > 0) sections.push({ heading: part.split("\n")[0].trim(), body: part, line });
+    line += (part.match(/\n/g) ?? []).length;
+  }
+  return sections;
+}
+
+/**
+ * Select the CHANGELOG section the notes for this tree must live in, or refuse.
  *
  * Exact token match, never `startsWith` on the raw string: a tree at `0.2.0-next.2` binds to a
  * `0.2.0-next.20` heading under a prefix test, which silently accepts a *different release's*
  * notes. `Unreleased` is the fallback because notes are legitimately written before the bump
  * commit; a *previous* version's heading is never the fallback.
+ *
+ * **Zero matching sections and more than one matching section are both refusals**, returned as
+ * `{ ok: false }` with a diagnostic naming every candidate and its line. The rule this replaces
+ * folded duplicates into a `Map` and kept the last one, so two sections for one release resolved
+ * silently to whichever was written later in the file — which for `0.2.0-next.49` was the
+ * *superseded* text a ruling had already corrected. A last-write-wins selection is not a choice
+ * the checker is entitled to make: the two bodies disagree, and the gate that reads one of them
+ * decides whether an adopter is told about a breaking change.
+ *
+ * Ambiguity is scoped to the section actually selected. Duplicate headings for *other* releases
+ * are a defect in the file but not in this binding, and refusing on them would make an unrelated
+ * old duplicate block every release.
  */
 export function selectSection(changelog, version) {
-  const sections = new Map();
-  for (const part of changelog.split(/^## /m).slice(1)) {
-    sections.set(part.split("\n")[0].trim(), part);
-  }
-  const heading = [...sections.keys()].find((key) => headingMatchesVersion(key, version));
-  if (heading !== undefined) return { heading, body: sections.get(heading) ?? "" };
-  const unreleased = sections.get("Unreleased");
-  if (unreleased !== undefined) return { heading: "Unreleased", body: unreleased };
-  return { heading: undefined, body: "" };
+  const sections = changelogSections(changelog);
+  const matched = sections.filter((section) => headingMatchesVersion(section.heading, version));
+  const match = matched.length === 1 ? matched[0] : undefined;
+  if (match !== undefined) return { ok: true, heading: match.heading, body: match.body };
+  if (matched.length > 1) return refusal("duplicate-section", version, matched);
+
+  const unreleased = sections.filter((section) => section.heading === "Unreleased");
+  const fallback = unreleased.length === 1 ? unreleased[0] : undefined;
+  if (fallback !== undefined) return { ok: true, heading: "Unreleased", body: fallback.body };
+  if (unreleased.length > 1) return refusal("duplicate-section", "Unreleased", unreleased);
+
+  return {
+    ok: false,
+    reason: "no-section",
+    matches: [],
+    diagnostic:
+      `CHANGELOG.md has no section for ${version} and no Unreleased section.\n` +
+      `Add one heading: "## ${version} — <date>", or "## Unreleased".`,
+  };
+}
+
+/** The refusal for an ambiguous binding: every candidate, in file order, with its line. */
+function refusal(reason, subject, matched) {
+  const listed = matched.map((section) => `  line ${section.line}: ## ${section.heading}`);
+  return {
+    ok: false,
+    reason,
+    matches: matched.map((section) => ({ heading: section.heading, line: section.line })),
+    diagnostic:
+      `CHANGELOG.md has ${matched.length} sections matching ${subject}:\n` +
+      `${listed.join("\n")}\n` +
+      "Exactly one is required. Consolidate them into one section, preserving every entry: " +
+      "selecting one of several would silently drop the others' notes.",
+  };
 }
 
 /**

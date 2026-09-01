@@ -153,13 +153,21 @@ if (breaking.length === 0) {
 // are tested without a worktree and a build. See `packages/aldus-e2e/test/breaking-coverage.test.ts`.
 const version = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version;
 const changelog = readFileSync(join(repoRoot, "CHANGELOG.md"), "utf8");
-const { heading, body } = selectSection(changelog, version);
+const selected = selectSection(changelog, version);
 
-if (heading === undefined) {
-  console.error(`${breaking.length} breaking surface change(s), and CHANGELOG.md has no section`);
-  console.error(`for ${version} and no Unreleased section to hold them.`);
+// Absence and ambiguity both refuse. The rule this replaces resolved duplicate headings by keeping
+// the last one, so a release with two sections was read from whichever came later in the file —
+// silently, and in this repository's own CHANGELOG that was the superseded text of `0.2.0-next.49`.
+// A gate that decides whether an adopter is told about a breaking change may not pick between two
+// disagreeing bodies on file order.
+if (!selected.ok) {
+  console.error(`${breaking.length} breaking surface change(s), and CHANGELOG.md cannot bind them`);
+  console.error(`to exactly one section (${selected.reason}):\n`);
+  console.error(selected.diagnostic);
   process.exit(1);
 }
+
+const { heading, body } = selected;
 
 const { waived, malformed } = parseWaivers(body);
 if (malformed.length > 0) {
