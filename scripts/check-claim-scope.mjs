@@ -20,11 +20,25 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 
+import { BASE_REF_NOTE, declineMissingArgument, declineUnknownClaim } from "./declined.mjs";
+
+/** The claims this gate can evaluate. One list, so no message can drift from the branches. */
+const CLAIMS = ["docs-only", "no-shipped-change"];
+const USAGE = `<base-ref> <${CLAIMS.join("|")}>`;
+const EXAMPLE = "origin/main docs-only";
+const NOTES = `${BASE_REF_NOTE}\n<claim> is the claim to verify: ${CLAIMS.join(", ")}.`;
+const decline = (argument) =>
+  declineMissingArgument("check-claim-scope.mjs", argument, USAGE, EXAMPLE, NOTES);
+
+// Every declined case is decided here, before the gate touches the repository, so what a missing
+// or unusable argument produces cannot depend on where the script was run. That ordering is the
+// property `gate-declined.test.ts` pins: the mutant that survived PR #264's review moved a guard
+// below the work, and every test that existed still passed.
 const [base, claim] = process.argv.slice(2);
-if (base === undefined || claim === undefined) {
-  console.error("usage: check-claim-scope.mjs <base-ref> <docs-only|no-shipped-change>");
-  process.exit(2);
-}
+if (base === undefined) decline("<base-ref>");
+if (claim === undefined) decline("<claim>");
+if (!CLAIMS.includes(claim))
+  declineUnknownClaim("check-claim-scope.mjs", claim, USAGE, EXAMPLE, NOTES);
 
 const changed = execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], {
   encoding: "utf8",
@@ -60,9 +74,6 @@ if (claim === "docs-only") {
       }
     }
   }
-} else {
-  console.error(`check-claim-scope: unknown claim "${claim}".`);
-  process.exit(2);
 }
 
 if (violations.length > 0) {
