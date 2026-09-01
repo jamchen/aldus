@@ -317,8 +317,17 @@ export class FileSpendReservationStore implements SpendReservationStore {
     let names: string[];
     try {
       names = (await readdir(dir)).filter((name) => name.endsWith(".json")).sort();
-    } catch {
-      return [];
+    } catch (error) {
+      // The same distinction `#grantIds` makes, one level down, where it was still missing.
+      // A grant directory that does not exist is a grant that has committed nothing — an ordinary
+      // empty answer. A permission error, a file where the directory should be, an I/O failure:
+      // those are the instrument failing to look, and returning `[]` for them made a grant holding
+      // a live reservation read as "nothing reserved" to `costs`, to `settle`, and to every caller
+      // that asks what authorization is committed.
+      //
+      // An empty answer must come from an empty store, never from a failure to read one.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
     }
 
     const commits: CommitFile[] = [];

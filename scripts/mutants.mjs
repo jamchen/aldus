@@ -428,4 +428,237 @@ export const cases = [
     wantExit: 1,
     wantOutput: "lets the caller's key reach neither the message nor the details",
   },
+  /* ---------------------------------------------------------------------------------------------
+   * #244 — reservation evidence at the takeover refusal.
+   *
+   * Every guard the design named as load-bearing, switched off individually. Each case asserts the
+   * **distinguishing** clause of the test it kills, not a substring the other verdicts also
+   * satisfy — #246's surviving mutation was exactly that mistake.
+   * ------------------------------------------------------------------------------------------ */
+  {
+    // Aggregation across the stage is the join that does not lie. Without the stage scope, a
+    // sibling stage's prepared reservation answers for this one — a message about the wrong money.
+    name: "dispatch-evidence: dropping the stage scope lets another stage answer for this one",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/schema/reservation.ts",
+          "      reservation.stageId === scope.stageId &&",
+          "      true /* mutant */ &&",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-core",
+      "test/stage-dispatch-evidence.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "does not let another stage's prepared reservation answer for this one",
+  },
+  {
+    // Scoping by the stuck attempt instead. `reserve` resolves idempotency on `effectKey` and
+    // returns the existing reservation unchanged, so the reservation keeps the *first* attempt's
+    // id — an attempt-keyed read finds nothing while a dispatched reservation stands.
+    name: "dispatch-evidence: scoping by attemptId instead of stage misses a dispatched reservation",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/schema/reservation.ts",
+          "      reservation.stageId === scope.stageId &&",
+          '      reservation.attemptId === "att-10" /* mutant */ &&',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/stage-dispatch-evidence.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "sees a dispatched reservation that a retry left carrying the first attempt's id",
+  },
+  {
+    // Trusting absence. A free stage, an empty store and a grant nobody could read are all zero
+    // reservations from here; calling that the safe row claims a measurement nobody took.
+    name: "dispatch-evidence: treating an empty result as safe claims safety for every free stage",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/schema/reservation.ts",
+          'if (relevant.length === 0) return "indeterminate";',
+          'if (relevant.length === 0) return "reserved_never_dispatched"; /* mutant */',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-core",
+      "test/stage-dispatch-evidence.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "reads an empty stream as indeterminate, never as safe",
+  },
+  {
+    // Ignoring `dispatch_prepared` — the one transition the whole distinction rests on, appended
+    // before the provider call precisely so the window is visible rather than inferred.
+    name: "dispatch-evidence: ignoring dispatch_prepared reports a prepared call as never dispatched",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/schema/reservation.ts",
+          'const reservedOnly = own.length === 1 && own[0]?.kind === "reservation.reserved";',
+          'const reservedOnly = own.every((t) => t.kind !== "reservation.dispatch_identified"); /* mutant */',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-core",
+      "test/stage-dispatch-evidence.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "reads `dispatch_prepared` then nothing as possibly dispatched",
+  },
+  {
+    // Reading the projection's `execution` field instead of the raw stream. `dispatch_identified`
+    // is a legal successor of `reserved` with no `dispatch_prepared` between, and it leaves
+    // `execution` undefined — so the projection calls a stream carrying a provider request id safe.
+    name: "dispatch-evidence: reading reservation.execution instead of the stream misses an identified dispatch",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/schema/reservation.ts",
+          'const reservedOnly = own.length === 1 && own[0]?.kind === "reservation.reserved";',
+          "const reservedOnly = own.length >= 0 && reservation.execution === undefined; /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-core",
+      "test/stage-dispatch-evidence.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput:
+      "reads `dispatch_identified` with no `dispatch_prepared` between as possibly dispatched",
+  },
+  {
+    // Inspecting one grant. `reserve` resolves idempotency per grant stream, so one `effectKey`
+    // may hold a reservation in each of two grants and one grant's silence is not the stage's.
+    name: "dispatch-evidence: reading only the first grant reports safety from half the store",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/spend-service.ts",
+          "const grantIds = [...new Set(reservations.map((reservation) => reservation.grantId))].sort();",
+          "const grantIds = [...new Set(reservations.map((r) => r.grantId))].sort().slice(0, 1); /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/stage-dispatch-evidence.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "reads every grant, not the first one holding a reservation for the Run",
+  },
+  {
+    // Swallowing a per-grant read failure — the defect this change had to fix before the evidence
+    // could be trusted. `[]` from a grant nobody could read is indistinguishable from a truthful
+    // "nothing reserved", and the safe row would then be claimed from a failed read.
+    name: "dispatch-evidence: swallowing a grant read error turns a held reservation into an empty stream",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-file-store/src/reservation-store.ts",
+          '      // An empty answer must come from an empty store, never from a failure to read one.\n      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];\n      throw error;',
+          "      return []; /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-file-store",
+      "test/reservation-store.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "throws for a grant whose commits directory cannot be read",
+  },
+  {
+    // An unwired runner assuming the safe row. The rule `gateHasDecision` states one field up: a
+    // runner with no way to ask must not assume, and this is the field where assuming is a claim
+    // about money.
+    name: "dispatch-evidence: an unwired port assuming the safe row changes the message for every adopter",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-stage-runner/src/runner.ts",
+          'if (this.#stageSpendEvidence === undefined) return "indeterminate";',
+          'if (this.#stageSpendEvidence === undefined) return "reserved_never_dispatched"; /* mutant */',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-stage-runner",
+      "test/dispatch-evidence.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "emits it byte for byte",
+  },
+  {
+    // Weakening the friction, which is the one thing this change must not do. The safe row is
+    // evidence about a store, never permission: §19.1's concern is two runners executing one
+    // side-effecting stage at once, and no verdict answers that question.
+    name: "dispatch-evidence: letting the safe row skip --force removes the refusal entirely",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-stage-runner/src/runner.ts",
+          "      const evidence = await this.#dispatchEvidence(runId, definition.id);",
+          '      const evidence = await this.#dispatchEvidence(runId, definition.id);\n      if (evidence === "reserved_never_dispatched") return; /* mutant */',
+        ],
+      },
+    ],
+    // Measured through the composed test rather than the runner's own, because that one's stuck
+    // stage never returns: with the refusal gone the takeover *executes*, and the case would be
+    // killed by a timeout — which is a non-answer wearing a failure's exit code. The composed
+    // stage completes on its second claim, so the mutant fails an assertion instead.
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/takeover-evidence-wiring.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "still refuses without --force, and still takes over with it",
+  },
 ];

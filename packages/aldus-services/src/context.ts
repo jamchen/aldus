@@ -369,6 +369,21 @@ export class AldusContext {
       // (#240).
       gateHasDecision: async (gateId, runId) =>
         (await this.#gateDecisions.list(runId)).some((decision) => decision.gateId === gateId),
+      // And what the spend store establishes about a stuck stage's dispatch window (#244). The
+      // runner's refusal for a `running` stage reported two entirely different situations
+      // identically — authorization committed with the provider never called, and a call that may
+      // already have been billed — while `dispatch_prepared` recorded the difference durably.
+      //
+      // The `try`/`catch` is here rather than in the service, so the service stays honest about a
+      // failed read and the fail-closed boundary is one visible line at the composition seam:
+      // could not look is never reported as nothing was spent (§19.2, ADR-0030).
+      stageSpendEvidence: async (runId, stageId) => {
+        try {
+          return await this.#spend.stageDispatchEvidence(runId, stageId);
+        } catch {
+          return "indeterminate";
+        }
+      },
       // Without this a stage's `registerOutput` refuses with ARTIFACT_RECORDER_UNAVAILABLE, so
       // the capability exists on the context, is reachable as `context.artifacts`, and is
       // unusable from every stage the services actually run. The refusal is correct — a stage

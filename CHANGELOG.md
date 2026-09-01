@@ -8,6 +8,60 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.53 — 2026-09-01
+
+### Changed
+
+**The takeover refusal now says what the reservation store establishes about the stuck attempt.**
+
+A stage whose runner died refuses `run` and `retry` without `--force`, and the refusal said the
+same thing whether the provider had never been called or a paid call may already have gone out.
+Those carry entirely different risk under contract §19.1, and the reservation store has recorded
+the difference durably all along: `reservation.dispatch_prepared` is appended **before** the
+provider call precisely so that window is visible rather than inferred (ADR-0044,
+`docs/design/spend-reservation-store.md` §5). Nothing was reading it.
+
+The refusal now appends one sentence naming which of two rows applies — every active reservation
+for the stage is `reserved` with no dispatch recorded, or at least one records a dispatch that may
+already have been billed.
+
+**What does not change, and this is the substance of it.** `--force` is still required in every
+row. The error code, category and `retryable` are unchanged. No verdict permits a takeover, and no
+verdict is a claim that a takeover is safe: the safe row is worded as a fact about **this
+workspace's reservation store**, not about the world, because absence of a second reservation is
+not evidence there was no second effect — the same limit `an empty attempt is not evidence that
+nothing happened` states one sentence earlier, which is kept.
+
+**What changes for an adopter:** a longer message in two of three cases, and the verdict is also
+on `details.dispatchEvidence`. An embedder composing its own `StageRunner` sees **no change at
+all** until it wires the new port: absent, the message is byte-identical to `next.52`, because a
+runner with no way to ask must not assume the safe row. `AldusContext.runnerFor` wires it.
+
+**A reservation stream that cannot be read no longer reads as a stream holding nothing.**
+
+`FileSpendReservationStore` refused to convert a failure to read the **root** into an empty answer
+as of `next.36`, and did exactly that one level down: every error from reading a grant's commits
+directory was caught and answered `[]`. A grant holding a live reservation therefore read as a
+grant holding none — to `aldus costs`, to `costs settle`, and to anything asking what
+authorization is committed. Only `ENOENT` is an empty answer now; everything else propagates.
+
+**What changes for an adopter:** a read that used to under-report now throws. That is the intended
+direction — an empty answer must come from an empty store, never from a failure to read one — and
+it is what makes the evidence above trustworthy: at the composition seam, a failed read becomes
+`indeterminate`, which is today's message, never the row saying nothing was spent.
+
+### Added
+
+- `stageDispatchEvidence(transitions, { runId, stageId })` and the `StageDispatchEvidence` type in
+  `@aldus-runtime/core` — the rule, shared so no two callers can answer it differently. Scoped by
+  `(runId, stageId)` and never by attempt: `reserve` resolves idempotency on `effectKey`, so a
+  reservation keeps the `attemptId` of the attempt that _first_ reserved the effect, and an
+  attempt-keyed read returns nothing while a dispatched reservation stands.
+- `SpendService.stageDispatchEvidence(runId, stageId)` — aggregates every grant stream the Run
+  touches and applies the rule. Throws on an unreadable or corrupt stream rather than answering it.
+- `StageRunnerOptions.stageSpendEvidence` — the optional port, the third of the same shape as
+  `gateIsKnown` and `gateHasDecision`.
+
 ## 0.2.0-next.52 — 2026-08-29
 
 ### Changed

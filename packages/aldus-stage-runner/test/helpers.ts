@@ -11,7 +11,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ActorRef, ArtifactRef, RunManifest } from "@aldus-runtime/core";
+import type {
+  ActorRef,
+  ArtifactRef,
+  RunManifest,
+  StageDispatchEvidence,
+} from "@aldus-runtime/core";
 import { openWorkspace, type EventStore, type FileWorkspace } from "@aldus-runtime/file-store";
 import { builders, createTestContext, type TestContext } from "@aldus-runtime/testkit";
 import { z } from "zod";
@@ -90,6 +95,11 @@ export interface TempRunOptions {
    * a double can delegate whatever it is not about.
    */
   events?: (real: EventStore) => EventStore;
+  /**
+   * The spend-evidence port (#244). Omitted so the unwired case — today's message, byte for byte —
+   * stays the default every other test in the package measures against.
+   */
+  stageSpendEvidence?: (runId: string, stageId: string) => Promise<StageDispatchEvidence>;
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -125,6 +135,9 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
     // refusal when one is absent has its own test.
     ...(options.workers !== undefined && options.paidDispatch !== false
       ? { paidDispatch: options.paidDispatch ?? recordingSpendController() }
+      : {}),
+    ...(options.stageSpendEvidence !== undefined
+      ? { stageSpendEvidence: options.stageSpendEvidence }
       : {}),
     now: () => {
       clock += 1000;

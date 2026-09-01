@@ -6,7 +6,7 @@
  * filesystem, because the failure is in the interleaving rather than in the arithmetic.
  */
 
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -288,5 +288,61 @@ describe('a store that cannot look does not answer "nothing"', () => {
   it("names where it looked, so two compositions can compare paths", async () => {
     const store = new FileSpendReservationStore({ root: join(root, "spend", "reservations") });
     expect(store.root).toBe(join(root, "spend", "reservations"));
+  });
+});
+
+describe("nor does a grant stream it cannot read", () => {
+  // The same defect one level down, and it survived the fix that announced it. `#grantIds()`
+  // learned the distinction; `#readCommits()` still caught every error from its `readdir` and
+  // returned `[]`, so a grant holding a live reservation read as a grant holding nothing — to
+  // `readGrant`, to `listByRun`, to `costs`, and to the takeover refusal that now asks (#244).
+  //
+  // The claim in the module docstring — "an empty answer must come from an empty store, never
+  // from a failure to read one" — was true of one of the two places it was written about.
+
+  it("reports an empty stream for a grant that has committed nothing", async () => {
+    // The legitimate empty answer, kept.
+    const stream = await store.readGrant("grant-never-used");
+    expect(stream).toEqual({ grantId: "grant-never-used", revision: 0, transitions: [] });
+  });
+
+  it("throws for a grant whose commits directory cannot be read", async () => {
+    // A file where `<grant>/commits` belongs — ENOTDIR, not ENOENT.
+    await mkdir(join(root, "grant-broken"), { recursive: true });
+    await writeFile(join(root, "grant-broken", "commits"), "not a directory", "utf8");
+
+    await expect(store.readGrant("grant-broken")).rejects.toThrow();
+  });
+
+  it("does not let an unreadable grant silently shrink a listByRun answer", async () => {
+    // The consequence, stated where it bites: a scan that swallows one grant's failure returns a
+    // shorter list and every caller reads it as completeness. `listByRun` is documented as a scan
+    // *because* completeness is a claim about everything.
+    await store.compareAndAppend({
+      grantId: GRANT,
+      expectedRevision: 0,
+      transitions: [reserved("a")],
+    });
+    await mkdir(join(root, "grant-broken"), { recursive: true });
+    await writeFile(join(root, "grant-broken", "commits"), "not a directory", "utf8");
+
+    await expect(store.listByRun("run-a")).rejects.toThrow();
+  });
+
+  it("still refuses a stream with a revision gap rather than projecting a shorter history", async () => {
+    // The neighbouring refusal, kept green by the change: a gap is corruption, not absence.
+    await store.compareAndAppend({
+      grantId: GRANT,
+      expectedRevision: 0,
+      transitions: [reserved("a")],
+    });
+    await store.compareAndAppend({
+      grantId: GRANT,
+      expectedRevision: 1,
+      transitions: [reserved("b")],
+    });
+    await rm(join(root, GRANT, "commits", "000001.json"));
+
+    await expect(store.readGrant(GRANT)).rejects.toThrow(/missing revision 1/);
   });
 });

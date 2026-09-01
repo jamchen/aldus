@@ -35,6 +35,7 @@ import {
   type CostExpectation,
   type RunManifest,
   type StageAttempt,
+  type StageDispatchEvidence,
   type StageStatus,
   type StructuredError,
 } from "@aldus-runtime/core";
@@ -95,6 +96,30 @@ const NEVER_RETRIED_CATEGORIES: ReadonlySet<string> = new Set([
   "not_found",
 ]);
 
+/**
+ * What is appended to the running-stage refusal for each answer the spend store can give (#244).
+ *
+ * `indeterminate` appends the empty string, so a runner with no port wired — or one whose port
+ * declined — emits today's message byte for byte.
+ *
+ * The safe row is worded as a claim about **the store**, not about the world, and the distinction
+ * is the whole of it: absence of a second reservation is not evidence there was no second effect,
+ * and a sentence saying "nothing happened" would contradict the paragraph above it that says an
+ * empty attempt is not evidence of that. Neither row lowers the friction; `--force` is required in
+ * all three.
+ */
+const DISPATCH_EVIDENCE_SENTENCE: Record<StageDispatchEvidence, string> = {
+  reserved_never_dispatched:
+    " Every spend reservation this Run holds for this stage is `reserved` and none records a " +
+    "dispatch, so no provider call was begun under an authorization Aldus holds (ADR-0044). That " +
+    "is a fact about this workspace's reservation store, not about every effect the attempt could " +
+    "have had.",
+  dispatch_possible:
+    " A reservation for this stage records that a dispatch was prepared, so a provider call may " +
+    "have gone out and may already have been billed. Taking over may repeat a paid call.",
+  indeterminate: "",
+};
+
 /** Everything the runner needs, expressed as ports rather than a concrete workspace. */
 export interface StageRunnerOptions {
   /** Run manifests (contract §6.2). */
@@ -136,6 +161,23 @@ export interface StageRunnerOptions {
    * Absent means the old behaviour — refuse — because a runner with no way to ask must not assume.
    */
   gateHasDecision?: (gateId: string, runId: string) => Promise<boolean>;
+  /**
+   * What the spend reservation store can establish about a stuck stage's dispatch window
+   * (ADR-0044; `docs/design/spend-reservation-store.md` §5; #244).
+   *
+   * The third predicate of the same shape as `gateIsKnown` and `gateHasDecision`, and a port for
+   * the same reason: the reservation store lives above this package and the runner must not reach
+   * up to it.
+   *
+   * It changes **what an operator is told**, never what they may do — `--force` stays required in
+   * every answer. The refusal today reports two entirely different situations identically: a stage
+   * whose authorization was committed and whose provider was never called, and one that may already
+   * have been billed. §5 records that distinction durably; nothing was reading it here.
+   *
+   * Absent means today's message, byte for byte. A runner with no way to ask must not assume the
+   * safe row — the same rule `gateHasDecision` states one field up.
+   */
+  stageSpendEvidence?: (runId: string, stageId: string) => Promise<StageDispatchEvidence>;
   /** Who or what is running stages (contract §19.2). */
   actor: ActorRef;
   /** Backend whose capabilities are checked before execution (contract §10). */
@@ -227,6 +269,8 @@ export class StageRunner {
 
   readonly #gateIsKnown: ((gateId: string, stageId: string) => boolean) | undefined;
   readonly #gateHasDecision: ((gateId: string, runId: string) => Promise<boolean>) | undefined;
+  readonly #stageSpendEvidence:
+    ((runId: string, stageId: string) => Promise<StageDispatchEvidence>) | undefined;
 
   /**
    * Whether this stage can wait on that gate.
@@ -285,6 +329,7 @@ export class StageRunner {
   constructor(options: StageRunnerOptions) {
     this.#gateIsKnown = options.gateIsKnown;
     this.#gateHasDecision = options.gateHasDecision;
+    this.#stageSpendEvidence = options.stageSpendEvidence;
     this.#options = {
       runs: options.runs,
       events: options.events,
@@ -501,6 +546,13 @@ export class StageRunner {
       // So the message says what it cannot answer and points at what can. §19.1's concern stands
       // undiminished; what changes is that the operator is no longer left to guess whether it
       // applies to them.
+      // And what the reservation store *can* answer, which is not nothing (#244). The attempt
+      // record cannot say whether a provider was called; the reservation stream can, because
+      // `dispatch_prepared` is appended before the call precisely so this window is visible rather
+      // than inferred (ADR-0044). Reading it changes only what the operator is told — `--force`
+      // is still required in every one of the three answers below.
+      const evidence = await this.#dispatchEvidence(runId, definition.id);
+
       throw stageRunnerError(
         StageRunnerErrorCodes.STAGE_STATE_INVALID,
         // Names the operator's flag, not the runner's parameter. `force` is what this function
@@ -514,7 +566,8 @@ export class StageRunner {
           "runners execute one side-effecting stage at once (contract §19.1). This runner cannot " +
           "tell what the stuck attempt did: artifacts reach the record when a stage settles and " +
           "this one has not, and it holds no cost store — so an empty attempt is not evidence that " +
-          "nothing happened. `aldus costs --run <id>` shows what the Run holds.",
+          "nothing happened. `aldus costs --run <id>` shows what the Run holds." +
+          DISPATCH_EVIDENCE_SENTENCE[evidence],
         {
           category: "conflict",
           retryable: true,
@@ -522,9 +575,26 @@ export class StageRunner {
             runId,
             stageId: definition.id,
             status,
+            dispatchEvidence: evidence,
           },
         },
       );
+    }
+  }
+
+  /**
+   * Ask the spend port, and treat every way of not getting an answer as not getting one (#244).
+   *
+   * A predicate that is unwired, that throws, or that reports `indeterminate` are three routes to
+   * the same state: nothing was established. `DECLINED` is not a pass — a refusal to look must
+   * never leave this method as the row that says no provider call was begun.
+   */
+  async #dispatchEvidence(runId: string, stageId: string): Promise<StageDispatchEvidence> {
+    if (this.#stageSpendEvidence === undefined) return "indeterminate";
+    try {
+      return await this.#stageSpendEvidence(runId, stageId);
+    } catch {
+      return "indeterminate";
     }
   }
 
