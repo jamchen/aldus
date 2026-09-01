@@ -186,6 +186,10 @@ jobs:
       # Recorded before and after, and asserted afterwards (ADR-0023 decision 4). The 0.1.0
       # bootstrap published with --tag next and still moved latest, because npm creates latest
       # on a package's first publish. Nothing in the pipeline noticed at the time.
+      #
+      # The snapshot now **refuses** when any package cannot be read, rather than recording the
+      # failure as "no tags". A baseline with holes cannot detect a tag that moved: a registry
+      # blip here used to record an absence and every later comparison held.
       - name: Record dist-tags before publishing
         run: |
           set -euo pipefail
@@ -217,8 +221,21 @@ jobs:
             echo "::endgroup::"
           done < "${RUNNER_TEMP}/publish-dirs.txt"
 
-      # Fails the release if latest moved. `allow-latest-move` is a deliberate input, so a
-      # legitimate promotion states its intent rather than being inferred from the outcome.
+      # Asserts **both** invariants for every package: `latest` is exactly what was recorded
+      # before the publish, and `next` is exactly the version this tree intended to publish.
+      # `allow-latest-move` is a deliberate input, so a legitimate promotion states its intent
+      # rather than being inferred from the outcome. It does not relax the `next` assertion.
+      #
+      # The second invariant is why this step was rewritten. Run 33470723600 published all twelve
+      # packages as 0.2.0-next.53 and this step went green while printing `next: 0.2.0-next.52`
+      # for two of them — `next` was printed and never compared. The `latest` comparison it did
+      # make was reading `undefined` on both sides, because the `npm install -g npm@latest` step
+      # above puts npm 12 on the runner and npm 12 wraps `view --json` output in an array. Both
+      # are in `scripts/dist-tags-check.mjs`, measured.
+      #
+      # The registry can serve a stale `next` for seconds after a successful publish, so the
+      # assertion re-reads what has not converged on a bounded schedule and fails closed when the
+      # deadline runs out. It never infers success from the publish command.
       - name: Assert dist-tags after publishing
         run: |
           set -euo pipefail

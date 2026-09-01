@@ -417,9 +417,23 @@ that already exists the flag behaves as expected — but a rule that only holds 
 publish onwards is not one to rely on, which is why unvalidated releases use a prerelease
 _version_ instead. The registry enforces that; a flag's behaviour depends on state.
 
-The release workflow snapshots `latest` and `next` for all twelve packages before publishing,
-asserts afterwards, and fails if `latest` moved. A deliberate promotion passes
-`allow-latest-move` on `workflow_dispatch`, so the intent is stated rather than inferred.
+The release workflow snapshots `latest` and `next` for all twelve packages before publishing and
+asserts both afterwards: `latest` must still be exactly the recorded value, and `next` must be
+exactly the version the publish intended for that package. A deliberate promotion passes
+`allow-latest-move` on `workflow_dispatch`, so the intent is stated rather than inferred —
+it relaxes the `latest` half only.
+
+**The `next` half was added after it was needed.** Run 33470723600 published all twelve packages
+as `0.2.0-next.53` and the assertion went green while printing `next: 0.2.0-next.52` for
+`@aldus-runtime/testkit` and `@aldus-runtime/tts-ledger`: `next` was printed and never compared,
+and the `latest` comparison that did run was reading `undefined` on both sides, because npm 12
+wraps `view --json` output in an array and the runner installs `npm@latest`. A value that is
+printed is not a value that is checked, and a comparison between two `undefined`s cannot fail.
+
+Because the registry can serve a stale `next` for a few seconds after a successful publish — which
+is what that run actually caught — the assertion re-reads what has not converged, on a bounded
+schedule with a deadline, and fails closed when the deadline runs out. A missing, stale,
+malformed, wrong-package or mixed-version `next` never produces green.
 
 Promoting to `latest` later, once an adopter has validated:
 
