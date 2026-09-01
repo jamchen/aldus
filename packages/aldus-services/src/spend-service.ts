@@ -343,6 +343,33 @@ class OperatorSpendConsole {
 export type { OperatorSpendConsole };
 
 /**
+ * How an agent records a decision it may not make itself, appended to a refusal that named the rule
+ * (#228).
+ *
+ * `costs`' listing was fixed first (#231): it named `aldus costs abandon` to an agent, which is a
+ * command an agent may not run, and the agent spent a round trip discovering the refusal. The
+ * refusals themselves had the same shape one layer down — they state that reconciliation is a
+ * human decision and stop there, so an agent that reads one still has to be told, or guess, that
+ * the way through is to transcribe an owner's decision rather than to give up.
+ *
+ * **The refusal is unchanged.** Nothing here is conditional on the clause, and no path reaches an
+ * effect that the plain refusal would have blocked; the only difference is that the message now
+ * also says what to do next.
+ *
+ * Returned empty for a human and for an unknown actor, for the reason `renderCosts` gives: a
+ * clause printed to every reader is noise a human learns to skip, which is how a hint stops
+ * working on the day it matters. An unknown actor is not evidence of an agent, and its remedy is a
+ * different one — attribute the invocation — so it is deliberately not offered this one.
+ */
+function transcriptionRemedy(actorKind: string | undefined): string {
+  if (actorKind === undefined || actorKind === "human") return "";
+  return (
+    " Reconciliation is a human decision, so record theirs rather than making one: " +
+    "`--decided-by <who decided> --verbatim <what they said>`."
+  );
+}
+
+/**
  * Mint an operator console from an actor a trusted boundary established (#155 step 5).
  *
  * @internal **Not exported from `@aldus-runtime/services`, and it must not become so while its
@@ -374,7 +401,12 @@ export function openOperatorConsole(options: {
       ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
       `This invocation is attributed to a "${options.actor.kind}", and reconciliation is a human ` +
         "decision. An agent that could reconcile could release authorization it had itself " +
-        "consumed (§13.3, §19.3).",
+        "consumed (§13.3, §19.3)." +
+        // Surface 1 of three (#228). The refusal an agent-driven adopter actually receives, and
+        // the one quoted in the report: `settleSpend` and `abandonDispatch` open the console on
+        // the *decider*, so an agent that named no `--decided-by` arrives here as its own decider.
+        // The clause is the way through, and it was the missing half of the sentence.
+        transcriptionRemedy(options.actor.kind),
       { category: "policy", retryable: false, details: {} },
     );
   }
@@ -969,7 +1001,14 @@ export class SpendService {
         ServiceErrorCodes.SPEND_NOT_AUTHORIZED,
         `Reconciliation is a human decision and this actor is a "${authority.actor.kind}". An ` +
           "agent " +
-          "that could reconcile could release authorization it had itself consumed (§13.3, §19.3).",
+          "that could reconcile could release authorization it had itself consumed (§13.3, §19.3)." +
+          // Surface 2 of three (#228). Defence in depth rather than the path an adopter travels:
+          // `openOperatorConsole` refuses to mint a non-human authority, so reaching this needs an
+          // actor whose kind changed after it was minted. Carrying the same clause anyway, because
+          // the reader of a defence-in-depth refusal is in the worst position to work out the
+          // remedy, and three sites that answer the same question differently is how one of them
+          // becomes wrong.
+          transcriptionRemedy(authority.actor.kind),
         {
           category: "policy",
           retryable: false,
@@ -1158,7 +1197,18 @@ export class SpendService {
           (current.status === "reserved"
             ? "This one is not terminal: it is still reserved, so a billing outcome was never " +
               "recorded — most often a process killed mid-dispatch. `aldus costs abandon` " +
-              "records that it is not coming back, after which it can be reconciled."
+              "records that it is not coming back, after which it can be reconciled." +
+              // Surface 3 of three, and the exact shape of #228 rather than an analogue of it:
+              // this refusal *names a command*, so an agent that reads it runs `aldus costs
+              // abandon` plain and is refused at surface 1 — the same round trip, one layer down.
+              //
+              // The actor asked about is the **transcriber**, not `authority.actor`. By this line
+              // the authority's actor is necessarily human, because the two guards above rejected
+              // everything else; the party who will type the next command is `recordedBy`, which
+              // is the acting actor `settleSpend` derived. So the kind is already in scope here
+              // and nothing needed threading — but it is a different actor from the other two
+              // sites, which is why it is read explicitly rather than shared.
+              transcriptionRemedy(input.transcription?.recordedBy.kind)
             : "A terminal reservation never resumes (ADR-0044)."),
         {
           category: "conflict",
