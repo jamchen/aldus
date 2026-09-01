@@ -290,7 +290,7 @@ export const cases = [
     wantOutput: "Failed Tests 1",
   },
   {
-    // The same property for the gate PR #265 routed through `declined.mjs`. Written as its own
+    // The same property for the gate routed through `declined.mjs` alongside this case. Written as its own
     // case rather than trusted to the one above, because a guard is only tested when its result
     // comes from the mechanism under test — two guards were once confirmed by a third.
     name: "claim-scope: moving the declined guards below the work must be killed",
