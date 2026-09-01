@@ -24,3 +24,23 @@ export declare function uncoveredFindings(
   sectionBody: string,
   waived: Map<string, string>,
 ): string[];
+
+export type DeclarationKind = "class" | "interface" | "type" | "function" | "const" | "enum";
+
+/** Extract the declarations relevant to the breaking-notes check from one built `.d.ts`. */
+export declare function declarationSurface(
+  text: string,
+  pkg: string,
+): {
+  surface: Map<string, Set<string>>;
+  declarations: Map<string, DeclarationKind>;
+  opaque: Map<string, string>;
+};
+
+/** Mechanical breaking findings between two extracted declaration surfaces. */
+export declare function breakingFindings(
+  base: Map<string, Set<string>>,
+  head: Map<string, Set<string>>,
+  baseDeclarations: Map<string, DeclarationKind>,
+  headDeclarations: Map<string, DeclarationKind>,
+): string[];

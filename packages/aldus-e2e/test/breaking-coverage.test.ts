@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  breakingFindings,
+  declarationSurface,
   parseWaivers,
   selectSection,
   uncoveredFindings,
@@ -20,6 +22,107 @@ const SYMBOL = "aldus-gate-engine:SpendGrant.scope";
 
 const changelogWith = (heading: string, body: string): string =>
   `# Changelog\n\n## ${heading}\n\n${body}\n\n## 0.1.0 — 2026-08-18\n\nold notes.\n`;
+
+const findingsFor = (baseText: string, headText: string): string[] => {
+  const base = declarationSurface(baseText, "aldus-core");
+  const head = declarationSurface(headText, "aldus-core");
+  return breakingFindings(base.surface, head.surface, base.declarations, head.declarations);
+};
+
+describe("breakingFindings", () => {
+  const MEMBER_INTERFACE = `export interface ReworkVerdict {
+    readonly blockingFindingClasses: readonly string[];
+    findingCount: number;
+}
+`;
+
+  it("reports the ReworkVerdict interface-to-discriminated-union change", () => {
+    const union = `export type ReworkVerdict =
+  | { kind: "evaluated"; findingCount: number }
+  | { kind: "not_evaluated"; reason: string };
+`;
+    expect(findingsFor(MEMBER_INTERFACE, union)).toEqual([
+      "declaration kind changed: aldus-core:ReworkVerdict",
+    ]);
+  });
+
+  it.each([
+    ["intersection", "export type ReworkVerdict = EvaluatedVerdict & AuditEvidence;\n"],
+    ["plain alias", "export type ReworkVerdict = EvaluatedVerdict;\n"],
+    ["other non-interface declaration", "export declare function ReworkVerdict(): void;\n"],
+  ])("reports an interface changed to an %s", (_shape, declaration) => {
+    expect(findingsFor(MEMBER_INTERFACE, declaration)).toEqual([
+      "declaration kind changed: aldus-core:ReworkVerdict",
+    ]);
+  });
+
+  it("uses only the existing removed-export path when the interface is gone", () => {
+    expect(findingsFor(MEMBER_INTERFACE, "export type SomethingElse = string;\n")).toEqual([
+      "removed export: aldus-core:ReworkVerdict",
+    ]);
+  });
+
+  it.each([
+    ["empty", "export interface ReworkVerdict {\n}\n"],
+    ["optional-only", "export interface ReworkVerdict {\n    reason?: string;\n}\n"],
+  ])("does not infer a kind break from a legitimately %s base interface", (_shape, base) => {
+    expect(findingsFor(base, "export type ReworkVerdict = EvaluatedVerdict;\n")).toEqual([]);
+  });
+
+  it("does not treat removing every required member from a surviving interface as a kind change", () => {
+    expect(findingsFor(MEMBER_INTERFACE, "export interface ReworkVerdict {\n}\n")).toEqual([]);
+  });
+
+  it("keeps unchanged interfaces silent and still reports newly required members", () => {
+    expect(findingsFor(MEMBER_INTERFACE, MEMBER_INTERFACE)).toEqual([]);
+    expect(
+      findingsFor(
+        MEMBER_INTERFACE,
+        MEMBER_INTERFACE.replace(
+          "    findingCount: number;",
+          "    findingCount: number;\n    kind: string;",
+        ),
+      ),
+    ).toEqual(["newly required member: aldus-core:ReworkVerdict.kind"]);
+  });
+
+  it("leaves unsupported aliases silent and the #236 Zod blind spot named by its digest", () => {
+    expect(
+      findingsFor("export type Alias = string;\n", "export type Alias = string | number;\n"),
+    ).toEqual([]);
+
+    const before = declarationSurface(
+      `export declare const policySchema: z.ZodObject<{\n    maxRounds: z.ZodNumber;\n}>;\nexport type ReworkPolicy = z.infer<typeof policySchema>;\n`,
+      "aldus-core",
+    );
+    const after = declarationSurface(
+      `export declare const policySchema: z.ZodObject<{\n    maxRounds: z.ZodNumber;\n    note: z.ZodOptional<z.ZodString>;\n}>;\nexport type ReworkPolicy = z.infer<typeof policySchema>;\n`,
+      "aldus-core",
+    );
+    expect(
+      breakingFindings(before.surface, after.surface, before.declarations, after.declarations),
+    ).toEqual([]);
+    expect(after.opaque.get("aldus-core:ReworkPolicy")).not.toBe(
+      before.opaque.get("aldus-core:ReworkPolicy"),
+    );
+  });
+
+  it("produces the same finding on repeated evaluation without mutating either surface", () => {
+    const base = declarationSurface(MEMBER_INTERFACE, "aldus-core");
+    const head = declarationSurface(
+      "export type ReworkVerdict = EvaluatedVerdict | NoEvaluationVerdict;\n",
+      "aldus-core",
+    );
+    const evaluate = (): string[] =>
+      breakingFindings(base.surface, head.surface, base.declarations, head.declarations);
+
+    expect(evaluate()).toEqual(evaluate());
+    expect(base.surface.get("aldus-core:ReworkVerdict")).toEqual(
+      new Set(["blockingFindingClasses", "findingCount"]),
+    );
+    expect(head.surface.get("aldus-core:ReworkVerdict")).toEqual(new Set());
+  });
+});
 
 describe("selectSection", () => {
   it("binds a version to its own heading", () => {
@@ -75,6 +178,12 @@ describe("uncoveredFindings", () => {
   it("counts a finding as covered only when explicitly marked", () => {
     const body = `### BREAKING\n\nmigration prose.\n\n<!-- breaking: ${SYMBOL} -->`;
     expect(uncoveredFindings([FINDING], body, empty)).toEqual([]);
+  });
+
+  it("covers a declaration-kind finding with the surviving export's marker", () => {
+    const finding = "declaration kind changed: aldus-core:ReworkVerdict";
+    const body = "### BREAKING\n\n<!-- breaking: aldus-core:ReworkVerdict -->";
+    expect(uncoveredFindings([finding], body, empty)).toEqual([]);
   });
 
   it("does not accept a BREAKING heading that names nothing", () => {

@@ -23,7 +23,8 @@
  * Breaking, for this check:
  *
  * - an exported symbol present on the base and absent on the head — a removal;
- * - a required member appearing on an exported type that did not have it.
+ * - a required member appearing on an exported type that did not have it;
+ * - a member-bearing exported interface surviving under a non-interface declaration kind.
  *
  * ## What it deliberately does not do
  *
@@ -37,12 +38,17 @@
  * Usage: node scripts/check-breaking-notes.mjs <base-ref>
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseWaivers, selectSection, uncoveredFindings } from "./breaking-coverage.mjs";
+import {
+  breakingFindings,
+  declarationSurface,
+  parseWaivers,
+  selectSection,
+  uncoveredFindings,
+} from "./breaking-coverage.mjs";
 
 const baseRef = process.argv[2];
 if (baseRef === undefined) {
@@ -57,8 +63,9 @@ function surfaceOf(root) {
   const surface = new Map();
   // Exported interfaces whose bodies are Zod-inferred: present, and deliberately unclassifiable.
   const opaque = new Map();
+  const declarations = new Map();
   const pkgDir = join(root, "packages");
-  if (!existsSync(pkgDir)) return surface;
+  if (!existsSync(pkgDir)) return { surface, opaque, declarations };
   const dts = sh("bash", [
     "-c",
     `find ${JSON.stringify(pkgDir)} -path '*/dist/*.d.ts' -not -path '*/node_modules/*' | sort`,
@@ -66,64 +73,16 @@ function surfaceOf(root) {
   for (const file of dts.split("\n").filter(Boolean)) {
     const pkg = file.slice(pkgDir.length + 1).split("/")[0];
     const text = readFileSync(file, "utf8");
-    for (const match of text.matchAll(
-      /^export (?:declare )?(?:abstract )?(class|interface|type|function|const|enum) ([A-Za-z_$][\w$]*)/gm,
-    )) {
-      surface.set(`${pkg}:${match[2]}`, new Set());
-    }
-    // Required members of exported **interfaces**. Two restrictions, each from a measured false
-    // positive on the run that validated this check against the release it was built for:
-    //
-    // `interface` only, and the brace must open on the declaration line. A one-line
-    // `export type BillingStatus = (typeof BILLING_STATUSES)[number];` has no body, and a pattern
-    // that skips ahead to the next `{` attributes the *following* declaration's members to it —
-    // which reported `BillingStatus.kind`, a member of `CostExpectation`.
-    //
-    // And Zod-inferred bodies are skipped: optionality there lives in `z.ZodOptional<…>`, not in a
-    // `?`, so every optional field on a schema type reads as newly required. `TakeDelivery.costIds`
-    // is declared `z.ZodOptional<z.ZodArray<…>>` and was reported as a break.
-    // Zod-inferred **type aliases**, which the interface scan below never reaches at all.
-    //
-    // `export type ReworkPolicy = z.infer<typeof reworkPolicySchemaBase>` has no body, so no member
-    // of it was ever classifiable — and that is exactly what was missed one release ago, when
-    // `ReworkPolicy.automaticCorrectionHarm` became required and this check reported one finding
-    // out of two. The alias carries no shape; the `declare const` it points at does, so that is
-    // what gets digested.
-    for (const alias of text.matchAll(
-      /^export type ([A-Za-z_$][\w$]*) = z\.infer<typeof ([A-Za-z_$][\w$]*)>/gm,
-    )) {
-      const schema = text.match(
-        new RegExp(`^export declare const ${alias[2]}:([\\s\\S]*?)^(?=export |declare |$)`, "m"),
-      );
-      if (schema !== null) {
-        opaque.set(`${pkg}:${alias[1]}`, createHash("sha256").update(schema[1]).digest("hex"));
-      }
-    }
-    for (const block of text.matchAll(
-      /^export (?:declare )?interface ([A-Za-z_$][\w$]*)[^{\n]*\{$([\s\S]*?)^\}/gm,
-    )) {
-      if (/z\.Zod/.test(block[2])) {
-        // Not silently. Skipping is correct — optionality here lives in `z.ZodOptional<…>` and
-        // every optional field would read as newly required — but a skip nobody is told about is
-        // the tool having a blind spot rather than *knowing* it has one, and the difference is
-        // whether a reader can go look. Recorded with a digest of the body so the report can name
-        // the ones that actually changed.
-        opaque.set(`${pkg}:${block[1]}`, createHash("sha256").update(block[2]).digest("hex"));
-        continue;
-      }
-      const key = `${pkg}:${block[1]}`;
-      const members = surface.get(key) ?? new Set();
-      for (const member of block[2].matchAll(/^\s{4}(?:readonly )?([A-Za-z_$][\w$]*)(\??):/gm)) {
-        if (member[2] !== "?") members.add(member[1]);
-      }
-      surface.set(key, members);
-    }
+    const found = declarationSurface(text, pkg);
+    for (const [key, members] of found.surface) surface.set(key, members);
+    for (const [key, kind] of found.declarations) declarations.set(key, kind);
+    for (const [key, digest] of found.opaque) opaque.set(key, digest);
   }
-  return { surface, opaque };
+  return { surface, opaque, declarations };
 }
 
 const repoRoot = sh("git", ["rev-parse", "--show-toplevel"]);
-const { surface: head, opaque: headOpaque } = surfaceOf(repoRoot);
+const { surface: head, opaque: headOpaque, declarations: headDeclarations } = surfaceOf(repoRoot);
 if (head.size === 0) {
   console.error("DECLINED: no built .d.ts found at HEAD — run `npm run build` first.");
   console.error("A missing build is not the same answer as a clean surface.");
@@ -135,11 +94,12 @@ if (head.size === 0) {
 const work = mkdtempSync(join(tmpdir(), "aldus-breaking-"));
 let base;
 let baseOpaque = new Map();
+let baseDeclarations = new Map();
 try {
   sh("git", ["worktree", "add", "--detach", work, baseRef]);
   const install = spawnSync("npm", ["ci", "--ignore-scripts"], { cwd: work, encoding: "utf8" });
   const built = spawnSync("npx", ["tsc", "-b"], { cwd: work, encoding: "utf8" });
-  ({ surface: base, opaque: baseOpaque } = surfaceOf(work));
+  ({ surface: base, opaque: baseOpaque, declarations: baseDeclarations } = surfaceOf(work));
   if (base.size === 0) {
     console.error(`DECLINED: could not build the base (${baseRef}) to compare against.`);
     console.error(`  npm ci  exit=${install.status}\n  tsc -b  exit=${built.status}`);
@@ -151,17 +111,7 @@ try {
   rmSync(work, { recursive: true, force: true });
 }
 
-const breaking = [];
-for (const [key, members] of base) {
-  if (!head.has(key)) {
-    breaking.push(`removed export: ${key}`);
-    continue;
-  }
-  const now = head.get(key) ?? new Set();
-  for (const member of now) {
-    if (!members.has(member)) breaking.push(`newly required member: ${key}.${member}`);
-  }
-}
+const breaking = breakingFindings(base, head, baseDeclarations, headDeclarations);
 
 // The blind spot, named rather than left implicit. These are exported interfaces whose bodies are
 // Zod-inferred, so a newly required member reads identically to an existing one and the check above

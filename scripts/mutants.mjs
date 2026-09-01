@@ -80,6 +80,28 @@ export const cases = [
     wantOutput: "aldus-core:ReworkPolicy",
   },
   {
+    name: "breaking-notes: the interface kind-change regression kills a disabled detector",
+    setup: [
+      {
+        replace: [
+          "scripts/breaking-coverage.mjs",
+          '      baseDeclarations.get(key) === "interface" &&',
+          '      false && baseDeclarations.get(key) === "interface" &&',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/breaking-coverage.test.ts",
+      "-t",
+      "reports the ReworkVerdict interface-to-discriminated-union change",
+    ],
+    wantExit: 1,
+    wantOutput: "reports the ReworkVerdict interface-to-discriminated-union change",
+  },
+  {
     name: "version-bump: a src/ change to a published package must fire",
     setup: [{ append: ["packages/aldus-core/src/schema-version.ts", "// mutant"] }],
     command: ["node", "scripts/check-version-bump.mjs", "{{BASE}}"],
