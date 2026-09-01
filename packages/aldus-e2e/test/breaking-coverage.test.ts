@@ -1,7 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
   breakingFindings,
+  changelogSections,
   declarationSurface,
   emptyDeclarationSurface,
   mergeDeclarationSurface,
@@ -330,27 +335,164 @@ describe("breakingFindings", () => {
   });
 });
 
+describe("changelogSections", () => {
+  it("keeps duplicate headings as separate sections, in file order, with their lines", () => {
+    // A `Map` keyed by heading answers "which section" with the last one inserted and destroys the
+    // evidence that there was more than one. That is how two `0.2.0-next.48` and two *different*
+    // `0.2.0-next.49` sections lived in this repository's CHANGELOG unnoticed.
+    const changelog = `# Changelog\n\n## 0.2.0-next.9 — 2026-08-27\n\nfirst.\n\n## 0.2.0-next.9 — 2026-08-27\n\nsecond.\n`;
+    const sections = changelogSections(changelog);
+    expect(sections.map((section) => [section.heading, section.line])).toEqual([
+      ["0.2.0-next.9 — 2026-08-27", 3],
+      ["0.2.0-next.9 — 2026-08-27", 7],
+    ]);
+    expect(sections.map((section) => section.body.includes("first."))).toEqual([true, false]);
+  });
+
+  it("does not read the preamble as a section, and counts lines through it", () => {
+    const changelog = `# Changelog\n\nAll notable changes.\nSee the contract.\n\n## Unreleased\n\npending.\n`;
+    expect(changelogSections(changelog)).toEqual([
+      { heading: "Unreleased", body: "Unreleased\n\npending.\n", line: 6 },
+    ]);
+  });
+
+  it("reads a CRLF file the same as its LF equivalent", () => {
+    const lf = `# Changelog\n\n## Unreleased\n\npending.\n`;
+    const crlf = lf.replace(/\n/g, "\r\n");
+    expect(changelogSections(crlf).map((section) => [section.heading, section.line])).toEqual(
+      changelogSections(lf).map((section) => [section.heading, section.line]),
+    );
+  });
+});
+
 describe("selectSection", () => {
+  const twice = (first: string, second: string): string =>
+    `# Changelog\n\n## ${first}\n\nfirst body.\n\n## ${second}\n\nsecond body.\n\n## 0.1.0 — 2026-08-18\n\nold notes.\n`;
+
   it("binds a version to its own heading", () => {
     const changelog = changelogWith("0.2.0-next.23 — 2026-08-25", "### BREAKING\n\nnotes.");
-    expect(selectSection(changelog, "0.2.0-next.23").heading).toBe("0.2.0-next.23 — 2026-08-25");
+    const selected = selectSection(changelog, "0.2.0-next.23");
+    expect(selected.ok).toBe(true);
+    expect(selected.ok && selected.heading).toBe("0.2.0-next.23 — 2026-08-25");
+    expect(selected.ok && selected.body).toContain("### BREAKING");
   });
 
   it("does not let a prefix bind to a different release", () => {
     // `0.2.0-next.2`.startsWith-matching `0.2.0-next.20` accepts another release's notes wholesale.
     const changelog = changelogWith("0.2.0-next.20 — 2026-08-20", "### BREAKING\n\nnotes.");
     const selected = selectSection(changelog, "0.2.0-next.2");
-    expect(selected.heading).not.toBe("0.2.0-next.20 — 2026-08-20");
+    expect(selected.ok).toBe(false);
+    expect(selected.ok === false && selected.reason).toBe("no-section");
   });
 
   it("falls back to Unreleased, never to a previous version's heading", () => {
     const changelog = `# Changelog\n\n## Unreleased\n\npending.\n\n## 0.2.0-next.20 — 2026-08-20\n\n### BREAKING\n\nold.\n`;
-    expect(selectSection(changelog, "0.2.0-next.23").heading).toBe("Unreleased");
+    const selected = selectSection(changelog, "0.2.0-next.23");
+    expect(selected.ok && selected.heading).toBe("Unreleased");
   });
 
-  it("reports no heading when neither exists", () => {
+  it("refuses when neither the version nor Unreleased exists", () => {
     const changelog = `# Changelog\n\n## 0.1.0 — 2026-08-18\n\nold.\n`;
-    expect(selectSection(changelog, "0.2.0-next.23").heading).toBeUndefined();
+    const selected = selectSection(changelog, "0.2.0-next.23");
+    expect(selected.ok).toBe(false);
+    expect(selected.ok === false && selected.reason).toBe("no-section");
+    expect(selected.ok === false && selected.diagnostic).toContain("0.2.0-next.23");
+  });
+
+  // Both declaration orders, with **different** bodies. The rule this replaces kept the last
+  // duplicate, so exactly one of these orders silently returned the corrected notes and the other
+  // silently returned the superseded ones — a test written in only the lucky order reports the
+  // defect as absent. This is the live `0.2.0-next.49` pair, whose two bodies disagree about
+  // whether criterion 7 is complete.
+  const CORRECTED = "### Added\n\ncriterion 7 stays open.";
+  const SUPERSEDED = "### Added\n\nthe loop explains where it is (criterion 7).";
+  for (const [order, bodies] of [
+    ["corrected first", [CORRECTED, SUPERSEDED]],
+    ["corrected last", [SUPERSEDED, CORRECTED]],
+  ] as const) {
+    it(`refuses two sections for the target version (${order}), never selecting one`, () => {
+      const changelog = `# Changelog\n\n## 0.2.0-next.49 — 2026-08-27\n\n${bodies[0]}\n\n## 0.2.0-next.49 — 2026-08-27\n\n${bodies[1]}\n`;
+      const selected = selectSection(changelog, "0.2.0-next.49");
+      expect(selected.ok).toBe(false);
+      expect(selected.ok === false && selected.reason).toBe("duplicate-section");
+      expect(selected.ok === false && selected.matches.map((match) => match.line)).toEqual([3, 9]);
+      expect(selected.ok === false && selected.diagnostic).toContain("line 3");
+      expect(selected.ok === false && selected.diagnostic).toContain("line 9");
+      // No body at all is returned: the refusal carries the evidence, never a chosen section.
+      expect("body" in selected).toBe(false);
+    });
+  }
+
+  it("refuses byte-identical duplicates, which no content comparison would flag", () => {
+    // The live `0.2.0-next.48` pair was identical. A rule that only refused *disagreeing* bodies
+    // would have passed on it and left the ambiguity in the file.
+    const body = "### BREAKING\n\nsame notes.";
+    const changelog = `# Changelog\n\n## 0.2.0-next.48 — 2026-08-27\n\n${body}\n\n## 0.2.0-next.48 — 2026-08-27\n\n${body}\n`;
+    expect(selectSection(changelog, "0.2.0-next.48").ok).toBe(false);
+  });
+
+  it("refuses two Unreleased sections rather than choosing between them", () => {
+    const changelog = `# Changelog\n\n## Unreleased\n\nfirst.\n\n## Unreleased\n\nsecond.\n`;
+    const selected = selectSection(changelog, "0.2.0-next.23");
+    expect(selected.ok).toBe(false);
+    expect(selected.ok === false && selected.reason).toBe("duplicate-section");
+    expect(selected.ok === false && selected.diagnostic).toContain("Unreleased");
+  });
+
+  it("binds normally when some *other* version is duplicated", () => {
+    // The false positive to avoid: an old duplicate is a defect in the file, not in this binding,
+    // and refusing on it would block every release until an unrelated section is repaired.
+    const changelog = `# Changelog\n\n## 0.2.0-next.23 — 2026-08-25\n\nmine.\n\n## 0.1.0 — 2026-08-18\n\nold.\n\n## 0.1.0 — 2026-08-18\n\nold again.\n`;
+    const selected = selectSection(changelog, "0.2.0-next.23");
+    expect(selected.ok && selected.heading).toBe("0.2.0-next.23 — 2026-08-25");
+    expect(selected.ok && selected.body).toContain("mine.");
+  });
+
+  it("binds the right one of several distinct versions", () => {
+    const changelog = `# Changelog\n\n## 0.2.0-next.24 — 2026-08-26\n\nnewer.\n\n## 0.2.0-next.23 — 2026-08-25\n\nmine.\n\n## 0.2.0-next.2 — 2026-08-19\n\nolder.\n`;
+    const selected = selectSection(changelog, "0.2.0-next.23");
+    expect(selected.ok && selected.body).toContain("mine.");
+  });
+
+  it("accepts a bare, a tab-separated and a trailing-whitespace heading", () => {
+    for (const heading of [
+      "0.2.0-next.23",
+      "0.2.0-next.23\tstill this release",
+      "0.2.0-next.23  ",
+    ]) {
+      const selected = selectSection(changelogWith(heading, "notes."), "0.2.0-next.23");
+      expect(selected.ok).toBe(true);
+    }
+  });
+
+  it("does not bind a heading whose version token is not where the match reads it", () => {
+    // False positives the token rule must reject: a non-breaking space is not a separator, and a
+    // version named mid-sentence is not that release's section. Both refuse rather than bind.
+    for (const heading of ["0.2.0-next.23\u00a0— 2026-08-25", "Reverts 0.2.0-next.23"]) {
+      const selected = selectSection(changelogWith(heading, "notes."), "0.2.0-next.23");
+      expect(selected.ok).toBe(false);
+    }
+  });
+
+  it("refuses CRLF duplicates too, with the same lines", () => {
+    const lf = twice("0.2.0-next.49 — 2026-08-27", "0.2.0-next.49 — 2026-08-27");
+    const selected = selectSection(lf.replace(/\n/g, "\r\n"), "0.2.0-next.49");
+    expect(selected.ok).toBe(false);
+    expect(selected.ok === false && selected.matches.map((match) => match.line)).toEqual([3, 7]);
+  });
+
+  it("binds this repository's own CHANGELOG and version to exactly one section", () => {
+    // The live proof. Two `0.2.0-next.48` sections and two disagreeing `0.2.0-next.49` sections
+    // reached `main` and no check saw them; a rule tested only on fixtures would not have either.
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+    const headings = changelogSections(changelog).map((section) => section.heading);
+    expect(headings.length).toBe(new Set(headings).size);
+
+    const version: string = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+    const selected = selectSection(changelog, version);
+    expect(selected.ok === false ? selected.diagnostic : "").toBe("");
+    expect(selected.ok && selected.heading.startsWith(`${version} `)).toBe(true);
   });
 });
 

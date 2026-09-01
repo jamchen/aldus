@@ -158,6 +158,32 @@ export const cases = [
     wantOutput: "reports a cross-file interface-to-alias change",
   },
   {
+    // Last-write-wins, restored. The `Map` this replaced kept whichever duplicate heading was
+    // inserted last, so two sections for one release resolved silently to the later one — which
+    // for the live `0.2.0-next.49` pair was the *superseded* text a ruling had already corrected.
+    // The case is a pattern rather than a literal so it survives a rename of the local binding.
+    name: "breaking-notes: restoring last-write-wins on duplicate headings is killed",
+    setup: [
+      {
+        replace: [
+          "scripts/breaking-coverage.mjs",
+          /const match = matched\.length === 1 \? matched\[0\] : undefined;/,
+          "const match = matched.at(-1); /* mutant: last-write-wins */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/breaking-coverage.test.ts",
+      "-t",
+      "refuses two sections for the target version",
+    ],
+    wantExit: 1,
+    wantOutput: "never selecting one",
+  },
+  {
     name: "version-bump: a src/ change to a published package must fire",
     setup: [{ append: ["packages/aldus-core/src/schema-version.ts", "// mutant"] }],
     command: ["node", "scripts/check-version-bump.mjs", "{{BASE}}"],
