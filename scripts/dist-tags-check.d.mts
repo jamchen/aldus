@@ -91,10 +91,21 @@ export declare function formatProblem(name: string, problem: TagProblem): string
 /** The three states. `declined` is neither a pass nor a failure and `ok` is false for it. */
 export type Verdict = "pass" | "fail" | "declined";
 
+/**
+ * Why the read loop ended. `settled`: every package passes. `structural`: the snapshot names a
+ * package the publish set does not, decided after one round. `permanent`: a problem no re-read can
+ * change. `exhausted`: the deadline, with a package still absent or unreadable. `unconverged`: the
+ * convergence bound, with only lagging packages left — the one stop that declines.
+ */
+export type Stop = "settled" | "structural" | "permanent" | "exhausted" | "unconverged";
+
 /** What the whole assertion concluded. */
 export interface AssertResult {
   readonly ok: boolean;
   readonly verdict: Verdict;
+  readonly stop: Stop;
+  /** Packages the snapshot records that the publish set does not contain. */
+  readonly strays: readonly string[];
   /** Packages still serving the pre-publish `next` when the loop ended. */
   readonly lagging: readonly string[];
   readonly rounds: number;

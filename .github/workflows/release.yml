@@ -248,26 +248,51 @@ jobs:
       # distinction a reader needs at a glance — a step-summary section and an annotation saying
       # the Publish step succeeded and how to re-check — so a red run no longer has to be
       # re-measured by hand to learn which of the two it was. The Publish step precedes this one
-      # under `set -e`, so reaching here is what "the publish step succeeded" rests on.
+      # under `set -e`, so reaching here is what "the publish step succeeded" rests on, and
+      # `--after-publish` is how this step tells the script so: the script asserts nothing about a
+      # publish it did not see unless its caller states one happened.
+      #
+      # Exit 2 is also what the script gives an invocation it cannot act on, and those carry a
+      # different first line. The branch reads that line rather than the code alone, so the
+      # "not yet converged" summary is printed only for the result it describes; any other exit 2
+      # gets a summary saying the assertion did not run. Keyed on the exit code alone, the first
+      # version would have attributed an invocation refusal to a slow registry (PR #270 review,
+      # finding 4). `packages/aldus-e2e/test/dist-tags.test.ts` reads the pattern out of this file
+      # and checks it against the script's real output, so the two cannot drift apart unnoticed.
       - name: Assert dist-tags after publishing
         run: |
           set -euo pipefail
           status=0
-          node scripts/dist-tags.mjs assert "${RUNNER_TEMP}/dist-tags-before.json" \
-            ${{ inputs.allow-latest-move && '--allow-latest-move' || '' }} || status=$?
+          stderr="${RUNNER_TEMP}/dist-tags-assert.stderr"
+          node scripts/dist-tags.mjs assert "${RUNNER_TEMP}/dist-tags-before.json" --after-publish \
+            ${{ inputs.allow-latest-move && '--allow-latest-move' || '' }} 2> "${stderr}" || status=$?
+          cat "${stderr}" >&2
           if [ "${status}" -eq 2 ]; then
-            {
-              echo "### DECLINED: dist-tags not yet converged for ${{ needs.verify.outputs.version }}"
-              echo
-              echo "The Publish step succeeded for every package. The assertion ran to its convergence"
-              echo "bound with at least one package still serving the pre-publish \`next\`; the step log"
-              echo "names them. This is neither a pass nor a failure, and the job is red because a"
-              echo "declined result is never folded into a pass."
-              echo
-              echo "Re-check: \`npm view @aldus-runtime/<pkg> dist-tags\` — expect"
-              echo "\`next=${{ needs.verify.outputs.version }}\`. See docs/RELEASING.md."
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning title=dist-tags DECLINED::next not yet converged on at least one package; the Publish step succeeded. Neither a pass nor a failure - see the step log and summary."
+            if grep -q '^DECLINED: `next` has not converged' "${stderr}"; then
+              {
+                echo "### DECLINED: dist-tags not yet converged for ${{ needs.verify.outputs.version }}"
+                echo
+                echo "The Publish step succeeded for every package. The assertion ran to its convergence"
+                echo "bound with at least one package still serving the pre-publish \`next\`; the step log"
+                echo "names them. This is neither a pass nor a failure, and the job is red because a"
+                echo "declined result is never folded into a pass."
+                echo
+                echo "Re-check: \`npm view @aldus-runtime/<pkg> dist-tags\` — expect"
+                echo "\`next=${{ needs.verify.outputs.version }}\`. See docs/RELEASING.md."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning title=dist-tags DECLINED::next not yet converged on at least one package; the Publish step succeeded. Neither a pass nor a failure - see the step log and summary."
+            else
+              {
+                echo "### DECLINED: the dist-tags assertion did not run for ${{ needs.verify.outputs.version }}"
+                echo
+                echo "\`dist-tags.mjs\` exited 2 without reading the registry: it declined its own"
+                echo "invocation, and the first line of the step log says what was wrong. Nothing is"
+                echo "known here about \`next\` on any package. The Publish step succeeded; re-check"
+                echo "every package by hand: \`npm view @aldus-runtime/<pkg> dist-tags\`, expect"
+                echo "\`next=${{ needs.verify.outputs.version }}\`. See docs/RELEASING.md."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning title=dist-tags DECLINED::the assertion declined its invocation and read nothing; the Publish step succeeded. See the step log."
+            fi
           fi
           exit "${status}"
 

@@ -751,6 +751,7 @@ describe("assertDistTags: the third state", () => {
       intervalMs: 5_000,
     });
     expect(result.verdict).toBe("fail");
+    expect(result.stop).toBe("exhausted");
     expect(result.exhausted).toBe(true);
     expect(result.rounds).toBe(4);
     expect(
@@ -759,15 +760,22 @@ describe("assertDistTags: the third state", () => {
   });
 
   it("fails, not declines, when the snapshot names a package the publish set does not", async () => {
+    // Known before the first read and changed by no re-read, so the loop ends after one round
+    // rather than polling the lagging package to the convergence bound (PR #270 review, finding 2).
+    const reader = readerOver(oneBehind("@aldus-runtime/testkit"));
     const result = await run({
       expected: expectedSet(),
       before: { ...beforeAll(), "@aldus-runtime/retired": { latest: LATEST, next: STALE } },
-      read: readerOver(oneBehind("@aldus-runtime/testkit")).read,
+      read: reader.read,
       deadlineMs: 10_000,
-      convergenceMs: 10_000,
+      convergenceMs: 60_000,
       intervalMs: 5_000,
     });
     expect(result.verdict).toBe("fail");
+    expect(result.stop).toBe("structural");
+    expect(result.strays).toEqual(["@aldus-runtime/retired"]);
+    expect(result.rounds).toBe(1);
+    expect(reader.calls()).toBe(12);
     expect(result.problems).toHaveLength(2);
   });
 
@@ -816,11 +824,29 @@ describe("dist-tags.mjs assert: exit codes", () => {
     chmodSync(join(dir, "npm"), 0o755);
   }
 
+  /** Milliseconds for one run: the deadline for absence, the longer bound for lag, the interval. */
+  interface Bounds {
+    deadline: number;
+    convergence: number;
+    interval: number;
+  }
+  const TINY: Bounds = { deadline: 60, convergence: 120, interval: 20 };
+
   /**
    * Run the real script against a registry table. Bounds are tiny because a virtual clock cannot be
-   * injected across a process boundary; the interval still leaves room for several rounds.
+   * injected across a process boundary; the interval still leaves room for several rounds. A case
+   * about *which* bound ended the loop passes wider ones, so a round of twelve spawned reads cannot
+   * by itself outlive the bound the case is not about.
    */
-  function assertWith(registry: Record<string, Record<string, string>>) {
+  function assertWith(
+    registry: Record<string, Record<string, string>>,
+    options: {
+      bounds?: Bounds;
+      args?: readonly string[];
+      alsoBefore?: Record<string, Record<string, string>>;
+    } = {},
+  ) {
+    const bounds = options.bounds ?? TINY;
     const dir = mkdtempSync(join(tmpdir(), "dist-tags-exit-"));
     temporaries.push(dir);
     fakeNpm(dir);
@@ -831,9 +857,10 @@ describe("dist-tags.mjs assert: exit codes", () => {
       beforeFile,
       JSON.stringify({
         schema: 1,
-        packages: Object.fromEntries(
-          set.map(({ name }) => [name, { latest: LATEST, next: PREVIOUS }]),
-        ),
+        packages: {
+          ...Object.fromEntries(set.map(({ name }) => [name, { latest: LATEST, next: PREVIOUS }])),
+          ...(options.alsoBefore ?? {}),
+        },
       }),
     );
     const result = spawnSync(
@@ -843,11 +870,12 @@ describe("dist-tags.mjs assert: exit codes", () => {
         "assert",
         beforeFile,
         "--deadline-ms",
-        "60",
+        String(bounds.deadline),
         "--convergence-ms",
-        "120",
+        String(bounds.convergence),
         "--interval-ms",
-        "20",
+        String(bounds.interval),
+        ...(options.args ?? []),
       ],
       {
         cwd: repoRoot,
@@ -861,6 +889,29 @@ describe("dist-tags.mjs assert: exit codes", () => {
     );
     return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
   }
+
+  /** The script's own summary line, so a case can assert on rounds and time rather than infer them. */
+  function readSummary(stdout: string): { rounds: number; elapsedMs: number } {
+    const match = /Read in (\d+) round\(s\) over (\d+)ms\./.exec(stdout);
+    if (match === null) throw new Error(`no summary line in stdout:\n${stdout}`);
+    return { rounds: Number(match[1]), elapsedMs: Number(match[2]) };
+  }
+
+  /**
+   * The pattern `release.yml` greps the script's stderr for before printing its "not yet converged"
+   * summary, read out of the workflow file itself. The workflow keys that summary on the exit code
+   * *and* this first line, so a declined invocation exiting 2 does not get a summary written for a
+   * slow registry; the cases below check the pattern against the script's real output in both
+   * directions, so the workflow and the script cannot drift apart unnoticed.
+   */
+  const workflowDeclinedPattern = (): RegExp => {
+    const workflow = readFileSync(join(repoRoot, ".github", "workflows", "release.yml"), "utf8");
+    const match = /grep -q '([^']+)' "\$\{stderr\}"/.exec(workflow);
+    if (match === null || match[1] === undefined) {
+      throw new Error("release.yml no longer greps the assertion's stderr for its DECLINED line");
+    }
+    return new RegExp(match[1], "m");
+  };
 
   const converged = (): Record<string, Record<string, string>> =>
     Object.fromEntries(set.map(({ name }) => [name, { latest: LATEST, next: intended }]));
@@ -898,10 +949,31 @@ describe("dist-tags.mjs assert: exit codes", () => {
     expect(run.stderr).toContain("DECLINED:");
     expect(run.stderr).toContain("NOT a gate pass and NOT a gate failure");
     expect(run.stderr).toContain("  @aldus-runtime/testkit\n");
-    expect(run.stderr).toContain("reported success");
     expect(run.stderr).toContain("npm view @aldus-runtime/testkit dist-tags");
     expect(run.stderr).not.toContain("FAILED");
     expect(run.stdout).not.toContain("converged to the intended version");
+    // The workflow's summary branch recognises this, and only this, exit 2.
+    expect(run.stderr).toMatch(workflowDeclinedPattern());
+  });
+
+  it("does not assert a publish succeeded unless the caller says so with --after-publish", () => {
+    // From a laptop the script has no evidence a publish preceded it, and the first version said
+    // "reported success for every package" anyway (PR #270 review, finding 3). The fact is the
+    // caller's to state: `release.yml` passes the flag because its Publish step runs first.
+    const registry = converged();
+    registry["@aldus-runtime/testkit"] = { latest: LATEST, next: PREVIOUS };
+
+    const bare = assertWith(registry);
+    expect(bare.status).toBe(2);
+    expect(bare.stderr).toContain("If this ran after a publish step that succeeded");
+    expect(bare.stderr).toContain("did not pass --after-publish");
+    expect(bare.stderr).not.toContain("reported success");
+
+    const stated = assertWith(registry, { args: ["--after-publish"] });
+    expect(stated.status).toBe(2);
+    expect(stated.stderr).toContain("reported success for every package");
+    expect(stated.stderr).toContain("caller passed --after-publish");
+    expect(stated.stderr).not.toContain("If this ran after");
   });
 
   it("exits 1, not 2, when one package is one behind and another is wrong", () => {
@@ -914,22 +986,131 @@ describe("dist-tags.mjs assert: exit codes", () => {
     expect(run.stderr).not.toContain("DECLINED");
   });
 
-  it("declines a convergence bound shorter than the deadline before reading anything", () => {
-    const result = spawnSync(
-      "node",
-      [
-        join(repoRoot, "scripts", "dist-tags.mjs"),
-        "assert",
-        "/nonexistent/before.json",
-        "--deadline-ms",
-        "100",
-        "--convergence-ms",
-        "50",
-      ],
-      { cwd: repoRoot, encoding: "utf8" },
+  it("exits 1 at the deadline, not the convergence bound, when a package is absent and another lags", () => {
+    // Absence has no measurement behind it, so it is held to the ordinary deadline even while a
+    // lagging package is alongside; the review's hand mutant (ii) — `failed.some(lagging)` — was
+    // caught by one unit case only, so the mix is asserted through the real process as well
+    // (PR #270 review, finding 5). The convergence bound is wide enough that a round of twelve
+    // spawned reads cannot reach it by accident; the deadline is what has to end the loop.
+    const registry = converged();
+    registry["@aldus-runtime/testkit"] = { latest: LATEST, next: PREVIOUS };
+    delete registry["@aldus-runtime/release"];
+    const bounds: Bounds = { deadline: 300, convergence: 6_000, interval: 20 };
+    const run = assertWith(registry, { bounds });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("dist-tags assertion FAILED");
+    expect(run.stderr).toContain("(package not on the registry)");
+    expect(run.stderr).toContain(`The ${bounds.deadline}ms deadline was exhausted`);
+    expect(run.stderr).not.toContain("DECLINED");
+    const { elapsedMs } = readSummary(run.stdout);
+    expect(elapsedMs).toBeLessThan(bounds.convergence);
+  });
+
+  it("exits 1 after one round when the snapshot names a stray package alongside a lagging one", () => {
+    // A stray is known before the first read and no re-read can change it; the first version
+    // computed it and then polled the lagging package to the full convergence bound before failing
+    // — 37 rounds over six seconds in the review's probe, ten minutes in production (PR #270
+    // review, finding 2). Its footer also said the deadline was exhausted with a package absent,
+    // when nothing was absent (finding 1). The convergence bound here is wide enough that a
+    // one-round run cannot reach it by accident, so the round count is what distinguishes the fix.
+    const registry = converged();
+    registry["@aldus-runtime/testkit"] = { latest: LATEST, next: PREVIOUS };
+    const bounds: Bounds = { deadline: 1_000, convergence: 6_000, interval: 20 };
+    const run = assertWith(registry, {
+      bounds,
+      alsoBefore: { "@aldus-runtime/retired": { latest: LATEST, next: PREVIOUS } },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("dist-tags assertion FAILED");
+    expect(run.stderr).toContain("@aldus-runtime/retired tag=* expected=(in the publish set)");
+    expect(run.stderr).toContain("The two sides describe different releases");
+    expect(run.stderr).toContain("a lagging package alongside it is not waited for");
+    expect(run.stderr).not.toContain("deadline was exhausted");
+    expect(run.stderr).not.toContain("absent or unreadable");
+    expect(run.stderr).not.toContain("DECLINED");
+    const { rounds, elapsedMs } = readSummary(run.stdout);
+    expect(rounds).toBe(1);
+    expect(elapsedMs).toBeLessThan(bounds.convergence);
+  });
+
+  /** Run the script with raw arguments and no fake registry: nothing here should read anything. */
+  function invoke(...args: string[]) {
+    const result = spawnSync("node", [join(repoRoot, "scripts", "dist-tags.mjs"), ...args], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  }
+
+  /** What every declined invocation carries, and what the workflow's converged branch must not see. */
+  function expectDeclinedInvocation(run: {
+    status: number | null;
+    stdout: string;
+    stderr: string;
+  }) {
+    expect(run.status).toBe(2);
+    expect(run.stderr).toMatch(/^DECLINED: dist-tags\.mjs /m);
+    expect(run.stderr).toContain(
+      "This is a declined invocation. It is NOT a gate pass and NOT a gate failure.",
     );
-    expect(result.status).toBe(2);
-    expect(result.stderr).toContain("must not be shorter than --deadline-ms");
+    expect(run.stderr).toContain(
+      "usage: node scripts/dist-tags.mjs snapshot <file> | assert <before>",
+    );
+    expect(run.stderr).toContain(
+      "Exit codes: 0 the gate passed, 1 the gate failed, 2 declined (no result).",
+    );
+    expect(run.stderr).not.toContain("FAILED");
+    expect(run.stdout).toBe("");
+    expect(run.stderr).not.toMatch(workflowDeclinedPattern());
+  }
+
+  it("declines a convergence bound shorter than the deadline before reading anything", () => {
+    const run = invoke(
+      "assert",
+      "/nonexistent/before.json",
+      "--deadline-ms",
+      "100",
+      "--convergence-ms",
+      "50",
+    );
+    expectDeclinedInvocation(run);
+    expect(run.stderr).toContain("--convergence-ms 50, shorter than --deadline-ms 100");
+  });
+
+  it("spells every other exit 2 the same way: a bad number, a foreign snapshot, no mode, no file", () => {
+    // The first version exited 2 from three bare `dist-tags: …` lines of its own alongside the
+    // one `DECLINED:` (PR #270 review, finding 4). One spelling, so a reader — and the workflow
+    // branch that now reads the first line — can tell a refused invocation from a declined result.
+    const dir = mkdtempSync(join(tmpdir(), "dist-tags-refusals-"));
+    temporaries.push(dir);
+    const foreign = join(dir, "foreign.json");
+    writeFileSync(foreign, JSON.stringify({ schema: 99, packages: {} }));
+    const notJson = join(dir, "not.json");
+    writeFileSync(notJson, "not json");
+
+    const badNumber = invoke("assert", foreign, "--interval-ms", "soon");
+    expectDeclinedInvocation(badNumber);
+    expect(badNumber.stderr).toContain("--interval-ms soon, which is not a positive number");
+
+    const foreignSchema = invoke("assert", foreign);
+    expectDeclinedInvocation(foreignSchema);
+    expect(foreignSchema.stderr).toContain("is not a schema-1 snapshot");
+
+    const unreadable = invoke("assert", notJson);
+    expectDeclinedInvocation(unreadable);
+    expect(unreadable.stderr).toContain("could not read");
+
+    const noMode = invoke();
+    expectDeclinedInvocation(noMode);
+    expect(noMode.stderr).toContain("was invoked with no mode");
+
+    const unknownMode = invoke("verify", foreign);
+    expectDeclinedInvocation(unknownMode);
+    expect(unknownMode.stderr).toContain('does not know the mode "verify"');
+
+    const noFile = invoke("assert");
+    expectDeclinedInvocation(noFile);
+    expect(noFile.stderr).toContain("was invoked with no <before> argument");
   });
 });
 

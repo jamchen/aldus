@@ -332,7 +332,9 @@ export function formatProblem(name, problem) {
  * reaching it **fails**. `convergenceMs` covers packages still serving the pre-publish `next`;
  * reaching it with nothing else outstanding **declines** — `verdict: "declined"`, `ok: false`,
  * and the problems listed, so a caller that only reads `ok` still cannot treat it as a pass. A
- * problem no re-read can change ends the loop at once.
+ * problem no re-read can change ends the loop at once, and so does a snapshot that names a package
+ * the publish set does not — that is a fault in the question, not in any answer, and is known
+ * before the first read. `stop` says which of the five ways the loop ended.
  *
  * Each bound is enforced twice over, because a retry loop that can outlive its budget is a release
  * job that hangs instead of failing: a round count derived from the bound *and* a clock check.
@@ -369,7 +371,11 @@ export async function assertDistTags({
 
   // A package recorded before the publish that is no longer in the set means the two sides are
   // describing different releases, and every per-package verdict below would be about the wrong
-  // set. Structural, so it is decided once rather than retried.
+  // set. Structural: known before the first read, and no re-read can change it, so the loop ends
+  // after one round whatever the packages say. The first version computed this here and then never
+  // consulted it inside the loop, so a stray alongside a lagging package polled to the full
+  // convergence bound — ten minutes in production — before failing on a fact known in round one
+  // (PR #270 review, finding 2).
   const names = new Set(expected.map((entry) => entry.name));
   const strays = Object.keys(before ?? {}).filter((name) => !names.has(name));
 
@@ -380,7 +386,11 @@ export async function assertDistTags({
   let pending = expected.map((entry) => entry.name);
   let rounds = 0;
   let results = [];
-  // Why the loop ended: settled, permanent, exhausted (deadline) or unconverged (convergence).
+  // Why the loop ended. Returned to the caller as `stop`, because a footer that describes the
+  // mechanism has to know which mechanism ran: `settled` (every package passes), `structural`
+  // (the snapshot names a package the publish set does not), `permanent` (a problem no re-read can
+  // change), `exhausted` (the deadline, with a package still absent or unreadable) or
+  // `unconverged` (the convergence bound, with only lagging packages left).
   let stop;
 
   for (;;) {
@@ -396,6 +406,14 @@ export async function assertDistTags({
         allowLatestMove,
       }),
     );
+
+    // The packages are read once even when the snapshot is structurally wrong, so the report
+    // still shows what the registry said — but they are not re-read, because nothing they could
+    // say makes the two sides describe the same release.
+    if (strays.length > 0) {
+      stop = "structural";
+      break;
+    }
 
     const failed = results.filter((result) => !result.ok);
     if (failed.length === 0) {
@@ -436,7 +454,9 @@ export async function assertDistTags({
 
   // Declined only when the *whole* set of problems is the lagging kind. A stray in the snapshot
   // is a structural fault about which release is being asserted, and it makes this a failure
-  // regardless of how the packages read.
+  // regardless of how the packages read. A stray never reaches `unconverged` — the loop ends
+  // `structural` above — and the guard is kept here anyway, so the verdict does not rest on the
+  // loop's short-circuit: if the two ever disagree, a stray is still a failure.
   const verdict =
     problems.length === 0
       ? "pass"
@@ -447,6 +467,8 @@ export async function assertDistTags({
   return {
     ok: verdict === "pass",
     verdict,
+    stop,
+    strays,
     lagging: results.filter((result) => result.lagging).map((result) => result.name),
     rounds,
     exhausted: (stop === "exhausted" || stop === "unconverged") && problems.length > 0,

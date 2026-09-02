@@ -8,7 +8,7 @@
  * tag movement fail the job that caused it.
  *
  *   node scripts/dist-tags.mjs snapshot <file>
- *   node scripts/dist-tags.mjs assert <before> [--allow-latest-move]
+ *   node scripts/dist-tags.mjs assert <before> [--allow-latest-move] [--after-publish]
  *                                              [--deadline-ms N] [--convergence-ms N] [--interval-ms N]
  *
  * `assert` holds **two** invariants for every package in the publish set, not one:
@@ -34,6 +34,20 @@
  *   apart from here, so this says so — neither a pass nor a failure — and names the command that
  *   settles it later.
  *
+ * Exit 2 is also what an invocation this script cannot act on gets — a flag that is not a number,
+ * a snapshot another schema wrote, no mode at all — and every one of those goes through
+ * `declined.mjs` too, so exit 2 has **one** spelling: `DECLINED:` on the first line and the shared
+ * legend on the last. The first version kept three bare `dist-tags: …` refusals of its own; the
+ * workflow keys its "not yet converged" summary on the exit code, and a refusal exiting 2 with a
+ * different first line is how that summary would one day be printed for the wrong reason (PR #270
+ * review, finding 4). The workflow now also reads the first line, so both sides hold.
+ *
+ * `--after-publish` is a statement by the caller, not an inference by the script: `release.yml`
+ * passes it because its Publish step precedes this one under `set -e`, so the DECLINED text may
+ * then say the publish reported success. Run from a laptop without the flag, the same text says
+ * "if this ran after a publish step that succeeded" — the script has no evidence either way and
+ * does not pretend to (finding 3).
+ *
  * The rule and its reader live in `dist-tags-check.mjs` so they can be driven by a test with a
  * fake registry. This file is argv, files and exit codes.
  */
@@ -41,7 +55,7 @@
 import { writeFileSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
-import { declineUndecided } from "./declined.mjs";
+import { declineInvocation, declineMissingArgument, declineUndecided } from "./declined.mjs";
 import { publishSet } from "./publish-set.mjs";
 import {
   DEFAULT_CONVERGENCE_MS,
@@ -61,19 +75,68 @@ function expectedFromManifests() {
   return publishSet().map((pkg) => ({ name: pkg.name, version: pkg.manifest.version }));
 }
 
-/** A numeric flag, or its default. Refuses a value that is not a positive number. */
+const SCRIPT = "dist-tags.mjs";
+const USAGE =
+  "snapshot <file> | assert <before> [--allow-latest-move] [--after-publish] " +
+  "[--deadline-ms N] [--convergence-ms N] [--interval-ms N]";
+const EXAMPLE = 'assert "$RUNNER_TEMP/dist-tags-before.json" --after-publish';
+const NOTES = [
+  "`snapshot <file>` records every package's `latest` and `next` before the publish.",
+  "`assert <before>` re-reads them afterwards and holds both invariants against that file.",
+  "`--after-publish` states that a publish step succeeded before this ran; `release.yml` passes it.",
+  "`--deadline-ms` bounds an absent or unreadable package (fails closed); `--convergence-ms`",
+  "bounds a package still serving the pre-publish `next` (declines), and must not be shorter.",
+].join("\n");
+
+/** Every invocation this script cannot act on exits 2 through here, so exit 2 has one spelling. */
+function refuse(headline) {
+  declineInvocation(SCRIPT, headline, USAGE, EXAMPLE, NOTES);
+}
+
+/** A numeric flag, or its default. Declines a value that is not a positive number. */
 function numberFlag(argv, flag, fallback) {
   const at = argv.indexOf(flag);
   if (at === -1) return fallback;
   const value = Number(argv[at + 1]);
   if (!Number.isFinite(value) || value <= 0) {
-    console.error(`dist-tags: ${flag} needs a positive number, got ${String(argv[at + 1])}`);
-    process.exit(2);
+    refuse(
+      `${SCRIPT} was given ${flag} ${String(argv[at + 1])}, which is not a positive number, so no gate ran.`,
+    );
   }
   return value;
 }
 
+/** The snapshot `assert` compares against, or a declined invocation naming what is wrong with it. */
+function readSnapshot(path) {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    refuse(
+      `${SCRIPT} could not read ${path} as a snapshot (${error instanceof Error ? error.message : String(error)}), so no gate ran.`,
+    );
+  }
+  if (raw?.schema !== SNAPSHOT_SCHEMA || raw.packages === undefined) {
+    // A file written by another version records different fields, and reading it as this one is a
+    // comparison against values that are not there.
+    refuse(
+      `${SCRIPT} was given ${path}, which is not a schema-${SNAPSHOT_SCHEMA} snapshot, so no gate ran.`,
+    );
+  }
+  return raw;
+}
+
 const [mode, file, ...rest] = process.argv.slice(2);
+
+if ((mode === "snapshot" || mode === "assert") && file === undefined) {
+  declineMissingArgument(
+    SCRIPT,
+    mode === "snapshot" ? "<file>" : "<before>",
+    USAGE,
+    EXAMPLE,
+    NOTES,
+  );
+}
 
 if (mode === "snapshot") {
   // A read that failed is not a package without tags. The old snapshot recorded both as `null`,
@@ -107,26 +170,17 @@ if (mode === "snapshot") {
 
 if (mode === "assert") {
   const allowLatestMove = rest.includes("--allow-latest-move");
+  const afterPublish = rest.includes("--after-publish");
   const deadlineMs = numberFlag(rest, "--deadline-ms", DEFAULT_DEADLINE_MS);
   const convergenceMs = numberFlag(rest, "--convergence-ms", DEFAULT_CONVERGENCE_MS);
   const intervalMs = numberFlag(rest, "--interval-ms", DEFAULT_INTERVAL_MS);
   if (convergenceMs < deadlineMs) {
-    console.error(
-      `dist-tags: --convergence-ms (${convergenceMs}) must not be shorter than --deadline-ms (${deadlineMs})`,
+    refuse(
+      `${SCRIPT} was given --convergence-ms ${convergenceMs}, shorter than --deadline-ms ${deadlineMs}, so no gate ran.`,
     );
-    process.exit(2);
   }
 
-  const raw = JSON.parse(readFileSync(file, "utf8"));
-  if (raw?.schema !== SNAPSHOT_SCHEMA || raw.packages === undefined) {
-    console.error(
-      `dist-tags: ${file} is not a schema-${SNAPSHOT_SCHEMA} snapshot. A file written by another\n` +
-        "version records different fields, and reading it as this one is a comparison against\n" +
-        "values that are not there.",
-    );
-    process.exit(2);
-  }
-
+  const raw = readSnapshot(file);
   const expected = expectedFromManifests();
   const result = await assertDistTags({
     expected,
@@ -153,9 +207,25 @@ if (mode === "assert") {
     // Every package that is not passing reads exactly as it did before the publish, and nothing
     // else is wrong. The registry has not served the new document yet, or the package never
     // published; the two look identical from here (#266: five minutes, twice, same package). The
-    // publish command itself reported success — in `release.yml` this step does not run otherwise
-    // — so the one thing that would distinguish them is time, and the bound is up.
+    // one thing that would distinguish them is time, and the bound is up.
+    //
+    // Whether a publish preceded this run is the caller's to state, not this script's to assume:
+    // `release.yml` passes `--after-publish` because its Publish step runs first under `set -e`.
+    // Without the flag the same text is conditional, because from a laptop nothing here knows.
     const names = result.lagging;
+    const publishEvidence = afterPublish
+      ? [
+          "The publish step that precedes this assertion reported success for every package (the",
+          "caller passed --after-publish; in `release.yml` this step is not reached otherwise). A",
+          "registry whose read side has not caught up and a package that never published read",
+          "identically at this point, and this check will not pick one.",
+        ]
+      : [
+          "If this ran after a publish step that succeeded, a registry whose read side has not caught",
+          "up and a package that never published read identically at this point, and this check will",
+          "not pick one. Nothing here establishes that a publish happened at all — this invocation",
+          "did not pass --after-publish, so that is not asserted.",
+        ];
     declineUndecided(
       `\`next\` has not converged on ${names.length} of ${expected.length} package(s) after ` +
         `${convergenceMs}ms, so the assertion has no result.`,
@@ -163,9 +233,7 @@ if (mode === "assert") {
         "Still serving the pre-publish `next`, with `latest` unmoved and every other package passing:",
         ...names.map((name) => `  ${name}`),
         "",
-        "The publish step that precedes this assertion reported success for every package; this",
-        "step is not reached otherwise. A registry whose read side has not caught up and a package",
-        "that never published read identically at this point, and this check will not pick one.",
+        ...publishEvidence,
         "",
         "Re-check once the registry has had time to converge (measured at about five minutes):",
         ...names.map((name) => `  npm view ${name} dist-tags`),
@@ -179,11 +247,29 @@ if (mode === "assert") {
   if (!result.ok) {
     console.error("\ndist-tags assertion FAILED:");
     for (const problem of result.problems) console.error(`  ${problem}`);
-    if (result.exhausted) {
+    // The footer is keyed on why the loop stopped, not on a flag that covers two stops. The first
+    // version keyed on `exhausted`, which is true at the deadline *and* at the convergence bound,
+    // so a stray snapshot entry alongside a lagging package printed "deadline exhausted with a
+    // package still absent" when nothing was absent (PR #270 review, finding 1).
+    if (result.stop === "exhausted") {
       console.error(
         `\nThe ${deadlineMs}ms deadline was exhausted with a package still absent or unreadable.\n` +
           "That is not the measured lag shape (a pre-publish `next` still being served), so it\n" +
           "fails closed rather than declining.",
+      );
+    } else if (result.stop === "structural") {
+      console.error(
+        `\nThe snapshot records ${result.strays.length} package(s) the publish set does not contain:\n` +
+          result.strays.map((name) => `  ${name}`).join("\n") +
+          "\nThe two sides describe different releases, so this fails after one read regardless of\n" +
+          "what the packages say — a lagging package alongside it is not waited for.",
+      );
+    } else if (result.stop === "unconverged") {
+      // Unreachable while `assertDistTags` declines on this stop; kept so a future change to the
+      // verdict rule does not fall through to silence.
+      console.error(
+        `\nThe ${convergenceMs}ms convergence bound was reached with a package still serving the\n` +
+          "pre-publish `next`.",
       );
     }
     console.error(
@@ -200,8 +286,8 @@ if (mode === "assert") {
   process.exit(0);
 }
 
-console.error(
-  "usage: dist-tags.mjs snapshot <file>\n" +
-    "       dist-tags.mjs assert <file> [--allow-latest-move] [--deadline-ms N] [--convergence-ms N] [--interval-ms N]",
+refuse(
+  mode === undefined
+    ? `${SCRIPT} was invoked with no mode, so no gate ran.`
+    : `${SCRIPT} does not know the mode "${mode}", so no gate ran.`,
 );
-process.exit(2);
