@@ -162,7 +162,7 @@ export function gateStatus(overrides: Partial<GateStatus> & { gateId: string }):
     level: "human_oracle",
     enforcement: "blocking",
     state: "pending",
-    blocking: true,
+    currentlyBlocking: true,
     ...overrides,
   };
 }

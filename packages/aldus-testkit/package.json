@@ -1,6 +1,6 @@
 {
   "name": "@aldus-runtime/testkit",
-  "version": "0.2.0-next.56",
+  "version": "0.2.0-next.57",
   "type": "module",
   "description": "Aldus Testkit — deterministic builders, fixtures, and test doubles for Aldus Core contracts.",
   "license": "Apache-2.0",
@@ -35,7 +35,7 @@
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aldus-runtime/core": "0.2.0-next.56"
+    "@aldus-runtime/core": "0.2.0-next.57"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

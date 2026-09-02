@@ -217,7 +217,7 @@ describe("advisory gates do not block (§12 level 2)", () => {
 
     const statuses = await advisoryEngine.evaluate(RUN_ID, subjects);
     expect(statuses.get("rhythm-advice")?.state).toBe("pending");
-    expect(statuses.get("rhythm-advice")?.blocking).toBe(false);
+    expect(statuses.get("rhythm-advice")?.currentlyBlocking).toBe(false);
     expect(statuses.get("final")?.state).toBe("satisfied");
   });
 });
@@ -239,7 +239,7 @@ describe("waivers (§13)", () => {
 
     const statuses = await engine.evaluate(RUN_ID, subjects);
     expect(statuses.get(CONTENT_FREEZE)?.state).toBe("waived");
-    expect(statuses.get(CONTENT_FREEZE)?.blocking).toBe(false);
+    expect(statuses.get(CONTENT_FREEZE)?.currentlyBlocking).toBe(false);
     // Distinct from approved, so the bypass stays visible in the record.
     expect(statuses.get(CONTENT_FREEZE)?.decision?.decision).toBe("waived");
   });

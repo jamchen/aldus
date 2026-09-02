@@ -66,7 +66,9 @@ describe("ordering", () => {
         { stageId: "stage-a", status: "failed", retryable: true },
         { stageId: "stage-b", status: "never_run" },
       ],
-      gates: [gateStatus({ gateId: "performance-freeze", state: "stale", blocking: true })],
+      gates: [
+        gateStatus({ gateId: "performance-freeze", state: "stale", currentlyBlocking: true }),
+      ],
     });
     expect(result.next[0]?.kind).toBe("approve-gate");
     expect(result.next[0]?.gateId).toBe("performance-freeze");
@@ -85,7 +87,7 @@ describe("ordering", () => {
           gateId: "gate-a",
           state: "pending",
           enforcement: "advisory",
-          blocking: false,
+          currentlyBlocking: false,
         }),
       ],
     });
@@ -179,7 +181,9 @@ describe("what is withheld, and why", () => {
 
   it("does not report a satisfied gate as blocking anything", () => {
     const result = plan({
-      gates: [gateStatus({ gateId: "content-freeze", state: "satisfied", blocking: false })],
+      gates: [
+        gateStatus({ gateId: "content-freeze", state: "satisfied", currentlyBlocking: false }),
+      ],
     });
     expect(result.blocked).toEqual([]);
   });
@@ -192,7 +196,7 @@ describe("what is withheld, and why", () => {
           gateId: "rhythm-check",
           state: "stale",
           enforcement: "advisory",
-          blocking: false,
+          currentlyBlocking: false,
         }),
       ],
     });
