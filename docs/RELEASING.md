@@ -430,10 +430,37 @@ and the `latest` comparison that did run was reading `undefined` on both sides, 
 wraps `view --json` output in an array and the runner installs `npm@latest`. A value that is
 printed is not a value that is checked, and a comparison between two `undefined`s cannot fail.
 
-Because the registry can serve a stale `next` for a few seconds after a successful publish — which
-is what that run actually caught — the assertion re-reads what has not converged, on a bounded
-schedule with a deadline, and fails closed when the deadline runs out. A missing, stale,
-malformed, wrong-package or mixed-version `next` never produces green.
+Because the registry can serve a stale `next` after a successful publish — which is what that run
+actually caught — the assertion re-reads what has not converged, on a bounded schedule. A missing,
+stale, malformed, wrong-package or mixed-version `next` never produces green.
+
+**The assertion has three outcomes, not two.** Two release runs in one day (`next.54` and
+`next.58`, #266) published all twelve packages and then went red on the assertion with
+`@aldus-runtime/testkit` still reading the _previous_ `next` after its two-minute window; read
+from a laptop, the tag had converged about five minutes after the publish both times, and the
+version document itself returned 404 three minutes in. That red was spelled the same as a partial
+publish, and a partial publish is the case whose recovery is owner-reserved — so a reader had to
+re-measure by hand to learn which one they were looking at.
+
+So `scripts/dist-tags.mjs assert` now distinguishes them by what the registry says:
+
+| Observed                                                                                | Verdict       | Exit |
+| --------------------------------------------------------------------------------------- | ------------- | ---- |
+| `latest` unmoved, `next` the intended version, on every package                         | pass          | 0    |
+| `latest` moved; or `next` a version neither intended nor recorded before the publish    | fail, at once | 1    |
+| a package absent or unreadable past `--deadline-ms` (default 120 s)                     | fail          | 1    |
+| only packages still serving **exactly** the pre-publish `next`, past `--convergence-ms` | **DECLINED**  | 2    |
+
+The convergence bound defaults to ten minutes — twice the measured lag — and is a flag so a third
+measurement can move it. `DECLINED` names the packages, states that the publish step reported
+success (in `release.yml` the assertion is not reached otherwise), says it is neither a pass nor a
+failure, and gives the command to re-check: `npm view @aldus-runtime/<pkg> dist-tags`. A lagging
+package alongside anything wrong is a failure, not a decline — a failure always wins.
+
+The workflow still marks the job red on exit 2. A declined result is not folded into a pass, and
+the job has no green that means "unknown"; what it adds on 2 is a step-summary section and an
+annotation saying which of the two reds this is. If `next` is still the old value an hour after
+the publish, treat it as a partial publish (below).
 
 Promoting to `latest` later, once an adopter has validated:
 

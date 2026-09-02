@@ -12,8 +12,11 @@ export declare const ASSERTED_TAGS: readonly ["latest", "next"];
 /** Snapshot file format version. */
 export declare const SNAPSHOT_SCHEMA: number;
 
-/** Total convergence budget, in milliseconds. */
+/** How long an absent or unreadable package is re-read before failing closed, in milliseconds. */
 export declare const DEFAULT_DEADLINE_MS: number;
+
+/** How long a still-pre-publish `next` is re-read before the assertion declines, in milliseconds. */
+export declare const DEFAULT_CONVERGENCE_MS: number;
 
 /** Delay between re-reads of the packages that have not converged. */
 export declare const DEFAULT_INTERVAL_MS: number;
@@ -40,6 +43,8 @@ export interface TagProblem {
   readonly why: string;
   /** Whether re-reading could change this answer. Never a reason to pass. */
   readonly retriable: boolean;
+  /** `next` is exactly the pre-publish value on an otherwise sound reading: not yet converged, or never published. */
+  readonly lagging: boolean;
 }
 
 /** One package's verdict. */
@@ -47,6 +52,8 @@ export interface PackageVerdict {
   readonly name: string;
   readonly ok: boolean;
   readonly retriable: boolean;
+  /** Every problem on this package is the lagging kind. */
+  readonly lagging: boolean;
   readonly problems: readonly TagProblem[];
   readonly declared: readonly string[];
   readonly reading: Reading;
@@ -81,9 +88,15 @@ export declare function evaluatePackage(input: {
 /** One diagnostic line. */
 export declare function formatProblem(name: string, problem: TagProblem): string;
 
+/** The three states. `declined` is neither a pass nor a failure and `ok` is false for it. */
+export type Verdict = "pass" | "fail" | "declined";
+
 /** What the whole assertion concluded. */
 export interface AssertResult {
   readonly ok: boolean;
+  readonly verdict: Verdict;
+  /** Packages still serving the pre-publish `next` when the loop ended. */
+  readonly lagging: readonly string[];
   readonly rounds: number;
   readonly exhausted: boolean;
   readonly results: readonly PackageVerdict[];
@@ -98,6 +111,7 @@ export declare function assertDistTags(input: {
   read: (name: string) => Reading | Promise<Reading>;
   allowLatestMove?: boolean;
   deadlineMs?: number;
+  convergenceMs?: number;
   intervalMs?: number;
   now?: () => number;
   sleep?: (ms: number) => void | Promise<void>;

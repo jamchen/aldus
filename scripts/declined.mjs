@@ -38,9 +38,33 @@ function decline(script, headline, usage, example, notes) {
   console.error("This is a declined invocation. It is NOT a gate pass and NOT a gate failure.\n");
   console.error(`usage: node scripts/${script} ${usage}`);
   console.error(`  e.g. node scripts/${script} ${example}\n`);
-  console.error(
-    `${notes}\nExit codes: 0 the gate passed, 1 the gate failed, 2 declined (no result).`,
-  );
+  console.error(`${notes}\n${EXIT_CODES}`);
+  process.exit(2);
+}
+
+/** The one spelling of the three exit codes. */
+const EXIT_CODES = "Exit codes: 0 the gate passed, 1 the gate failed, 2 declined (no result).";
+
+/**
+ * Print a declined-**result** message and exit 2.
+ *
+ * The other way a check declines. `decline()` above is for an invocation the gate could not act
+ * on; this is for a gate that ran to its bound and found the evidence still undecided — the
+ * post-publish dist-tag assertion when the registry has not yet served the new `next` (#266). The
+ * distinction matters to the reader: there is no usage line to print because the arguments were
+ * fine, and what they need instead is what was observed and how to look again.
+ *
+ * Same first two lines as `decline()`, so a reader — or a grep — finds every declined outcome by
+ * one spelling, and the same exit-code legend at the end.
+ *
+ * @param {string} headline - what is undecided, as one sentence.
+ * @param {string} body - what was observed and how to re-check; one or more lines, no trailing newline.
+ * @returns {never}
+ */
+export function declineUndecided(headline, body) {
+  console.error(`DECLINED: ${headline}`);
+  console.error("This is a declined result. It is NOT a gate pass and NOT a gate failure.\n");
+  console.error(`${body}\n${EXIT_CODES}`);
   process.exit(2);
 }
 
