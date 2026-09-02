@@ -8,6 +8,61 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.56 — 2026-09-02
+
+### BREAKING
+
+**A `human_oracle` gate whose `permittedActorKinds` is anything but exactly `["human"]` is now
+refused by `validateGateDefinition` — and therefore at `GateRegistry` construction — where it used
+to resolve.**
+
+Until now the check only required that a human-oracle gate _include_ `human`, so
+`permittedActorKinds: ["human", "agent"]` was accepted. That arm widened the one gate §12 level 4
+gives to a person to every agent on every run, per definition, with no record of who delegated what
+(#207). It could never be the right answer: if the judgement genuinely needs a human, permitting an
+agent contradicts the declared level; if it does not, the gate is at the wrong level and widening
+hides the mis-declaration instead of fixing it. The case that surfaced it was a signed spend ceiling
+declared as a `human_oracle` gate — the widening arm was the fix the API invited, and the right fix
+was to change the level.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding, because no signature
+     changed — `GateDefinition.permittedActorKinds` is still `readonly ActorKind[] | undefined` and
+     `validateGateDefinition` still returns `ResolvedGateDefinition`. The break is behavioural: a
+     definition previously accepted at registry construction now throws
+     `ALDUS_GATE_DEFINITION_INVALID` there. `SCHEMA_VERSION` does not move, because no schema field
+     changed. This note is written by hand for the same reason the next.36 entry was. -->
+
+**Migration.** An adopter with a widened `human_oracle` gate has two honest doors, and the refusal
+names both:
+
+- **Move the gate to the level its judgement warrants.** An objectively testable check — _is a
+  signed ceiling in force for this run?_ — is a `hard_gate` binding the signed artifact as its
+  subject, where agents are permitted by default. The human's judgement lives in the signature the
+  gate binds; the gate verifies it is present and unchanged.
+- **Record that the gate was bypassed**, with `aldus waive --reason <why>` (since `next.29`). A
+  waiver is attributable, dated and voided when its subjects drift, which a widened actor list
+  never was.
+
+Leaving `permittedActorKinds` unset on a `human_oracle` gate is unchanged: the default is and was
+`["human"]`, and writing `["human"]` explicitly still resolves. Every other level is untouched.
+Measured rather than asserted: the first adopter's integration sets `permittedActorKinds` on no
+gate at `origin/main` on 2026-09-02 (coordinator ruling on #207), so no adopter definition changes
+meaning.
+
+### Changed
+
+**The two charge fields now each say what they are not, with the replay adapter as the worked
+example** (#203). Doc comments only, on `SynthesisAdapterCapabilities.incursCharge` and
+`SynthesisOutcome.incurredCharge` in `@aldus-runtime/services` and `TakeRecord.delivery.incurredCharge`
+in `@aldus-runtime/tts-ledger`. `incursCharge` answers _can this adapter charge at all?_ and feeds
+only the spend expectation; `incurredCharge` answers _did this delivery charge?_ and is the only one
+of the two `takePaidness` reads. Neither is derived from the other. The replay adapter shows why the
+distinction matters: it declares `incursCharge: false`, omits `incurredCharge`, and its take's
+paidness is `unknown` — the only one of `paid` / `free` / `unknown` that is not a false statement
+about bytes purchased once and replayed for free. The first adapter to consider declaring
+`incursCharge` could not tell from the API whether doing so was safe and had to ask; now the comment
+answers. No code changed.
+
 ## 0.2.0-next.55 — 2026-09-02
 
 ### Changed

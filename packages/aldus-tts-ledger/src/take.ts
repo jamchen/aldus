@@ -323,6 +323,20 @@ export const takeDeliverySchema = z
      * The positive evidence {@link takePaidness} needs. Absent is unknown, and unknown is not
      * free: an adapter that never learned to report is indistinguishable from one that charged
      * nothing.
+     *
+     * **This answers "did this delivery charge?" and nothing else.** It is not the adapter
+     * capability `incursCharge` (declared on the synthesis adapter's capabilities, one package
+     * over), which answers *can this adapter charge at all?* and feeds only the spend expectation
+     * formed before dispatch. `takePaidness` reads this field, `costRecordId` and
+     * `unauthorizedCharge`, and never the capability; the capability is never derived from this
+     * field either (#203).
+     *
+     * Worked example, the replay adapter. It declares `incursCharge: false` — replaying stored
+     * bytes calls no provider — and omits this field on every delivery, so the replayed take's
+     * paidness is `unknown`. That is the correct value, not a gap: the bytes were purchased once,
+     * by the take being replayed, and are delivered again for nothing. `paid` would count them
+     * twice and `free` would say they were never bought; `unknown` is the only one of the three
+     * that is not a false statement about purchased bytes.
      */
     incurredCharge: z.boolean().optional(),
     /** The take whose bytes this delivery replays, where it replays one (§15 lineage). */

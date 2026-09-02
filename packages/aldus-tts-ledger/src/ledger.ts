@@ -66,8 +66,10 @@ export interface TtsLedgerOptions {
    * so the condition could never be satisfied by anyone.
    *
    * Gates already had the right shape one package over. `GateDefinition.permittedActorKinds`
-   * defaults to human-only for a `human_oracle` gate and is overridable where an adopter states
-   * it, so the same contract clause was configurable there and absolute here.
+   * defaults to human-only for a `human_oracle` gate, and an adopter whose judgement does not need
+   * a person declares a lower level, where any actor is permitted by default (a `human_oracle`
+   * gate itself permits exactly `["human"]`, since #207). So the same contract clause was
+   * configurable there and absolute here.
    *
    * The default stays human-only because the failure modes are asymmetric: a supervised show that
    * accidentally permits agents loses its human-ear guarantee silently, while an automated show

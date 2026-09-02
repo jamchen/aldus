@@ -117,6 +117,16 @@ export interface GateDefinition {
    * Defaults to human-only for `human_oracle`, and to any actor otherwise. §13.3 keeps final
    * performance approval human-owned "until a scoped evaluator is demonstrably reliable", and
    * §12 forbids presenting a machine pass as semantic correctness.
+   *
+   * **A `human_oracle` gate permits exactly `["human"]`, and nothing else is accepted** (#207).
+   * Until `next.56` this field only had to *include* `human` at that level, so
+   * `["human", "agent"]` resolved — a per-definition, all-runs, all-agents widening with no record
+   * of who delegated what. The arm could never be the right answer: if the judgement needs a
+   * human, permitting an agent contradicts the declared level; if it does not, the gate is at the
+   * wrong level and widening hides that. Either move the gate to the level its judgement warrants
+   * — an objectively testable check on a signed artifact is a `hard_gate` binding that artifact —
+   * or record that it was bypassed with `aldus waive --reason`. Both leave a decision with a
+   * reason attached; widening left neither.
    */
   permittedActorKinds?: readonly ActorKind[];
   /**
@@ -210,10 +220,23 @@ export function validateGateDefinition(definition: GateDefinition): ResolvedGate
   if (permittedActorKinds.length === 0) {
     fail("A gate that permits no actor kind can never be decided.");
   }
-  if (definition.level === "human_oracle" && !permittedActorKinds.includes("human")) {
-    fail("A human-oracle gate must permit a human actor (contract §12 level 4, §13.3).", {
-      permittedActorKinds: [...permittedActorKinds],
-    });
+  // Exactly `["human"]`, not "includes human" (#207). The includes rule accepted
+  // `["human", "agent"]` on a human-oracle gate, which widens the one gate §12 level 4 gives to a
+  // person to every agent on every run, with no record of who delegated what. If the judgement
+  // needs a human, widening contradicts the level; if it does not, the gate is at the wrong level
+  // and widening hides that. Either way the honest moves exist and this arm is not one of them.
+  if (
+    definition.level === "human_oracle" &&
+    (permittedActorKinds.length !== 1 || permittedActorKinds[0] !== "human")
+  ) {
+    fail(
+      "A human-oracle gate permits exactly [human] (contract §12 level 4, §13.3). A judgement " +
+        "that needs a person cannot also be decided by an agent, and one that does not belongs at " +
+        "a lower level: move the gate to the level its judgement warrants — an objectively " +
+        "testable check on a signed artifact is a hard_gate binding that artifact — or record " +
+        "that it was bypassed with `aldus waive --reason`.",
+      { permittedActorKinds: [...permittedActorKinds] },
+    );
   }
 
   return {
