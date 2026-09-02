@@ -9,9 +9,20 @@
 
 import { describe, expect, it } from "vitest";
 
-import { SCHEMA_VERSION, type ReworkPolicy, type ReworkRound } from "@aldus-runtime/core";
+import {
+  AldusError,
+  SCHEMA_VERSION,
+  type ReworkPolicy,
+  type ReworkRound,
+} from "@aldus-runtime/core";
 
-import { decideRework, type EvaluatedVerdict } from "../src/rework.js";
+import {
+  decideRework,
+  type EvaluatedVerdict,
+  type ReworkDecision,
+  type ReworkInput,
+  type RunningAttemptVerdict,
+} from "../src/rework.js";
 
 const FALLBACK = "editorial.freeze";
 
@@ -696,5 +707,238 @@ describe("an approval at the gate clears the stop it answers (#220)", () => {
     });
 
     expect(decision.kind).toBe("converged");
+  });
+});
+
+/**
+ * The fourth state: an attempt durably recorded as `running` (#220, ADR-0057).
+ *
+ * Named by the first adopter after a harness timeout killed a dispatch. Their record showed
+ * `status: "running"`, attempt 10, no cost record — and their own observation is what makes it a
+ * category: a different kill one second later would show a charge and an artifact with the same
+ * status. **Both timings are covered here, and the property under test is that they produce the same
+ * class**, because a controller that treated recorded evidence as a completion test would answer
+ * differently for two records that establish the same thing.
+ */
+describe("an attempt recorded running is reconciled, not decided", () => {
+  const A = "a".repeat(64);
+
+  const runningVerdict = (over: Partial<RunningAttemptVerdict> = {}): RunningAttemptVerdict => ({
+    kind: "attempt_running",
+    artifactDigest: A,
+    stageId: "script.oracle",
+    attemptId: "att-10",
+    ...over,
+  });
+
+  const decide = (
+    verdict: RunningAttemptVerdict,
+    over: Partial<ReworkInput> = {},
+  ): ReworkDecision =>
+    decideRework({ policy: policy(), rounds: [], verdict, fallbackGateId: FALLBACK, ...over });
+
+  // The two legal timings from the ruling, as data, so every property below is asserted against
+  // both rather than against whichever one a test author reached for.
+  const timings: readonly [string, RunningAttemptVerdict][] = [
+    [
+      "killed before anything was written down",
+      runningVerdict({ recordedCostIds: [], recordedArtifactDigests: [] }),
+    ],
+    [
+      "killed one second later, with a charge and an artifact already recorded",
+      runningVerdict({ recordedCostIds: ["cost-a"], recordedArtifactDigests: ["b".repeat(64)] }),
+    ],
+  ];
+
+  it.each(timings)("reaches reconciliation_required when %s", (_timing, verdict) => {
+    expect(decide(verdict).kind).toBe("reconciliation_required");
+  });
+
+  it.each(timings)("never converges, reworks or escalates when %s", (_timing, verdict) => {
+    // The four arms this state must not fall into by default, asserted as absences rather than
+    // inferred from the one it does reach: a mapping that returned `converged` would still satisfy
+    // "produces a decision".
+    const decision = decide(verdict);
+    expect(decision.kind).not.toBe("converged");
+    expect(decision.kind).not.toBe("rework");
+    expect(decision.kind).not.toBe("escalate");
+    // No gate, no stop reason, no candidate list — nothing that would route a fact-finding task to
+    // a decision-making mechanism.
+    expect(decision).not.toHaveProperty("gateId");
+    expect(decision).not.toHaveProperty("reason");
+    expect(decision).not.toHaveProperty("candidates");
+  });
+
+  it.each(timings)(
+    "retains the exact attempt identity and evidence when %s",
+    (_timing, verdict) => {
+      const decision = decide(verdict);
+      if (decision.kind !== "reconciliation_required") throw new Error(decision.kind);
+      expect(decision.stageId).toBe("script.oracle");
+      expect(decision.attemptId).toBe("att-10");
+      expect(decision.artifactDigest).toBe(A);
+      expect(decision.recordedCostIds).toEqual(verdict.recordedCostIds);
+      expect(decision.recordedArtifactDigests).toEqual(verdict.recordedArtifactDigests);
+    },
+  );
+
+  it("says the same thing about both timings, so evidence is not read as an outcome", () => {
+    // The load-bearing case. Presence of a charge does not mean the round finished and absence does
+    // not mean it did not; a controller inferring either would produce two different explanations
+    // for two records that establish the same thing.
+    const [, quiet] = timings[0] as [string, RunningAttemptVerdict];
+    const [, charged] = timings[1] as [string, RunningAttemptVerdict];
+    const first = decide(quiet);
+    const second = decide(charged);
+    if (first.kind !== "reconciliation_required") throw new Error(first.kind);
+    if (second.kind !== "reconciliation_required") throw new Error(second.kind);
+    expect(first.explanation).toBe(second.explanation);
+  });
+
+  it("explains the round, the uncertainty and the bounded remedy", () => {
+    const decision = decide(runningVerdict(), {
+      rounds: [round(1, "z".repeat(64), A)],
+      policy: policy({ maxRounds: 5 }),
+    });
+    if (decision.kind !== "reconciliation_required") throw new Error(decision.kind);
+    // The round it interrupts: two rounds are recorded as one here, so the interrupted one is 2.
+    expect(decision.explanation).toContain("round 2");
+    expect(decision.explanation).toContain("att-10");
+    expect(decision.explanation).toContain("not established");
+    // The remedy, named and not invoked, with the flag an operator has to type.
+    expect(decision.explanation).toContain("--force");
+    expect(decision.explanation).toContain("aldus run script.oracle");
+  });
+
+  it("never claims the attempt is dead or that a takeover is safe", () => {
+    // The wording is the mechanism here. The runtime cannot tell a live dispatch from an abandoned
+    // one, so a healthy in-flight evaluation reaches this same arm — and a sentence asserting death
+    // or safety is the one an operator would act on.
+    for (const [, verdict] of timings) {
+      const decision = decide(verdict);
+      if (decision.kind !== "reconciliation_required") throw new Error(decision.kind);
+      // The disclaimers are removed before matching, because they legitimately contain the words a
+      // false claim would use — asserting on the raw string would have been satisfied by deleting
+      // them, which is the opposite of what is wanted here.
+      expect(decision.explanation).toContain("not a statement that the attempt is dead");
+      expect(decision.explanation).toContain("not a statement that a takeover is safe");
+      const claimed = decision.explanation.replace(/not a statement that [^.]*/g, "");
+      expect(claimed).not.toMatch(/\bis dead\b|\bhas died\b|\bsafe to (retry|take)/);
+    }
+  });
+
+  it("returns the identical decision when the identical durable input is read again", () => {
+    // Criterion 4, in the arm where a repeat is most dangerous: a restarted process re-reading the
+    // same record must not produce a second remedy, and must not pay for anything.
+    for (const [, verdict] of timings) {
+      expect(decide(verdict)).toEqual(decide(verdict));
+    }
+  });
+
+  it("outranks an approval, which cannot establish that a process is dead", () => {
+    // `approvedContinuationDigests` clears the three continuable stops. It must not appear to clear
+    // this one: the person at that gate was shown an artifact, not a machine.
+    const decision = decide(runningVerdict(), { approvedContinuationDigests: [A] });
+    expect(decision.kind).toBe("reconciliation_required");
+  });
+
+  it("outranks an exhausted bound, an oscillation and a missing policy", () => {
+    // Precedence is the fail-closed direction: whatever else the history says, acting on it across
+    // an unreconciled window is the thing that spends money twice.
+    const exhausted = decide(runningVerdict(), {
+      policy: policy({ maxRounds: 1 }),
+      rounds: [round(1, A, "b".repeat(64))],
+    });
+    expect(exhausted.kind).toBe("reconciliation_required");
+
+    const noPolicy = decideRework({
+      rounds: [],
+      verdict: runningVerdict(),
+      fallbackGateId: FALLBACK,
+    });
+    expect(noPolicy.kind).toBe("reconciliation_required");
+  });
+
+  it("keeps a true not_evaluated input as no_evaluation", () => {
+    // The two arms are adjacent and must stay distinct: `no_evaluation` asserts nothing ran, and
+    // this state's whole content is that whether anything ran is unknown.
+    const decision = decideRework({
+      policy: policy(),
+      rounds: [],
+      verdict: { kind: "not_evaluated", artifactDigest: A, reason: "the stage failed" },
+      fallbackGateId: FALLBACK,
+    });
+    expect(decision.kind).toBe("escalate");
+    if (decision.kind !== "escalate") return;
+    expect(decision.reason).toBe("no_evaluation");
+    expect(decision.explanation).not.toContain("--force");
+  });
+
+  it("keeps evaluated clean and evaluated blocking unchanged", () => {
+    expect(
+      decideRework({
+        policy: policy(),
+        rounds: [],
+        verdict: verdict({ blockingFindingClasses: [], observedFindingClasses: [] }),
+        fallbackGateId: FALLBACK,
+      }).kind,
+    ).toBe("converged");
+
+    expect(
+      decideRework({ policy: policy(), rounds: [], verdict: verdict(), fallbackGateId: FALLBACK })
+        .kind,
+    ).toBe("rework");
+  });
+
+  describe("an identity that cannot be acted on is refused", () => {
+    // Fail closed means refuse, not answer. A notice naming an empty attempt id points at nothing,
+    // and a caller would read it as a reconciliation they can perform.
+    const cases: readonly [string, Record<string, unknown>][] = [
+      ["a missing attemptId", { attemptId: undefined }],
+      ["an empty attemptId", { attemptId: "" }],
+      ["a whitespace attemptId", { attemptId: "   " }],
+      ["a mistyped attemptId", { attemptId: 10 }],
+      ["a missing stageId", { stageId: undefined }],
+      ["an empty stageId", { stageId: "" }],
+      ["a mistyped stageId", { stageId: { id: "script.oracle" } }],
+      ["a missing artifactDigest", { artifactDigest: undefined }],
+      ["an empty artifactDigest", { artifactDigest: "" }],
+      ["a mistyped artifactDigest", { artifactDigest: 42 }],
+      ["a mistyped cost list", { recordedCostIds: "cost-a" }],
+      ["a mistyped cost id", { recordedCostIds: [1] }],
+      ["an empty cost id", { recordedCostIds: [""] }],
+      ["a mistyped artifact list", { recordedArtifactDigests: {} }],
+      ["a mistyped artifact digest", { recordedArtifactDigests: [null] }],
+    ];
+
+    it.each(cases)("refuses %s", (_name, over) => {
+      const verdict = { ...runningVerdict(), ...over } as unknown as RunningAttemptVerdict;
+      expect(() => decide(verdict)).toThrow(AldusError);
+      try {
+        decide(verdict);
+      } catch (error) {
+        const thrown = error as AldusError;
+        expect(thrown.code).toBe("ALDUS_INVALID_REQUEST");
+        expect(thrown.category).toBe("validation");
+        // §19.2: the failing path and issue code only, never the received value.
+        const issues = (thrown.details as { issues: { path: string; code: string }[] }).issues;
+        expect(issues.length).toBeGreaterThan(0);
+        for (const issue of issues) {
+          expect(issue.code).toMatch(/^(invalid_type|empty_string)$/);
+        }
+        const serialised = JSON.stringify(thrown.toStructuredError());
+        for (const value of Object.values(over)) {
+          if (typeof value === "string" && value.trim().length > 0) {
+            expect(serialised).not.toContain(value);
+          }
+        }
+      }
+    });
+
+    it("accepts a verdict whose optional evidence is simply absent", () => {
+      // Absent is not empty and is not invalid: it means nothing read it. Without this the case
+      // above passes for a validator that refuses every running verdict.
+      expect(decide(runningVerdict()).kind).toBe("reconciliation_required");
+    });
   });
 });

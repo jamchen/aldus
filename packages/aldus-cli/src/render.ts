@@ -796,6 +796,24 @@ export function renderRework(report: ReworkStatusReport): string {
           }
         }
         break;
+      // Not an escalation, and it must not read like one: there is no gate to decide and no
+      // candidate to choose (ADR-0057). The lines name the attempt, say what is unestablished, and
+      // print the remedy sentence unaltered — an operator acting on a summary of it is the failure
+      // the wording was written against.
+      case "reconciliation_required":
+        lines.push(
+          `  would decide     reconcile — attempt ${loop.wouldDecide.attemptId} of ` +
+            `${loop.wouldDecide.stageId} is recorded running`,
+        );
+        lines.push(`                   ${loop.wouldDecide.explanation}`);
+        // Reported, never read as an outcome, and labelled so. An empty list is the ordinary case
+        // for a stuck attempt and is not evidence that nothing happened.
+        lines.push(
+          `  recorded so far  ${loop.wouldDecide.recordedCostIds?.length ?? 0} cost record(s), ` +
+            `${loop.wouldDecide.recordedArtifactDigests?.length ?? 0} artifact(s) — neither ` +
+            "establishes whether the evaluation finished",
+        );
+        break;
     }
     lines.push("");
   }
