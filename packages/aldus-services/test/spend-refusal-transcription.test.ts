@@ -39,6 +39,14 @@ import { openOperatorConsole, SpendService } from "../src/spend-service.js";
 const RUN = "run-a";
 const AGENT: ActorRef = { kind: "agent", id: "coordinator" };
 const HUMAN: ActorRef = { kind: "human", id: "operator-a" };
+/**
+ * The other two non-human kinds. `transcriptionRemedy`'s docstring says the rule is "non-human",
+ * not "agent", and PR #267's receipt found that a mutant giving `worker` the plain form survived the
+ * whole suite — every case below named `agent`, so the docstring's claim about the other kinds was a
+ * description with no mechanism under it.
+ */
+const WORKER: ActorRef = { kind: "worker", id: "worker-a" };
+const SYSTEM: ActorRef = { kind: "system", id: "scheduler-a" };
 /** A second human, because the self-transcription guard compares kind *and* id. */
 const OWNER: ActorRef = { kind: "human", id: "owner-a" };
 
@@ -140,6 +148,28 @@ describe("surface 1: opening a console for a non-human decider", () => {
     expect(() => openOperatorConsole({ spend, actor: undefined })).toThrow(/No actor identity/);
     expect(() => openOperatorConsole({ spend, actor: undefined })).not.toThrow(/--decided-by/);
   });
+
+  describe("the rule is non-human, not agent (PR #267 receipt)", () => {
+    // One case per kind rather than a parameterised loop, so a survivor names the kind it survived
+    // on. Each asserts the refusal alongside the clause, for the reason the file header gives.
+    it("a worker receives the clause and is refused", () => {
+      expect(() => openOperatorConsole({ spend, actor: WORKER })).toThrow(/human decision/);
+      expect(() => openOperatorConsole({ spend, actor: WORKER })).toThrow(/--decided-by/);
+      expect(() => openOperatorConsole({ spend, actor: WORKER })).toThrow(/--verbatim/);
+    });
+
+    it("a system actor receives the clause and is refused", () => {
+      expect(() => openOperatorConsole({ spend, actor: SYSTEM })).toThrow(/human decision/);
+      expect(() => openOperatorConsole({ spend, actor: SYSTEM })).toThrow(/--decided-by/);
+      expect(() => openOperatorConsole({ spend, actor: SYSTEM })).toThrow(/--verbatim/);
+    });
+
+    it("a human does not, and the console opens", () => {
+      // Restated next to the two positives so the three kinds are read together: the human is the
+      // one for whom the clause would be noise, and the only one who gets through.
+      expect(() => openOperatorConsole({ spend, actor: HUMAN })).not.toThrow();
+    });
+  });
 });
 
 describe("surface 2: reconcile's consistency check on a minted authority", () => {
@@ -225,6 +255,39 @@ describe("surface 3: settling a reservation that is still reserved", () => {
     });
 
     await expect(refusal).rejects.toThrow(/not terminal: it is still reserved/);
+    await expect(refusal).rejects.toThrow(/aldus costs abandon/);
+    await expect(refusal).rejects.toThrow(/--decided-by/);
+  });
+
+  // Same rule as surface 1, read at the transcriber rather than the decider: a worker or a system
+  // process writing down an owner's decision is a non-human and needs the flag form. Two tests, not
+  // a loop, so a survivor names the kind it survived on.
+  it("gives a worker transcriber the clause", async () => {
+    const reservation = await stranded();
+    const console_ = openOperatorConsole({ spend, actor: OWNER });
+
+    const refusal = console_.reconcile(reservation, {
+      evidenceRef: "provider statement 2026-08, line 42",
+      resolution: { kind: "investigation_ended" },
+      decisionId: "d-1",
+      transcription: { recordedBy: WORKER, verbatim: "abandon it, it is not coming back" },
+    });
+
+    await expect(refusal).rejects.toThrow(/aldus costs abandon/);
+    await expect(refusal).rejects.toThrow(/--decided-by/);
+  });
+
+  it("gives a system transcriber the clause", async () => {
+    const reservation = await stranded();
+    const console_ = openOperatorConsole({ spend, actor: OWNER });
+
+    const refusal = console_.reconcile(reservation, {
+      evidenceRef: "provider statement 2026-08, line 42",
+      resolution: { kind: "investigation_ended" },
+      decisionId: "d-1",
+      transcription: { recordedBy: SYSTEM, verbatim: "abandon it, it is not coming back" },
+    });
+
     await expect(refusal).rejects.toThrow(/aldus costs abandon/);
     await expect(refusal).rejects.toThrow(/--decided-by/);
   });
