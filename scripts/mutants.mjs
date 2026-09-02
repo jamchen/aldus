@@ -244,11 +244,82 @@ export const cases = [
     // checker: "no-shipped-change holds for this PR" is false on any branch touching `src`, and it
     // failed for that reason rather than for a defect. A case whose answer depends on where it is
     // run is a case that will be red for the wrong reason and then ignored.
+    //
+    // The fragment expired once already, in the direction this file warns about: it read
+    // `unknown claim`, which was the whole of the old bare message, and the PR that routed this
+    // gate through `declined.mjs` changed the wording without changing the behaviour. Asserting
+    // the DECLINED framing rather than the old phrasing is what the case was always about.
     name: "claim-scope: an unknown claim must refuse rather than be satisfied",
     setup: [{ append: ["docs/adr/README.md", ""] }],
     command: ["node", "scripts/check-claim-scope.mjs", "{{BASE}}", "not-a-real-claim"],
     wantExit: 2,
-    wantOutput: "unknown claim",
+    wantOutput: 'does not know the claim "not-a-real-claim"',
+  },
+  {
+    // The mutant that SURVIVED PR #264's independent review, now killed. Moving the declined
+    // guard below the `publish-dirs.mjs` call makes the gate do real work before deciding it has
+    // no arguments, and every test that existed still passed, because they all ran in the
+    // repository root where that call succeeds. `gate-declined.test.ts` runs the gate from a
+    // directory holding the scripts and nothing else, which is where the two differ.
+    name: "version-bump: moving the declined guard below the work must be killed",
+    setup: [
+      {
+        replace: [
+          "scripts/check-version-bump.mjs",
+          /if \(base === undefined\) declineMissingBaseRef\("check-version-bump\.mjs", "origin\/main"\);/,
+          "/* mutant: guard moved below the work */",
+        ],
+      },
+      {
+        replace: [
+          "scripts/check-version-bump.mjs",
+          /const changed = git\("diff", "--name-only",/,
+          'if (base === undefined) declineMissingBaseRef("check-version-bump.mjs", "origin/main");\n\nconst changed = git("diff", "--name-only",',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/gate-declined.test.ts",
+      "-t",
+      "check-version-bump.mjs declines with no repository at all",
+    ],
+    wantExit: 1,
+    wantOutput: "Failed Tests 1",
+  },
+  {
+    // The same property for the gate routed through `declined.mjs` alongside this case. Written as its own
+    // case rather than trusted to the one above, because a guard is only tested when its result
+    // comes from the mechanism under test — two guards were once confirmed by a third.
+    name: "claim-scope: moving the declined guards below the work must be killed",
+    setup: [
+      {
+        replace: [
+          "scripts/check-claim-scope.mjs",
+          /if \(base === undefined\) decline\("<base-ref>"\);/,
+          "/* mutant: guards moved below the work */",
+        ],
+      },
+      {
+        replace: [
+          "scripts/check-claim-scope.mjs",
+          /const changed = execFileSync\("git", \["diff", "--name-only",/,
+          'if (base === undefined) decline("<base-ref>");\n\nconst changed = execFileSync("git", ["diff", "--name-only",',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "packages/aldus-e2e/test/gate-declined.test.ts",
+      "-t",
+      "check-claim-scope.mjs declines with no repository at all",
+    ],
+    wantExit: 1,
+    wantOutput: "Failed Tests 1",
   },
   {
     name: "claim-scope: docs-only is false for a PR carrying a script",
@@ -829,5 +900,225 @@ export const cases = [
     ],
     wantExit: 1,
     wantOutput: "exhausts the deadline on permanent staleness rather than retrying forever",
+  },
+  /* ------------------------------------------------------------------------------------------
+   * The fourth rework state: an attempt durably recorded as `running` (#220, ADR-0057).
+   *
+   * The issue's own warning is that this state "gets decided by accident if nobody decides it
+   * deliberately", so each case switches off one guard and asserts the distinguishing clause of the
+   * test that catches it. Five of them are the five wrong mappings named in the ruling — converged,
+   * ordinary rework, gate escalation, `no_evaluation`, and evidence read as an outcome.
+   * ------------------------------------------------------------------------------------------ */
+  {
+    // The worst of the five: `converged` is the arm that releases the next workflow stage, across a
+    // window whose paid effects are unknown.
+    name: "rework-running: mapping a running attempt to converged releases the next stage",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework.ts",
+          '      kind: "reconciliation_required",',
+          '      kind: "converged" as unknown as "reconciliation_required", /* mutant */',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/rework.test.ts"],
+    wantExit: 1,
+    wantOutput:
+      "never converges, reworks or escalates when killed before anything was written down",
+  },
+  {
+    // Ordinary rework spends an authorised round and a paid repair on a candidate whose evaluation
+    // may or may not have happened.
+    name: "rework-running: mapping a running attempt to an ordinary round spends a bound on it",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework.ts",
+          '      kind: "reconciliation_required",',
+          '      kind: "rework" as unknown as "reconciliation_required", /* mutant */',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/rework.test.ts"],
+    wantExit: 1,
+    wantOutput: "reaches reconciliation_required when killed before anything was written down",
+  },
+  {
+    // A gate escalation, under the reason a reader might think fits: the mapping ADR-0057 rejects
+    // by name, because an approval cannot establish that a process is dead and
+    // `approvedContinuationDigests` would then appear to clear it.
+    name: "rework-running: escalating a running attempt to a gate as an ambiguous verdict asks for a decision nobody can make",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework.ts",
+          '      kind: "reconciliation_required",\n      stageId: verdict.stageId,',
+          '      ...({ kind: "escalate", gateId: policy?.escalateToGateId ?? input.fallbackGateId, reason: "ambiguous_verdict", candidates } as unknown as { kind: "reconciliation_required" }), /* mutant */\n      stageId: verdict.stageId,',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/rework.test.ts"],
+    wantExit: 1,
+    wantOutput:
+      "never converges, reworks or escalates when killed before anything was written down",
+  },
+  {
+    // Folding it into `no_evaluation`, which asserts *nothing ran* — a statement about the world
+    // the record does not hold, and the nearest arm a maintainer would reach for.
+    name: "rework-running: folding a running attempt into no_evaluation asserts nothing ran",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework.ts",
+          '      kind: "reconciliation_required",\n      stageId: verdict.stageId,',
+          '      ...({ kind: "escalate", gateId: policy?.escalateToGateId ?? input.fallbackGateId, reason: "no_evaluation", candidates } as unknown as { kind: "reconciliation_required" }), /* mutant */\n      stageId: verdict.stageId,',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/rework.test.ts"],
+    wantExit: 1,
+    wantOutput: "reaches reconciliation_required when killed before anything was written down",
+  },
+  {
+    // Recorded evidence read as a completion test. The adopter's two timings differ by one second
+    // and establish the same thing, so any answer that varies with the charge is inventing one.
+    name: "rework-running: inferring completion from a recorded charge answers differently for the two timings",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework.ts",
+          '        "Whether that process is alive or died mid-round is not established here, and nothing " +',
+          '        (verdict.recordedCostIds?.length ? "A charge is recorded, so the round completed. " : "") + /* mutant */\n        "Whether that process is alive or died mid-round is not established here, and nothing " +',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/rework.test.ts"],
+    wantExit: 1,
+    wantOutput: "says the same thing about both timings, so evidence is not read as an outcome",
+  },
+  {
+    // Claiming death. A healthy in-flight evaluation reaches this same arm, so the sentence an
+    // operator acts on must never assert what the runtime cannot see.
+    name: "rework-running: claiming the attempt is dead states what the runtime cannot establish",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework.ts",
+          '        "you what the reservation store knows about a possible paid call. This is not a statement " +',
+          '        "you what the reservation store knows about a possible paid call. The attempt is dead. Not a statement " +',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/rework.test.ts"],
+    wantExit: 1,
+    wantOutput: "never claims the attempt is dead or that a takeover is safe",
+  },
+  {
+    // Identity dropped. A reconciliation notice naming no attempt points at nothing, and the remedy
+    // it asks for cannot be carried out.
+    name: "rework-running: dropping the attempt id leaves a remedy nobody can perform",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework.ts",
+          "      attemptId: verdict.attemptId,",
+          '      attemptId: "" /* mutant */,',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/rework.test.ts"],
+    wantExit: 1,
+    wantOutput:
+      "retains the exact attempt identity and evidence when killed before anything was written down",
+  },
+  {
+    // Validation that never refuses. A required check nothing enforces restores the invisibility it
+    // was added to remove — worse than absent, because it looks like coverage.
+    name: "rework-running: a validator that never refuses admits a verdict naming no attempt",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework.ts",
+          "  if (issues.length === 0) return;",
+          "  if (true) return; /* mutant */",
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/rework.test.ts"],
+    wantExit: 1,
+    wantOutput: "refuses an empty attemptId",
+  },
+  {
+    // The reading half: a guard that answers for a settled attempt puts every clean Run into
+    // reconciliation, which is the over-firing that makes a check people route around.
+    name: "rework-running: reading a settled attempt as running reconciles every clean Run",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework-rounds.ts",
+          '    if (entry === undefined || entry.attempt.status !== "running") continue;',
+          "    if (entry === undefined) continue; /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/rework-rounds.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "stays silent when every attempt has settled",
+  },
+  {
+    // The wiring, which is where the issue said this would be decided by accident: a stuck attempt
+    // beside an older clean evaluation previewed the clean verdict.
+    name: "rework-running: skipping the running attempt in reworkStatus previews the older clean verdict",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/services.ts",
+          "      const running = runningEvaluation(evaluationAttempts, policy.candidateArtifactKind);",
+          "      const running = runningEvaluation([], policy.candidateArtifactKind); /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/rework-status-running.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "outranks an older settled attempt whose verdict was clean",
+  },
+  {
+    // An unidentified candidate turned into a decision. Refused visibly rather than answered about
+    // an artifact nobody can check — and the validator is what catches it if the seam does not.
+    name: "rework-running: deciding on a running attempt whose candidate is unestablished names no subject",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/rework-rounds.ts",
+          "    return { entry, ...(candidate === undefined ? {} : { digest: candidate.sha256 }) };",
+          '    return { entry, digest: candidate?.sha256 ?? entry.attempt.inputArtifacts[0]?.sha256 ?? "" }; /* mutant */',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/rework-status-running.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "refuses a preview when the running attempt's candidate is not established",
   },
 ];
