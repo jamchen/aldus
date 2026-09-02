@@ -452,10 +452,13 @@ So `scripts/dist-tags.mjs assert` now distinguishes them by what the registry sa
 | only packages still serving **exactly** the pre-publish `next`, past `--convergence-ms` | **DECLINED**  | 2    |
 
 The convergence bound defaults to ten minutes — twice the measured lag — and is a flag so a third
-measurement can move it. `DECLINED` names the packages, states that the publish step reported
-success (in `release.yml` the assertion is not reached otherwise), says it is neither a pass nor a
-failure, and gives the command to re-check: `npm view @aldus-runtime/<pkg> dist-tags`. A lagging
-package alongside anything wrong is a failure, not a decline — a failure always wins.
+measurement can move it. `DECLINED` names the packages, says it is neither a pass nor a failure,
+and gives the command to re-check: `npm view @aldus-runtime/<pkg> dist-tags`. Whether it may also
+say that the publish step reported success depends on evidence the script has: `release.yml` passes
+`--after-publish` in the post-publish step, where the assertion is not reached unless the publish
+succeeded; run from a laptop without the flag, the same text says only that nothing here
+establishes a publish happened. A lagging package alongside anything wrong is a failure, not a
+decline — a failure always wins, in time as well as in exit code (#273).
 
 The workflow still marks the job red on exit 2. A declined result is not folded into a pass, and
 the job has no green that means "unknown"; what it adds on 2 is a step-summary section and an
