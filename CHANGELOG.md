@@ -8,6 +8,42 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.55 — 2026-09-02
+
+### Changed
+
+**A spend refusal that names the rule now also names the way through it, when the reader is not a
+human.**
+
+`aldus costs show` was fixed in `next.39` (#231) so that an agent reading the listing is told to
+transcribe a human's decision rather than to run `aldus costs abandon` plain. The three refusals one
+layer down — opening an operator console for a non-human decider, `reconcile`'s consistency check on
+a minted authority, and settling a reservation that is still `reserved` — had the same shape (#228):
+each stated correctly that reconciliation is a human decision and stopped there, so an agent that
+had read the listing and typed `--decided-by` wrongly, or had not read it at all, was refused
+without being told what to type next. The worst of the three names a command: an agent told to run
+`aldus costs abandon` runs it plain, is refused, and has spent the same round trip the listing used
+to cost.
+
+Each refusal now ends with the same clause when the invocation is attributed to a non-human actor —
+`agent`, `worker` or `system`: _Reconciliation is a human decision, so record theirs rather than
+making one: `--decided-by <who decided> --verbatim <what they said>`._ A human keeps the plain form,
+for the reason `next.39` gave: a clause every reader sees is noise a human learns to skip. An
+unattributed invocation is not evidence of an agent and is offered a different remedy — attribute
+itself — so it is not offered this one. The terminal branch of the `reserved` refusal carries no
+clause, because it offers no verb and advice about a flag there would be #228's defect reintroduced.
+
+**The refusals are unchanged.** Every path that was refused is still refused; nothing is conditional
+on the clause, and no guard was relaxed. The three sites emit the clause through one module-local
+helper, because three sites answering the same question separately is how one comes to answer it
+differently. The clause interpolates nothing — no reservation id, actor, amount or verbatim text —
+so nothing new reaches a message that can reach a log.
+
+**What does not change.** All three refusals keep the code `ALDUS_SPEND_NOT_AUTHORIZED`, their
+category, and their `details`. A caller matching one of these three messages by exact text — which
+the messages have never invited — sees a longer string for a non-human actor and the identical string
+for a human or an unattributed one.
+
 ## 0.2.0-next.54 — 2026-09-01
 
 ### Changed

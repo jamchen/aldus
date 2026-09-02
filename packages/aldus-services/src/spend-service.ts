@@ -360,6 +360,14 @@ export type { OperatorSpendConsole };
  * clause printed to every reader is noise a human learns to skip, which is how a hint stops
  * working on the day it matters. An unknown actor is not evidence of an agent, and its remedy is a
  * different one — attribute the invocation — so it is deliberately not offered this one.
+ *
+ * Every other kind receives the clause — `agent`, `worker`, `system`, and any kind `ACTOR_KINDS`
+ * grows later. The rule is "non-human", not "agent": whatever is not a human must transcribe a
+ * human's decision to get through this refusal, so the remedy is the same for all of them. The
+ * function names the two empty cases and returns the clause for everything else, rather than
+ * listing the kinds that receive it, so a kind added later cannot fall through to the plain form by
+ * omission. Named because the independent review of PR #263 found the docstring narrower than the
+ * mechanism it describes.
  */
 function transcriptionRemedy(actorKind: string | undefined): string {
   if (actorKind === undefined || actorKind === "human") return "";
