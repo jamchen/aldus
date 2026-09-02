@@ -130,7 +130,11 @@ means something because the stamps stayed where they were."
   expensive and visible, which is the desired pressure at this stage.
 - Non-strict object parsing (ADR-0002 decision 6) is what makes `forward` safe. If Core ever
   needs strict rejection of unknown fields, that is a MAJOR change to reader behaviour and
-  needs its own ADR.
+  needs its own ADR. **This table describes Core's records only.** `@aldus-runtime/regression`'s
+  corpus and run records are strict and refuse a newer minor; the two rules are set side by side
+  in ADR-0053's amendment, and a consumer must not infer one package's behaviour from the other's.
+  A `forward` read reports what it discarded as `droppedPaths` (ADR-0053), so "ignored" above
+  means kept out of the value, not kept from the caller.
 - Splitting into per-entity versions later is additive: pin each entity at the current value and
   bump them independently from then on. No stored record changes.
 

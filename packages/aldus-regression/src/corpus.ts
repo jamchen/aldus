@@ -27,6 +27,83 @@ import { RegressionErrorCodes, regressionError } from "./errors.js";
 /** A short opaque identifier. */
 const identifier = z.string().min(1).max(200);
 
+// --- Schema version (ADR-0003, ADR-0053) -----------------------------------------------------
+
+/** Schema version this package stamps on records it constructs. */
+export const REGRESSION_SCHEMA_VERSION = SCHEMA_VERSION;
+
+/** How a record's declared schema version relates to the one this runtime implements. */
+export type SchemaVersionRelation = "older" | "same" | "newer";
+
+/**
+ * Compare a record's declared schema version against {@link REGRESSION_SCHEMA_VERSION}.
+ *
+ * Exported because the two directions are not the same kind of question. **Newer** is soundness
+ * and belongs here: this runtime cannot know what a later version's fields mean, so it refuses.
+ * **Older** is policy and belongs to the caller — whether a run from an earlier version is
+ * comparable to today's depends on what changed between them, which this package cannot know
+ * either. What it can do is stop every caller reimplementing the comparison, which is the part
+ * that would drift.
+ *
+ * A record must be readable in order to be upgraded, so this is deliberately a question a caller
+ * can ask *before* parsing, and an older record still parses.
+ *
+ * @param recordVersion - The `schemaVersion` field of a record, `MAJOR.MINOR` (ADR-0003).
+ * @throws {AldusError} `ALDUS_CORPUS_MALFORMED` if `recordVersion` is not `MAJOR.MINOR`.
+ */
+export function compareSchemaVersion(recordVersion: string): SchemaVersionRelation {
+  const parse = (value: string): readonly [number, number] => {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value);
+    if (match === null) {
+      // Path and code only — never the received value (contract §19.2).
+      throw regressionError(
+        RegressionErrorCodes.CORPUS_MALFORMED,
+        "A schema version must be MAJOR.MINOR.",
+        {
+          category: "validation",
+          details: { issues: [{ path: "schemaVersion", code: "invalid_format" }] },
+        },
+      );
+    }
+    return [Number(match[1]), Number(match[2])] as const;
+  };
+  const [recordMajor, recordMinor] = parse(recordVersion);
+  const [runtimeMajor, runtimeMinor] = parse(REGRESSION_SCHEMA_VERSION);
+  if (recordMajor !== runtimeMajor) return recordMajor > runtimeMajor ? "newer" : "older";
+  if (recordMinor !== runtimeMinor) return recordMinor > runtimeMinor ? "newer" : "older";
+  return "same";
+}
+
+/**
+ * True when `value` is a well-formed version this runtime does not implement.
+ *
+ * A malformed value answers `false` rather than throwing, so the format check that owns that
+ * failure reports it under its own code and the version rule fires only on a version.
+ */
+function declaresNewerVersion(value: string): boolean {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value) && compareSchemaVersion(value) === "newer";
+}
+
+/**
+ * The `schemaVersion` field of a record this package reads.
+ *
+ * **The exported schema carries the rule** (ADR-0053). `parseDefectCorpus` and `parseEvaluatorRun`
+ * refused a newer record while `defectCorpusSchema.safeParse` and `evaluatorRunSchema.safeParse`
+ * accepted the same bytes — a rule enforced at one entry point and not the other is a rule plus a
+ * bypass, and the exported object is the obvious door (#199). So the refusal lives on the field, and
+ * the parse functions check it first only so that a newer record fails with one clear
+ * `ALDUS_SCHEMA_VERSION_UNSUPPORTED` rather than a field issue about the version.
+ *
+ * This is **this package's** rule, not Core's: any newer version is refused, minor included, because
+ * these schemas are strict and a newer minor would fail on its added keys anyway. Refusing on the
+ * version names the reason. Core's records accept a newer minor and report it as a `forward` read
+ * (ADR-0003, ADR-0053).
+ */
+const recordSchemaVersion = schemaVersionString.refine((value) => !declaresNewerVersion(value), {
+  // Names this package's own constant, never the received value (contract §19.2).
+  message: `Schema version must not be newer than ${REGRESSION_SCHEMA_VERSION}, which is what this runtime implements.`,
+});
+
 /**
  * A finding category, structured per contract §12.3.
  *
@@ -148,7 +225,7 @@ export type DefectCase = z.infer<typeof defectCaseSchema>;
 export const defectCorpusSchema = z
   .object({
     /** Schema version of this record (ADR-0003). */
-    schemaVersion: schemaVersionString,
+    schemaVersion: recordSchemaVersion,
     /** Identity of this corpus. */
     corpusId: identifier,
     /** Human-readable purpose. */
@@ -250,7 +327,7 @@ export type EvaluatorOutcome = z.infer<typeof evaluatorOutcomeSchema>;
 export const evaluatorRunSchema = z
   .object({
     /** Schema version of this record (ADR-0003). */
-    schemaVersion: schemaVersionString,
+    schemaVersion: recordSchemaVersion,
     /** Which evaluator produced these outcomes. */
     evaluatorId: identifier,
     /** Version of the evaluator. Metrics from different versions are not comparable. */
@@ -277,64 +354,26 @@ export const evaluatorRunSchema = z
 /** @see evaluatorRunSchema */
 export type EvaluatorRun = z.infer<typeof evaluatorRunSchema>;
 
-/** Schema version this package stamps on records it constructs. */
-export const REGRESSION_SCHEMA_VERSION = SCHEMA_VERSION;
-
-/** How a record's declared schema version relates to the one this runtime implements. */
-export type SchemaVersionRelation = "older" | "same" | "newer";
-
 /**
- * Compare a record's declared schema version against {@link REGRESSION_SCHEMA_VERSION}.
- *
- * Exported because the two directions are not the same kind of question. **Newer** is soundness
- * and belongs here: this runtime cannot know what a later version's fields mean, so it refuses.
- * **Older** is policy and belongs to the caller — whether a run from an earlier version is
- * comparable to today's depends on what changed between them, which this package cannot know
- * either. What it can do is stop every caller reimplementing the comparison, which is the part
- * that would drift.
- *
- * A record must be readable in order to be upgraded, so this is deliberately a question a caller
- * can ask *before* parsing, and an older record still parses.
- *
- * @param recordVersion - The `schemaVersion` field of a record, `MAJOR.MINOR` (ADR-0003).
- * @throws {AldusError} `ALDUS_CORPUS_MALFORMED` if `recordVersion` is not `MAJOR.MINOR`.
- */
-export function compareSchemaVersion(recordVersion: string): SchemaVersionRelation {
-  const parse = (value: string): readonly [number, number] => {
-    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value);
-    if (match === null) {
-      // Path and code only — never the received value (contract §19.2).
-      throw regressionError(
-        RegressionErrorCodes.CORPUS_MALFORMED,
-        "A schema version must be MAJOR.MINOR.",
-        {
-          category: "validation",
-          details: { issues: [{ path: "schemaVersion", code: "invalid_format" }] },
-        },
-      );
-    }
-    return [Number(match[1]), Number(match[2])] as const;
-  };
-  const [recordMajor, recordMinor] = parse(recordVersion);
-  const [runtimeMajor, runtimeMinor] = parse(REGRESSION_SCHEMA_VERSION);
-  if (recordMajor !== runtimeMajor) return recordMajor > runtimeMajor ? "newer" : "older";
-  if (recordMinor !== runtimeMinor) return recordMinor > runtimeMinor ? "newer" : "older";
-  return "same";
-}
-
-/**
- * Refuse a record declaring a version this runtime does not implement.
+ * Refuse a record declaring a version this runtime does not implement, **before** its shape is
+ * read.
  *
  * Only `newer` is refused. An older record parses, and {@link compareSchemaVersion} is how a
  * caller decides whether to trust it.
+ *
+ * Version before fields, for the same reason Core's `validateRecord` orders them so: a newer record
+ * fails with one `ALDUS_SCHEMA_VERSION_UNSUPPORTED` that names the cause, rather than a field issue
+ * that describes the symptom. A missing or malformed version is not this check's to report — it
+ * falls through, and the schema reports it precisely under `ALDUS_CORPUS_MALFORMED`.
  */
-function assertSchemaVersionSupported(recordVersion: string, record: "corpus" | "run"): void {
-  if (compareSchemaVersion(recordVersion) !== "newer") return;
+function assertSchemaVersionSupported(input: unknown, record: "corpus" | "run"): void {
+  if (typeof input !== "object" || input === null) return;
+  const declared = (input as { schemaVersion?: unknown }).schemaVersion;
+  if (typeof declared !== "string" || !declaresNewerVersion(declared)) return;
   throw regressionError(
     RegressionErrorCodes.SCHEMA_VERSION_UNSUPPORTED,
     `A ${record} declares a schema version newer than this runtime implements. Its fields cannot ` +
-      "be interpreted here, and the schema discards what it does not declare, so accepting it " +
-      "would return a record that looks complete and is not.",
+      "be interpreted here, so accepting it would return a record that looks complete and is not.",
     {
       category: "validation",
       // The runtime's own version is this package's constant, not received input, so naming it is
@@ -350,6 +389,7 @@ function assertSchemaVersionSupported(recordVersion: string, record: "corpus" | 
  * @throws {AldusError} `ALDUS_CORPUS_MALFORMED` or `ALDUS_CORPUS_DUPLICATE_CASE`.
  */
 export function parseDefectCorpus(input: unknown): DefectCorpus {
+  assertSchemaVersionSupported(input, "corpus");
   const result = defectCorpusSchema.safeParse(input);
   if (!result.success) {
     // Paths and issue codes only — never the received value (contract §19.2, ADR-0002).
@@ -367,8 +407,6 @@ export function parseDefectCorpus(input: unknown): DefectCorpus {
       },
     );
   }
-
-  assertSchemaVersionSupported(result.data.schemaVersion, "corpus");
 
   const seen = new Set<string>();
   for (const entry of result.data.cases) {
@@ -391,6 +429,7 @@ export function parseDefectCorpus(input: unknown): DefectCorpus {
  * @throws {AldusError} `ALDUS_CORPUS_MALFORMED` or `ALDUS_OUTCOME_DUPLICATE`.
  */
 export function parseEvaluatorRun(input: unknown): EvaluatorRun {
+  assertSchemaVersionSupported(input, "run");
   const result = evaluatorRunSchema.safeParse(input);
   if (!result.success) {
     throw regressionError(
@@ -407,8 +446,6 @@ export function parseEvaluatorRun(input: unknown): EvaluatorRun {
       },
     );
   }
-
-  assertSchemaVersionSupported(result.data.schemaVersion, "run");
 
   const seen = new Set<string>();
   for (const outcome of result.data.outcomes) {

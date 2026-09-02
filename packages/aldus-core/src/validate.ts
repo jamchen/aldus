@@ -54,9 +54,22 @@ export type ValidationResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: StructuredError };
 
-/** Outcome of a version-aware record validation. */
+/**
+ * Outcome of a version-aware record validation.
+ *
+ * `droppedPaths` is present only when the parse discarded something: the paths of properties the
+ * record carried and this build's schema does not declare (ADR-0003 reader behaviour, ADR-0053).
+ * A `forward` read is where that ordinarily happens — a newer minor added a field this build has
+ * never heard of — and `compatibility: "forward"` alone told a caller that the record came from a
+ * newer build without telling them what they lost (#199). Paths, never values (contract §19.2).
+ */
 export type RecordValidationResult<T> =
-  | { readonly ok: true; readonly value: T; readonly compatibility: SchemaCompatibility }
+  | {
+      readonly ok: true;
+      readonly value: T;
+      readonly compatibility: SchemaCompatibility;
+      readonly droppedPaths?: readonly string[];
+    }
   | { readonly ok: false; readonly error: StructuredError };
 
 /* -------------------------------------------------------------------------------------------
@@ -115,6 +128,45 @@ function scrubMessage(message: string, inputStrings: ReadonlySet<string>): strin
     if (message.includes(candidate)) return WITHHELD_MESSAGE;
   }
   return message;
+}
+
+/** Depth limit when comparing a record against what its parse kept. Matches the scrub scan. */
+const DROPPED_SCAN_MAX_DEPTH = SCRUB_SCAN_MAX_DEPTH;
+
+/**
+ * The paths a non-strict parse discarded: present in `input`, absent from `output`.
+ *
+ * Every Core record schema strips unknown properties rather than refusing them, which is what
+ * makes a `forward` read safe (ADR-0003). It is also a silent loss: the caller receives an object
+ * that looks complete and is not, with nothing saying which part went missing. This names the part.
+ *
+ * Paths only — the value under a dropped key is exactly the thing this build cannot interpret and
+ * must not echo (contract §19.2). A dropped subtree is reported once, at its root, because its
+ * interior is by definition undeclared here and enumerating it would describe the other build's
+ * schema rather than this one's.
+ */
+function droppedPaths(input: unknown, output: unknown): string[] {
+  const dropped: string[] = [];
+  const walk = (from: unknown, kept: unknown, path: PropertyKey[]): void => {
+    if (path.length > DROPPED_SCAN_MAX_DEPTH) return;
+    if (typeof from !== "object" || from === null || typeof kept !== "object" || kept === null) {
+      return;
+    }
+    if (Array.isArray(from)) {
+      if (!Array.isArray(kept)) return;
+      from.forEach((entry, index) => walk(entry, kept[index], [...path, index]));
+      return;
+    }
+    for (const [key, value] of Object.entries(from)) {
+      if (!Object.hasOwn(kept, key)) {
+        dropped.push(formatIssuePath([...path, key]));
+        continue;
+      }
+      walk(value, (kept as Record<string, unknown>)[key], [...path, key]);
+    }
+  };
+  walk(input, output, []);
+  return dropped;
 }
 
 /** Render a validator path as `a.b[0].c`. */
@@ -270,7 +322,8 @@ export function assertValid<N extends SchemaName>(name: N, data: unknown): Schem
  *
  * A `forward` read — same major, newer minor — succeeds, and the classification is returned so
  * a caller may decline to write such a record back. That decision belongs to the store, not
- * here.
+ * here. What the parse discarded on the way is returned as `droppedPaths`, so the caller is told
+ * not only that the record is newer but which of its parts this build did not keep (#199).
  */
 export function validateRecord<N extends VersionedSchemaName>(
   name: N,
@@ -282,17 +335,20 @@ export function validateRecord<N extends VersionedSchemaName>(
   const declared = readSchemaVersion(data);
   // A missing or malformed version is a field-level problem: fall through so the schema reports
   // it precisely, rather than pre-empting it with a vaguer version error.
+  let compatibility: SchemaCompatibility = "compatible";
   if (declared !== undefined && isSchemaVersion(declared)) {
-    const compatibility = checkSchemaVersion(declared, supported);
+    compatibility = checkSchemaVersion(declared, supported);
     if (compatibility === "incompatible") {
       return { ok: false, error: unsupportedVersionError(name, declared, supported) };
     }
-    const result = validate(name, data);
-    return result.ok ? { ok: true, value: result.value, compatibility } : result;
   }
 
   const result = validate(name, data);
-  return result.ok ? { ok: true, value: result.value, compatibility: "compatible" } : result;
+  if (!result.ok) return result;
+  const dropped = droppedPaths(data, result.value);
+  return dropped.length === 0
+    ? { ok: true, value: result.value, compatibility }
+    : { ok: true, value: result.value, compatibility, droppedPaths: dropped };
 }
 
 /**
@@ -305,14 +361,24 @@ export function assertValidRecord<N extends VersionedSchemaName>(
   name: N,
   data: unknown,
   supported: string = SCHEMA_VERSION,
-): { value: SchemaTypeFor<N>; compatibility: SchemaCompatibility } {
+): {
+  value: SchemaTypeFor<N>;
+  compatibility: SchemaCompatibility;
+  droppedPaths?: readonly string[];
+} {
   const declared = readSchemaVersion(data);
   if (declared !== undefined && isSchemaVersion(declared)) {
     assertSchemaVersionReadable(declared, supported);
   }
   const result = validateRecord(name, data, supported);
   if (!result.ok) throw fromStructuredError(result.error);
-  return { value: result.value, compatibility: result.compatibility };
+  return result.droppedPaths === undefined
+    ? { value: result.value, compatibility: result.compatibility }
+    : {
+        value: result.value,
+        compatibility: result.compatibility,
+        droppedPaths: result.droppedPaths,
+      };
 }
 
 /** Read a `schemaVersion` property without assuming the value is an object. */
