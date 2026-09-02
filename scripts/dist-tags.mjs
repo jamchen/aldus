@@ -9,7 +9,7 @@
  *
  *   node scripts/dist-tags.mjs snapshot <file>
  *   node scripts/dist-tags.mjs assert <before> [--allow-latest-move]
- *                                              [--deadline-ms N] [--interval-ms N]
+ *                                              [--deadline-ms N] [--convergence-ms N] [--interval-ms N]
  *
  * `assert` holds **two** invariants for every package in the publish set, not one:
  *
@@ -21,6 +21,19 @@
  * printed and never compared, and because the `latest` comparison it did make was reading
  * `undefined` on both sides under CI's npm. `dist-tags-check.mjs` documents both, measured.
  *
+ * `assert` has **three** exit codes, and the third is the one added by #266:
+ *
+ * - 0 — both invariants hold on every package;
+ * - 1 — something is wrong: `latest` moved, `next` is a version this publish neither intended nor
+ *   recorded beforehand, a reply is malformed, or a package stayed absent or unreadable past
+ *   `--deadline-ms`;
+ * - 2 — `DECLINED`: after `--convergence-ms`, the only packages not passing still serve **exactly**
+ *   the `next` recorded before the publish, with `latest` unmoved. Twice in one day that was the
+ *   registry's read side taking about five minutes to catch up on one package, and it was reported
+ *   with the same exit code and nearly the same line as a partial publish. The two cannot be told
+ *   apart from here, so this says so — neither a pass nor a failure — and names the command that
+ *   settles it later.
+ *
  * The rule and its reader live in `dist-tags-check.mjs` so they can be driven by a test with a
  * fake registry. This file is argv, files and exit codes.
  */
@@ -28,8 +41,10 @@
 import { writeFileSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
+import { declineUndecided } from "./declined.mjs";
 import { publishSet } from "./publish-set.mjs";
 import {
+  DEFAULT_CONVERGENCE_MS,
   DEFAULT_DEADLINE_MS,
   DEFAULT_INTERVAL_MS,
   SNAPSHOT_SCHEMA,
@@ -93,7 +108,14 @@ if (mode === "snapshot") {
 if (mode === "assert") {
   const allowLatestMove = rest.includes("--allow-latest-move");
   const deadlineMs = numberFlag(rest, "--deadline-ms", DEFAULT_DEADLINE_MS);
+  const convergenceMs = numberFlag(rest, "--convergence-ms", DEFAULT_CONVERGENCE_MS);
   const intervalMs = numberFlag(rest, "--interval-ms", DEFAULT_INTERVAL_MS);
+  if (convergenceMs < deadlineMs) {
+    console.error(
+      `dist-tags: --convergence-ms (${convergenceMs}) must not be shorter than --deadline-ms (${deadlineMs})`,
+    );
+    process.exit(2);
+  }
 
   const raw = JSON.parse(readFileSync(file, "utf8"));
   if (raw?.schema !== SNAPSHOT_SCHEMA || raw.packages === undefined) {
@@ -112,6 +134,7 @@ if (mode === "assert") {
     read,
     allowLatestMove,
     deadlineMs,
+    convergenceMs,
     intervalMs,
   });
 
@@ -126,13 +149,41 @@ if (mode === "assert") {
   }
   console.log(`\nRead in ${result.rounds} round(s) over ${result.elapsedMs}ms.`);
 
+  if (result.verdict === "declined") {
+    // Every package that is not passing reads exactly as it did before the publish, and nothing
+    // else is wrong. The registry has not served the new document yet, or the package never
+    // published; the two look identical from here (#266: five minutes, twice, same package). The
+    // publish command itself reported success — in `release.yml` this step does not run otherwise
+    // — so the one thing that would distinguish them is time, and the bound is up.
+    const names = result.lagging;
+    declineUndecided(
+      `\`next\` has not converged on ${names.length} of ${expected.length} package(s) after ` +
+        `${convergenceMs}ms, so the assertion has no result.`,
+      [
+        "Still serving the pre-publish `next`, with `latest` unmoved and every other package passing:",
+        ...names.map((name) => `  ${name}`),
+        "",
+        "The publish step that precedes this assertion reported success for every package; this",
+        "step is not reached otherwise. A registry whose read side has not caught up and a package",
+        "that never published read identically at this point, and this check will not pick one.",
+        "",
+        "Re-check once the registry has had time to converge (measured at about five minutes):",
+        ...names.map((name) => `  npm view ${name} dist-tags`),
+        `and expect next=${expected[0]?.version ?? "<version>"}. If it is still the old value an`,
+        "hour later, treat it as a partial publish — recovery is owner-reserved (docs/RELEASING.md).",
+        `Observed over ${result.rounds} round(s) and ${result.elapsedMs}ms.`,
+      ].join("\n"),
+    );
+  }
+
   if (!result.ok) {
     console.error("\ndist-tags assertion FAILED:");
     for (const problem of result.problems) console.error(`  ${problem}`);
     if (result.exhausted) {
       console.error(
-        `\nThe ${deadlineMs}ms convergence deadline was exhausted. A \`next\` that has not arrived\n` +
-          "by now is a package that did not publish, not a registry catching up.",
+        `\nThe ${deadlineMs}ms deadline was exhausted with a package still absent or unreadable.\n` +
+          "That is not the measured lag shape (a pre-publish `next` still being served), so it\n" +
+          "fails closed rather than declining.",
       );
     }
     console.error(
@@ -151,6 +202,6 @@ if (mode === "assert") {
 
 console.error(
   "usage: dist-tags.mjs snapshot <file>\n" +
-    "       dist-tags.mjs assert <file> [--allow-latest-move] [--deadline-ms N] [--interval-ms N]",
+    "       dist-tags.mjs assert <file> [--allow-latest-move] [--deadline-ms N] [--convergence-ms N] [--interval-ms N]",
 );
 process.exit(2);

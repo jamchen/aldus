@@ -1,9 +1,12 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_CONVERGENCE_MS,
   DEFAULT_DEADLINE_MS,
   DEFAULT_INTERVAL_MS,
   assertDistTags,
@@ -26,7 +29,17 @@ import { publishSet, repoRoot } from "../../../scripts/publish-set.mjs";
  * `next` was printed and never compared, and the `latest` comparison that did run was reading
  * `undefined` on both sides because npm 12 wraps `view --json` output in an array.
  *
- * Every case drives an **injected reader**. Nothing here reaches the network, so a red is a fact
+ * The second subject is the **red that meant two things** (#266). Runs 33583936736 and 33593065914
+ * each published all twelve packages; each time the assertion read `@aldus-runtime/testkit` at the
+ * previous `next` for 120 s and failed with the same line a partial publish would produce. The
+ * registry converged about five minutes later both times. The cases under "the third state" pin
+ * the split: a `next` that is exactly the pre-publish value on an otherwise sound reading gets a
+ * longer bound and then a `declined` verdict, never a pass and never a failure; anything else
+ * wrong is still a failure, decided as soon as it is seen.
+ *
+ * Every case drives an **injected reader**, except the last block, which drives the real
+ * `dist-tags.mjs` process against a fake `npm` on `PATH` — the exit codes live in that file, and a
+ * test of the rule alone cannot see them. Nothing here reaches the network, so a red is a fact
  * about the rule rather than about the registry's mood.
  */
 
@@ -212,15 +225,51 @@ describe("evaluatePackage", () => {
       reading: tagsReading("p", { latest: LATEST, next: STALE }),
     });
     expect(verdict.ok).toBe(false);
+    expect(verdict.lagging).toBe(true);
     expect(verdict.problems).toEqual([
       {
         tag: "next",
         expected: PUBLISHED,
         observed: STALE,
-        why: "`next` is not the version this publish intended",
+        why: "`next` is still the value recorded before the publish (not yet converged, or never published)",
         retriable: true,
+        lagging: true,
       },
     ]);
+  });
+
+  it("calls a next that is neither intended nor pre-publish wrong, not lagging, and not retriable", () => {
+    // A registry that has not caught up serves the old document. It does not serve a third one.
+    const verdict = evaluatePackage({
+      ...base,
+      before: { latest: LATEST, next: STALE },
+      reading: tagsReading("p", { latest: LATEST, next: "0.2.0-next.99" }),
+    });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.lagging).toBe(false);
+    expect(verdict.retriable).toBe(false);
+    expect(verdict.problems[0]?.why).toBe("`next` is not the version this publish intended");
+  });
+
+  it("does not call a pre-publish next lagging when latest moved on the same package", () => {
+    const verdict = evaluatePackage({
+      ...base,
+      before: { latest: LATEST, next: STALE },
+      reading: tagsReading("p", { latest: "9.9.9", next: STALE }),
+    });
+    expect(verdict.lagging).toBe(false);
+    expect(verdict.retriable).toBe(false);
+    expect(verdict.problems.map((problem) => problem.lagging)).toEqual([false, false]);
+  });
+
+  it("does not call a first publish with no next lagging: there is no pre-publish value to match", () => {
+    const verdict = evaluatePackage({
+      ...base,
+      before: null,
+      reading: tagsReading("p", { latest: null, next: null }),
+    });
+    expect(verdict.lagging).toBe(false);
+    expect(verdict.retriable).toBe(true);
   });
 
   it("treats a moved latest as permanent and a stale next as worth re-reading", () => {
@@ -258,6 +307,7 @@ describe("evaluatePackage", () => {
         observed: PUBLISHED,
         why: "latest was created by this publish (first publish of this package)",
         retriable: false,
+        lagging: false,
       },
     ]);
   });
@@ -337,6 +387,10 @@ describe("assertDistTags", () => {
 
   // The run itself. Ten packages at .53, `@aldus-runtime/testkit` and `@aldus-runtime/tts-ledger`
   // at .52, `latest` unmoved on all twelve — the exact state the old check reported as green.
+  //
+  // Since #266 this state, held to the bound, is **declined** rather than failed: it is what a
+  // registry five minutes behind looks like and also what a partial publish looks like. What the
+  // case pins is that it is never green — `ok` is false and both packages are named.
   it("refuses run 33470723600's state instead of reporting it green", async () => {
     const table = Object.fromEntries(
       TWELVE.map((name) => [
@@ -355,13 +409,16 @@ describe("assertDistTags", () => {
       before: beforeAll(),
       read: readerOver(table).read,
       deadlineMs: 30_000,
+      convergenceMs: 30_000,
       intervalMs: 5_000,
     });
     expect(result.ok).toBe(false);
+    expect(result.verdict).toBe("declined");
     expect(result.exhausted).toBe(true);
+    expect(result.lagging).toEqual(["@aldus-runtime/testkit", "@aldus-runtime/tts-ledger"]);
     expect(result.problems).toEqual([
-      `@aldus-runtime/testkit tag=next expected=${PUBLISHED} observed=${STALE} — \`next\` is not the version this publish intended`,
-      `@aldus-runtime/tts-ledger tag=next expected=${PUBLISHED} observed=${STALE} — \`next\` is not the version this publish intended`,
+      `@aldus-runtime/testkit tag=next expected=${PUBLISHED} observed=${STALE} — \`next\` is still the value recorded before the publish (not yet converged, or never published)`,
+      `@aldus-runtime/tts-ledger tag=next expected=${PUBLISHED} observed=${STALE} — \`next\` is still the value recorded before the publish (not yet converged, or never published)`,
     ]);
   });
 
@@ -385,16 +442,20 @@ describe("assertDistTags", () => {
       TWELVE.map((name) => [name, tagsReading(name, { latest: LATEST, next: STALE })]),
     );
     // The budget is the unbounded-retry tripwire: a loop without its round cap would exhaust the
-    // reader and fail with "reader exhausted" instead of the deadline diagnostic below.
+    // reader and fail with "reader exhausted" instead of the bound diagnostic below. Twelve packages
+    // all still at the pre-publish `next` is the lagging shape, so the bound in force is the
+    // convergence one.
     const reader = readerOver(table, 12 + 6 * 11);
     const result = await run({
       expected: expectedSet(),
       before: beforeAll(),
       read: reader.read,
       deadlineMs: 30_000,
+      convergenceMs: 30_000,
       intervalMs: 5_000,
     });
     expect(result.ok).toBe(false);
+    expect(result.verdict).toBe("declined");
     expect(result.exhausted).toBe(true);
     expect(result.rounds).toBe(6);
     expect(result.problems).toHaveLength(12);
@@ -430,14 +491,19 @@ describe("assertDistTags", () => {
         }),
       ]),
     );
+    const reader = readerOver(table);
     const result = await run({
       expected: expectedSet(),
       before: beforeAll(),
-      read: readerOver(table).read,
+      read: reader.read,
       deadlineMs: 10_000,
       intervalMs: 5_000,
     });
     expect(result.ok).toBe(false);
+    expect(result.verdict).toBe("fail");
+    // A third value is not a registry catching up, so it is not re-read: decided in one round.
+    expect(result.rounds).toBe(1);
+    expect(reader.calls()).toBe(12);
     expect(result.problems).toEqual([
       `@aldus-runtime/mcp tag=next expected=${PUBLISHED} observed=0.2.0-next.99 — \`next\` is not the version this publish intended`,
     ]);
@@ -524,7 +590,12 @@ describe("assertDistTags", () => {
   });
 
   it("refuses a non-positive deadline or interval, which would make the bound meaningless", async () => {
-    for (const bounds of [{ deadlineMs: 0 }, { intervalMs: 0 }, { intervalMs: -1 }]) {
+    for (const bounds of [
+      { deadlineMs: 0 },
+      { convergenceMs: 0 },
+      { intervalMs: 0 },
+      { intervalMs: -1 },
+    ]) {
       await expect(
         assertDistTags({
           expected: expectedSet(["@aldus-runtime/core"]),
@@ -559,7 +630,7 @@ describe("assertDistTags", () => {
     const table = Object.fromEntries(
       TWELVE.map((name) => [name, tagsReading(name, { latest: LATEST, next: STALE })]),
     );
-    const bounds = { deadlineMs: 10_000, intervalMs: 5_000 };
+    const bounds = { deadlineMs: 10_000, convergenceMs: 10_000, intervalMs: 5_000 };
     for (const _ of [1, 2, 3]) {
       const result = await run({
         expected: expectedSet(),
@@ -568,8 +639,297 @@ describe("assertDistTags", () => {
         ...bounds,
       });
       expect(result.ok).toBe(false);
+      expect(result.verdict).toBe("declined");
       expect(result.problems).toHaveLength(12);
     }
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
+// The third state (#266). One package exactly one version behind, on a publish that succeeded, is
+// not distinguishable from a partial publish by reading the registry — so it is declined, never
+// passed and never failed. Everything else wrong is still a failure, and a failure wins.
+// -------------------------------------------------------------------------------------------------
+
+describe("assertDistTags: the third state", () => {
+  /** Eleven converged, `name` still serving the pre-publish `next`. Runs 33583936736 and 33593065914. */
+  const oneBehind = (name: string, overrides: Record<string, Reading> = {}) =>
+    Object.fromEntries(
+      TWELVE.map((pkg) => [
+        pkg,
+        overrides[pkg] ??
+          tagsReading(pkg, { latest: LATEST, next: pkg === name ? STALE : PUBLISHED }),
+      ]),
+    );
+
+  it("declines rather than passes or fails when one package is still one behind at the bound", async () => {
+    const reader = readerOver(oneBehind("@aldus-runtime/testkit"));
+    const result = await run({
+      expected: expectedSet(),
+      before: beforeAll(),
+      read: reader.read,
+      deadlineMs: 20_000,
+      convergenceMs: 60_000,
+      intervalMs: 5_000,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.verdict).toBe("declined");
+    expect(result.lagging).toEqual(["@aldus-runtime/testkit"]);
+    expect(result.exhausted).toBe(true);
+    // Held to the convergence bound, not the deadline: 60 s / 5 s = 12 rounds, and only the
+    // lagging package is re-read after the first.
+    expect(result.rounds).toBe(12);
+    expect(reader.calls()).toBe(12 + 11);
+    expect(result.problems).toHaveLength(1);
+  });
+
+  it("passes when the lagging package converges inside the longer bound", async () => {
+    let reads = 0;
+    const read = (name: string): Reading => {
+      if (name !== "@aldus-runtime/testkit") {
+        return tagsReading(name, { latest: LATEST, next: PUBLISHED });
+      }
+      reads += 1;
+      // Converges on the 61st read: 300 s at 5 s intervals — the measured lag, past the old
+      // 120 s deadline and inside the new bound.
+      return tagsReading(name, { latest: LATEST, next: reads <= 60 ? STALE : PUBLISHED });
+    };
+    const result = await run({ expected: expectedSet(), before: beforeAll(), read });
+    expect(result.ok).toBe(true);
+    expect(result.verdict).toBe("pass");
+    expect(result.rounds).toBe(61);
+  });
+
+  it("fails, not declines, when one package is one behind and another is wrong", async () => {
+    const reader = readerOver(
+      oneBehind("@aldus-runtime/testkit", {
+        "@aldus-runtime/mcp": tagsReading("@aldus-runtime/mcp", {
+          latest: LATEST,
+          next: "0.2.0-next.99",
+        }),
+      }),
+    );
+    const result = await run({ expected: expectedSet(), before: beforeAll(), read: reader.read });
+    expect(result.verdict).toBe("fail");
+    expect(result.ok).toBe(false);
+    expect(result.rounds).toBe(1);
+    expect(result.problems.map((problem) => problem.split(" ")[0])).toEqual([
+      "@aldus-runtime/mcp",
+      "@aldus-runtime/testkit",
+    ]);
+  });
+
+  it("fails, not declines, when one package is one behind and latest moved on another", async () => {
+    const reader = readerOver(
+      oneBehind("@aldus-runtime/testkit", {
+        "@aldus-runtime/core": tagsReading("@aldus-runtime/core", {
+          latest: "9.9.9",
+          next: PUBLISHED,
+        }),
+      }),
+    );
+    const result = await run({ expected: expectedSet(), before: beforeAll(), read: reader.read });
+    expect(result.verdict).toBe("fail");
+    expect(result.rounds).toBe(1);
+    expect(result.problems[0]).toContain("tag=latest");
+  });
+
+  it("holds an absent package to the ordinary deadline and fails there, even with a lagging one alongside", async () => {
+    // Absence has no measurement behind it. Only the lagging shape earns the longer bound, and
+    // while an absence is outstanding the deadline is the bound in force.
+    const reader = readerOver(
+      oneBehind("@aldus-runtime/testkit", {
+        "@aldus-runtime/release": { kind: "absent" } satisfies Reading,
+      }),
+    );
+    const result = await run({
+      expected: expectedSet(),
+      before: beforeAll(),
+      read: reader.read,
+      deadlineMs: 20_000,
+      convergenceMs: 60_000,
+      intervalMs: 5_000,
+    });
+    expect(result.verdict).toBe("fail");
+    expect(result.exhausted).toBe(true);
+    expect(result.rounds).toBe(4);
+    expect(
+      result.problems.some((problem) => problem.includes("(package not on the registry)")),
+    ).toBe(true);
+  });
+
+  it("fails, not declines, when the snapshot names a package the publish set does not", async () => {
+    const result = await run({
+      expected: expectedSet(),
+      before: { ...beforeAll(), "@aldus-runtime/retired": { latest: LATEST, next: STALE } },
+      read: readerOver(oneBehind("@aldus-runtime/testkit")).read,
+      deadlineMs: 10_000,
+      convergenceMs: 10_000,
+      intervalMs: 5_000,
+    });
+    expect(result.verdict).toBe("fail");
+    expect(result.problems).toHaveLength(2);
+  });
+
+  it("refuses a convergence bound shorter than the deadline", async () => {
+    await expect(
+      assertDistTags({
+        expected: expectedSet(["@aldus-runtime/core"]),
+        before: beforeAll(["@aldus-runtime/core"]),
+        read: () => tagsReading("@aldus-runtime/core", { latest: LATEST, next: PUBLISHED }),
+        deadlineMs: 20_000,
+        convergenceMs: 10_000,
+      }),
+    ).rejects.toThrow("must not be shorter than deadlineMs");
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
+// The process. Exit codes are decided in `dist-tags.mjs`, not in the rule, so the rule's tests
+// cannot see a DECLINED folded into a 0 there. A fake `npm` on `PATH` answers `view` from a table.
+// -------------------------------------------------------------------------------------------------
+
+describe("dist-tags.mjs assert: exit codes", () => {
+  const set = publishSet().map((pkg) => ({ name: pkg.name, version: pkg.manifest.version }));
+  const intended = set[0]?.version ?? "";
+  const PREVIOUS = "0.0.0-previous";
+  const temporaries: string[] = [];
+  afterAll(() => {
+    for (const path of temporaries) rmSync(path, { recursive: true, force: true });
+  });
+
+  /** A `npm` that answers `view <name> …` from a JSON table, in npm 12's array envelope. */
+  function fakeNpm(dir: string): void {
+    writeFileSync(
+      join(dir, "fake-npm.mjs"),
+      [
+        'import { readFileSync } from "node:fs";',
+        "const table = JSON.parse(readFileSync(process.env.FAKE_REGISTRY, 'utf8'));",
+        "const [verb, name] = process.argv.slice(2);",
+        'if (verb !== "view") { console.error("fake npm: unsupported " + verb); process.exit(9); }',
+        "const tags = table[name];",
+        'if (tags === undefined) { console.error("npm error code E404\\nnpm error 404 Not Found"); process.exit(1); }',
+        'console.log(JSON.stringify([{ name, "dist-tags": tags }]));',
+      ].join("\n"),
+    );
+    writeFileSync(join(dir, "npm"), `#!/bin/sh\nexec node "${join(dir, "fake-npm.mjs")}" "$@"\n`);
+    chmodSync(join(dir, "npm"), 0o755);
+  }
+
+  /**
+   * Run the real script against a registry table. Bounds are tiny because a virtual clock cannot be
+   * injected across a process boundary; the interval still leaves room for several rounds.
+   */
+  function assertWith(registry: Record<string, Record<string, string>>) {
+    const dir = mkdtempSync(join(tmpdir(), "dist-tags-exit-"));
+    temporaries.push(dir);
+    fakeNpm(dir);
+    const registryFile = join(dir, "registry.json");
+    writeFileSync(registryFile, JSON.stringify(registry));
+    const beforeFile = join(dir, "before.json");
+    writeFileSync(
+      beforeFile,
+      JSON.stringify({
+        schema: 1,
+        packages: Object.fromEntries(
+          set.map(({ name }) => [name, { latest: LATEST, next: PREVIOUS }]),
+        ),
+      }),
+    );
+    const result = spawnSync(
+      "node",
+      [
+        join(repoRoot, "scripts", "dist-tags.mjs"),
+        "assert",
+        beforeFile,
+        "--deadline-ms",
+        "60",
+        "--convergence-ms",
+        "120",
+        "--interval-ms",
+        "20",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH ?? ""}`,
+          FAKE_REGISTRY: registryFile,
+        },
+      },
+    );
+    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  }
+
+  const converged = (): Record<string, Record<string, string>> =>
+    Object.fromEntries(set.map(({ name }) => [name, { latest: LATEST, next: intended }]));
+
+  it("exits 0 when every package converged", () => {
+    const run = assertWith(converged());
+    expect(run.stderr).toBe("");
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("next converged to the intended version");
+  });
+
+  it("exits 1 when a package carries a next this publish neither intended nor recorded", () => {
+    const registry = converged();
+    registry["@aldus-runtime/mcp"] = { latest: LATEST, next: "0.0.0-wrong" };
+    const run = assertWith(registry);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("dist-tags assertion FAILED");
+    expect(run.stderr).not.toContain("DECLINED");
+  });
+
+  it("exits 1 when latest moved", () => {
+    const registry = converged();
+    registry["@aldus-runtime/core"] = { latest: "9.9.9", next: intended };
+    const run = assertWith(registry);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("tag=latest");
+    expect(run.stderr).not.toContain("DECLINED");
+  });
+
+  it("declines with exit 2 when one package is still one behind at the bound", () => {
+    const registry = converged();
+    registry["@aldus-runtime/testkit"] = { latest: LATEST, next: PREVIOUS };
+    const run = assertWith(registry);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain("DECLINED:");
+    expect(run.stderr).toContain("NOT a gate pass and NOT a gate failure");
+    expect(run.stderr).toContain("  @aldus-runtime/testkit\n");
+    expect(run.stderr).toContain("reported success");
+    expect(run.stderr).toContain("npm view @aldus-runtime/testkit dist-tags");
+    expect(run.stderr).not.toContain("FAILED");
+    expect(run.stdout).not.toContain("converged to the intended version");
+  });
+
+  it("exits 1, not 2, when one package is one behind and another is wrong", () => {
+    const registry = converged();
+    registry["@aldus-runtime/testkit"] = { latest: LATEST, next: PREVIOUS };
+    registry["@aldus-runtime/mcp"] = { latest: LATEST, next: "0.0.0-wrong" };
+    const run = assertWith(registry);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("dist-tags assertion FAILED");
+    expect(run.stderr).not.toContain("DECLINED");
+  });
+
+  it("declines a convergence bound shorter than the deadline before reading anything", () => {
+    const result = spawnSync(
+      "node",
+      [
+        join(repoRoot, "scripts", "dist-tags.mjs"),
+        "assert",
+        "/nonexistent/before.json",
+        "--deadline-ms",
+        "100",
+        "--convergence-ms",
+        "50",
+      ],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("must not be shorter than --deadline-ms");
   });
 });
 
@@ -599,5 +959,9 @@ describe("the intended version comes from this tree", () => {
     expect(DEFAULT_DEADLINE_MS).toBeGreaterThan(0);
     expect(DEFAULT_INTERVAL_MS).toBeGreaterThan(0);
     expect(DEFAULT_DEADLINE_MS / DEFAULT_INTERVAL_MS).toBeGreaterThanOrEqual(2);
+    // The convergence bound is derived from a measurement — about five minutes, twice (#266) —
+    // and must cover it with margin, or the assertion declines on the very lag it was widened for.
+    expect(DEFAULT_CONVERGENCE_MS).toBeGreaterThanOrEqual(DEFAULT_DEADLINE_MS);
+    expect(DEFAULT_CONVERGENCE_MS).toBeGreaterThanOrEqual(2 * 300_000);
   });
 });

@@ -233,14 +233,43 @@ jobs:
       # above puts npm 12 on the runner and npm 12 wraps `view --json` output in an array. Both
       # are in `scripts/dist-tags-check.mjs`, measured.
       #
-      # The registry can serve a stale `next` for seconds after a successful publish, so the
-      # assertion re-reads what has not converged on a bounded schedule and fails closed when the
-      # deadline runs out. It never infers success from the publish command.
+      # The registry can serve a stale `next` after a successful publish — measured at about five
+      # minutes for one package out of twelve, twice in one day (#266, runs 33583936736 and
+      # 33593065914) — so the assertion re-reads what has not converged on a bounded schedule. It
+      # never infers success from the publish command.
+      #
+      # Three exit codes. 0 passes. 1 is a real failure — `latest` moved, `next` is a version this
+      # publish neither intended nor recorded, a package stayed absent — and stays red. 2 is
+      # DECLINED: the bound ran out with a package still serving exactly the pre-publish `next`,
+      # which a slow registry and a partial publish both look like from here.
+      #
+      # The job goes red on 2 as well, deliberately: a declined result is not folded into a pass,
+      # and this workflow has no green that means "unknown". What the branch below adds is the
+      # distinction a reader needs at a glance — a step-summary section and an annotation saying
+      # the Publish step succeeded and how to re-check — so a red run no longer has to be
+      # re-measured by hand to learn which of the two it was. The Publish step precedes this one
+      # under `set -e`, so reaching here is what "the publish step succeeded" rests on.
       - name: Assert dist-tags after publishing
         run: |
           set -euo pipefail
+          status=0
           node scripts/dist-tags.mjs assert "${RUNNER_TEMP}/dist-tags-before.json" \
-            ${{ inputs.allow-latest-move && '--allow-latest-move' || '' }}
+            ${{ inputs.allow-latest-move && '--allow-latest-move' || '' }} || status=$?
+          if [ "${status}" -eq 2 ]; then
+            {
+              echo "### DECLINED: dist-tags not yet converged for ${{ needs.verify.outputs.version }}"
+              echo
+              echo "The Publish step succeeded for every package. The assertion ran to its convergence"
+              echo "bound with at least one package still serving the pre-publish \`next\`; the step log"
+              echo "names them. This is neither a pass nor a failure, and the job is red because a"
+              echo "declined result is never folded into a pass."
+              echo
+              echo "Re-check: \`npm view @aldus-runtime/<pkg> dist-tags\` — expect"
+              echo "\`next=${{ needs.verify.outputs.version }}\`. See docs/RELEASING.md."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=dist-tags DECLINED::next not yet converged on at least one package; the Publish step succeeded. Neither a pass nor a failure - see the step log and summary."
+          fi
+          exit "${status}"
 
       - name: Summary
         run: |

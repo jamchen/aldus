@@ -883,8 +883,8 @@ export const cases = [
       {
         replace: [
           "scripts/dist-tags-check.mjs",
-          "  const maxRounds = Math.max(1, Math.ceil(deadlineMs / intervalMs));",
-          "  const maxRounds = Number.POSITIVE_INFINITY; /* mutant */",
+          "  const maxConvergenceRounds = Math.max(1, Math.ceil(convergenceMs / intervalMs));",
+          "  const maxConvergenceRounds = Number.POSITIVE_INFINITY; /* mutant */",
         ],
       },
     ],
@@ -900,6 +900,36 @@ export const cases = [
     ],
     wantExit: 1,
     wantOutput: "exhausts the deadline on permanent staleness rather than retrying forever",
+  },
+  {
+    // The third state folded into the first (#266). A package still serving the pre-publish `next`
+    // is the one shape this check cannot decide, and the tempting repair for a red that keeps
+    // meaning "the registry is slow" is to let that shape pass. It then passes for a package that
+    // never published, which is the partial-publish case the assertion exists to catch. Measured
+    // through the real process so the exit code — decided in `dist-tags.mjs`, not in the rule —
+    // is what is asserted.
+    name: "dist-tags: treating a lagging package as ok turns DECLINED into a pass",
+    setup: [
+      {
+        replace: [
+          "scripts/dist-tags-check.mjs",
+          "    ok: problems.length === 0,",
+          "    ok: problems.every((problem) => problem.lagging), /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-e2e",
+      "test/dist-tags.test.ts",
+      "-t",
+      "declines with exit 2 when one package is still one behind at the bound",
+    ],
+    wantExit: 1,
+    wantOutput: "declines with exit 2 when one package is still one behind at the bound",
   },
   /* ------------------------------------------------------------------------------------------
    * The fourth rework state: an attempt durably recorded as `running` (#220, ADR-0057).
