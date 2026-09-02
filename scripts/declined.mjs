@@ -18,6 +18,10 @@
  *
  * Found by the independent review of PR #263; same defect class as issue #228. Extended to
  * `check-claim-scope.mjs`, which had the identical defect, by the independent review of PR #264.
+ * Extended again by the review of PR #270: `dist-tags.mjs` routed one exit 2 through here and
+ * kept three bare `dist-tags: …` refusals of its own, so exit 2 had two spellings in one file and
+ * the workflow branch keyed on the code alone could attribute an invocation refusal to a slow
+ * registry. `declineInvocation()` is the generic form those refusals now use.
  */
 
 /**
@@ -66,6 +70,25 @@ export function declineUndecided(headline, body) {
   console.error("This is a declined result. It is NOT a gate pass and NOT a gate failure.\n");
   console.error(`${body}\n${EXIT_CODES}`);
   process.exit(2);
+}
+
+/**
+ * Print the declined-invocation message for an argument or input the gate could not act on, exit 2.
+ *
+ * The generic form of `decline()`, for the refusals the two specific helpers below do not cover:
+ * a flag whose value is not a number, two bounds in the wrong order, an input file another version
+ * wrote. `headline` names what was wrong and says no gate ran; the rest is the same synopsis and
+ * legend every other declined message carries, so a reader finds every exit 2 by one spelling.
+ *
+ * @param {string} script - the script's filename, e.g. `dist-tags.mjs`.
+ * @param {string} headline - what was wrong, as a sentence ending in "so no gate ran."
+ * @param {string} usage - the gate's full argument synopsis.
+ * @param {string} example - the arguments of a worked invocation.
+ * @param {string} notes - what the arguments mean; one or more lines, no trailing newline.
+ * @returns {never}
+ */
+export function declineInvocation(script, headline, usage, example, notes) {
+  decline(script, headline, usage, example, notes);
 }
 
 /** What `<base-ref>` is, shared by every gate that takes one. */

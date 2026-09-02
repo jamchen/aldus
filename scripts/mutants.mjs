@@ -931,6 +931,37 @@ export const cases = [
     wantExit: 1,
     wantOutput: "declines with exit 2 when one package is still one behind at the bound",
   },
+  {
+    // The stray short-circuit (PR #270 review, finding 2). The first version computed `strays`
+    // before the loop and never consulted it inside, so a snapshot naming a package the publish set
+    // does not — a fact known before the first read — polled to the full convergence bound when a
+    // lagging package was alongside: ten minutes in production to reach a failure decided in round
+    // one. The exit code was right; only the latency was wrong, so the distinguishing assertion is
+    // the round count printed by the real process, not the status.
+    name: "dist-tags: not consulting strays inside the loop polls the full bound before failing",
+    setup: [
+      {
+        replace: [
+          "scripts/dist-tags-check.mjs",
+          '    if (strays.length > 0) {\n      stop = "structural";',
+          '    if (false /* mutant */ && strays.length > 0) {\n      stop = "structural";',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-e2e",
+      "test/dist-tags.test.ts",
+      "-t",
+      "exits 1 after one round when the snapshot names a stray package alongside a lagging one",
+    ],
+    wantExit: 1,
+    wantOutput:
+      "exits 1 after one round when the snapshot names a stray package alongside a lagging one",
+  },
   /* ------------------------------------------------------------------------------------------
    * The fourth rework state: an attempt durably recorded as `running` (#220, ADR-0057).
    *
