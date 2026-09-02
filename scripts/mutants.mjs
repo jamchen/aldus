@@ -1121,4 +1121,29 @@ export const cases = [
     wantExit: 1,
     wantOutput: "refuses a preview when the running attempt's candidate is not established",
   },
+  {
+    // #207. The includes rule restored: a human-oracle gate accepting `["human", "agent"]` again.
+    // The test that must catch it constructs exactly that definition and asserts the refusal, so a
+    // regression to the widening arm cannot pass as "still permits a human".
+    name: "human-oracle: restoring the includes-only rule lets a widened human_oracle gate resolve",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-gate-engine/src/definition.ts",
+          '(permittedActorKinds.length !== 1 || permittedActorKinds[0] !== "human")',
+          '!permittedActorKinds.includes("human") /* mutant */',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-gate-engine",
+      "test/definition.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "refuses a human-oracle gate widened beyond humans, and says what to do instead",
+  },
 ];

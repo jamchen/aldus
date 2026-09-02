@@ -88,6 +88,44 @@ describe("who may decide (§12 level 4, §13.3)", () => {
     );
   });
 
+  it("refuses a human-oracle gate widened beyond humans, and says what to do instead", () => {
+    // #207. Until next.56 this definition resolved: the check only required that `human` be
+    // *included*, so `["human", "agent"]` widened the one gate §12 level 4 gives to a person to
+    // every agent on every run, with no record of who delegated what. The adopter case that
+    // surfaced it was a signed spend ceiling declared as a human-oracle gate — the widening arm was
+    // the fix the API invited, and the right fix was a `hard_gate` binding the signed artifact.
+    let thrown: unknown;
+    try {
+      validateGateDefinition({
+        ...base,
+        level: "human_oracle",
+        permittedActorKinds: ["human", "agent"],
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toEqual(
+      expect.objectContaining({ code: GateEngineErrorCodes.GATE_DEFINITION_INVALID }),
+    );
+    const message = (thrown as Error).message;
+    // The refusal names the rule, and both honest doors: change the level, or waive with a reason.
+    expect(message).toContain("exactly [human]");
+    expect(message).toContain("§12 level 4, §13.3");
+    expect(message).toContain("move the gate to the level its judgement warrants");
+    expect(message).toContain("aldus waive --reason");
+  });
+
+  it("still accepts a human-oracle gate that says [human] explicitly", () => {
+    // The negative control for the case above: the exact rule refuses widening, not the explicit
+    // form of the default.
+    const resolved = validateGateDefinition({
+      ...base,
+      level: "human_oracle",
+      permittedActorKinds: ["human"],
+    });
+    expect(resolved.permittedActorKinds).toEqual(["human"]);
+  });
+
   it("refuses a gate no actor may decide", () => {
     expect(() => validateGateDefinition({ ...base, permittedActorKinds: [] })).toThrowError(
       expect.objectContaining({ code: GateEngineErrorCodes.GATE_DEFINITION_INVALID }) as Error,

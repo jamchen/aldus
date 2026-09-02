@@ -189,6 +189,20 @@ export interface SynthesisOutcome {
    *
    * Where omitted it is derived from {@link charged}. Absent from both means unknown, which is
    * **not** free — see `takePaidness`.
+   *
+   * **This answers "did this delivery charge?" and nothing else.** It is not
+   * {@link SynthesisAdapterCapabilities.incursCharge}, which answers the other question — *can
+   * this adapter charge at all?* — before any dispatch and only for the spend expectation. The two
+   * are read by different code and neither is derived from the other: declaring `incursCharge:
+   * false` does not make a delivery free, and reporting `incurredCharge: false` does not make an
+   * adapter free (#203).
+   *
+   * Worked example, the replay adapter. It declares `incursCharge: false`, because replaying
+   * stored bytes calls no provider. Its delivery **omits** `incurredCharge`, so the take's
+   * `takePaidness` is `unknown` — and that is the correct value, not a gap: the bytes were
+   * purchased once, by the take being replayed, and are being delivered again for nothing. `paid`
+   * would charge them twice; `free` would say they were never bought. `unknown` is the only one of
+   * the three that is not a false statement about purchased bytes.
    */
   incurredCharge?: boolean;
 }
@@ -256,6 +270,19 @@ export interface SynthesisAdapterCapabilities {
    * honest and it is not the same statement.
    *
    * Absent means unknown, and is treated as before.
+   *
+   * **This answers "can this adapter charge at all?" and nothing else.** It is read once, when the
+   * spend expectation for a segment is formed, and feeds only that expectation. It is not
+   * {@link SynthesisOutcome.incurredCharge}, which answers the other question — *did this
+   * delivery charge?* — after the fact and per delivery, and is the only field `takePaidness`
+   * reads. Declaring `incursCharge: false` makes the *expectation* `{ kind: "free" }`; it does not
+   * make any *take* free, and nothing derives one field from the other (#203).
+   *
+   * Worked example, the replay adapter. It may declare `incursCharge: false` safely, because
+   * replaying stored bytes calls no provider. That declaration says nothing about its deliveries:
+   * with `incurredCharge` omitted on each, the replayed take's `takePaidness` is `unknown`, which
+   * is the correct value — the bytes were purchased once, by the take being replayed, and `unknown`
+   * is the only one of `paid` / `free` / `unknown` that is not a false statement about them.
    */
   incursCharge?: boolean;
 }
