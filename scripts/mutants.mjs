@@ -1323,4 +1323,59 @@ export const cases = [
     wantExit: 1,
     wantOutput: "names the paths a forward read dropped, and never their values",
   },
+
+  /* --------------------------------------------------------------------------------------------
+   * Two properties whose only pin was in another package or in a docstring (PR #269 and #267
+   * receipts). Each is measured through the suite of the package that owns the code, because a
+   * mutant caught one package over reports SURVIVED when that package's suite is run alone.
+   * ------------------------------------------------------------------------------------------ */
+  {
+    // #269's receipt: removing this arm survived tts-ledger's own 79 tests and was caught only in
+    // services' composition tests. With the arm gone, an adapter reporting `incurredCharge: false`
+    // reads `unknown` — the safe direction, which is why nothing in the ledger noticed.
+    name: "paidness: dropping the incurredCharge:false → free arm is caught in tts-ledger's own suite",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-tts-ledger/src/take.ts",
+          '  if (take.delivery?.incurredCharge === false) return "free";\n',
+          "  /* mutant: the free arm removed */\n",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-tts-ledger",
+      "test/paidness.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "only the adapter saying so makes a take free",
+  },
+  {
+    // #267's receipt: the docstring says every non-human kind receives the clause, and a mutant
+    // giving `worker` the plain form survived 430/430 because every case named `agent`.
+    name: "transcription-remedy: giving worker the plain form is caught",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/spend-service.ts",
+          '  if (actorKind === undefined || actorKind === "human") return "";',
+          '  if (actorKind === undefined || actorKind === "human" || actorKind === "worker") return ""; /* mutant */',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/spend-refusal-transcription.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "a worker receives the clause and is refused",
+  },
 ];
