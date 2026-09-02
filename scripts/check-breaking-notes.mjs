@@ -51,12 +51,10 @@ import {
   selectSection,
   uncoveredFindings,
 } from "./breaking-coverage.mjs";
+import { declineMissingBaseRef } from "./declined.mjs";
 
 const baseRef = process.argv[2];
-if (baseRef === undefined) {
-  console.error("usage: check-breaking-notes.mjs <base-ref>");
-  process.exit(2);
-}
+if (baseRef === undefined) declineMissingBaseRef("check-breaking-notes.mjs", "origin/main");
 
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: "utf8", ...opts }).trim();
 

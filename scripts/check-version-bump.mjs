@@ -31,11 +31,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 
+import { declineMissingBaseRef } from "./declined.mjs";
+
 const base = process.argv[2];
-if (base === undefined) {
-  console.error("usage: check-version-bump.mjs <base-ref>");
-  process.exit(2);
-}
+if (base === undefined) declineMissingBaseRef("check-version-bump.mjs", "origin/main");
 
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8" });
