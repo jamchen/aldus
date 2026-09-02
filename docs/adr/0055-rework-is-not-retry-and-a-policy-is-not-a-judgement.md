@@ -96,6 +96,14 @@ begun, and resumption must determine whether that round's paid effect completed.
 answers it must be visible to the operator as well as to the controller — `0.2.0-next.35` made held
 reservations visible in `costs` for that reason.
 
+### A fourth state, and it is not a stop reason
+
+The three verdict shapes above — classifiable, unclassifiable, absent — do not cover an attempt
+durably recorded as `running`. That state is settled by **ADR-0057**: its remedy is reconciliation
+rather than a decision, so it is deliberately _not_ one of the stop reasons listed here and does not
+terminate in a gate. Recorded in this ADR because a reader looking for the missing case will look at
+the stop-reason list first, and adding it there is the mistake ADR-0057 rejects.
+
 ### What this ADR does not decide
 
 The **shape** of the primitive: a controller above the graph, a composite execution contract, or a

@@ -82,10 +82,12 @@ export {
 
 export {
   deriveReworkRounds,
+  runningEvaluation,
   type AttemptWithMetadata,
   type RefusedRound,
   type ReworkRoundReading,
   type ReworkRoundSource,
+  type RunningEvaluation,
 } from "./rework-rounds.js";
 
 export {

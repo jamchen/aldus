@@ -23,7 +23,12 @@ import {
 } from "@aldus-runtime/core";
 import { isArchived, type ArtifactRecord } from "@aldus-runtime/artifact-registry";
 import { decideRework, type ReworkVerdict } from "./rework.js";
-import { deriveReworkRounds, onlyOfKind, type AttemptWithMetadata } from "./rework-rounds.js";
+import {
+  deriveReworkRounds,
+  onlyOfKind,
+  runningEvaluation,
+  type AttemptWithMetadata,
+} from "./rework-rounds.js";
 
 /**
  * The newest completed evaluation attempt that judged a candidate, and which candidate.
@@ -1369,6 +1374,11 @@ export class AldusServices {
       });
     };
 
+    // Read once for the Run, not per policy. Cost records carry an optional `attemptId`, which is
+    // the only join from a charge to the attempt that incurred it (§19.3) — and the join is
+    // evidence to report, never a completion test.
+    const costRecords = await this.#context.workspace.runs.listRecords(runId, "costs");
+
     const loops: ReworkLoopStatus[] = this.#context.reworkPolicies.map((policy) => {
       const evaluationAttempts = attemptsOf(policy.stageId);
       const reading = deriveReworkRounds({
@@ -1384,10 +1394,60 @@ export class AldusServices {
         refusedRepairs: reading.refused,
       };
 
+      // An attempt recorded `running` outranks every completed one, and is read first (ADR-0057).
+      //
+      // This is the wiring the issue said would otherwise decide the fourth state by accident.
+      // Before it, a Run holding a killed evaluation reported *no completed attempt has judged a
+      // candidate, so there is nothing to decide about* — true about completed attempts and wrong
+      // about the Run, because there is something to reconcile. And a Run holding both a stuck
+      // attempt and an older clean one reported the clean verdict, which is a preview that would
+      // release a stage across a window whose paid effects are unknown.
+      const running = runningEvaluation(evaluationAttempts, policy.candidateArtifactKind);
+      if (running !== undefined) {
+        // No identifiable candidate is no subject, so there is no decision to preview — refused
+        // visibly rather than answered about an artifact nobody can check. The reason still says a
+        // running attempt stands, because that is the fact an operator needs.
+        if (running.digest === undefined) {
+          return {
+            ...base,
+            previewUnavailable:
+              `attempt "${running.entry.attempt.attemptId}" of "${policy.stageId}" is recorded ` +
+              `running and does not consume exactly one "${policy.candidateArtifactKind}" ` +
+              "artifact, so which candidate it is judging is not established. It still has to be " +
+              "reconciled before the loop continues",
+          };
+        }
+        const attemptId = running.entry.attempt.attemptId;
+        return {
+          ...base,
+          wouldDecide: decideRework({
+            policy,
+            rounds: reading.rounds,
+            verdict: {
+              kind: "attempt_running",
+              artifactDigest: running.digest,
+              stageId: policy.stageId,
+              attemptId,
+              // Reported, never read as an outcome. Both lists come straight off the record and
+              // both are ordinarily empty for a stuck attempt — artifacts reach an attempt when its
+              // stage settles, and a charge lands whenever the provider billed. Neither emptiness
+              // establishes anything, which is what the field docstrings say and why they are
+              // attached rather than compared.
+              recordedCostIds: costRecords
+                .filter((record) => record.attemptId === attemptId)
+                .map((record) => record.costId),
+              recordedArtifactDigests: running.entry.attempt.outputArtifacts.map(
+                (artifact) => artifact.sha256,
+              ),
+            },
+            fallbackGateId: policy.escalateToGateId,
+          }),
+        };
+      }
+
       // The subject is the candidate the newest **completed** evaluation judged — its input, not
-      // its output, because an evaluator emits a report. A running or failed attempt has judged
-      // nothing, and reading one as the latest verdict is the shape `not_evaluated` exists to
-      // keep out.
+      // its output, because an evaluator emits a report. A failed attempt has judged nothing, and
+      // reading one as the latest verdict is the shape `not_evaluated` exists to keep out.
       const judged = latestJudged(evaluationAttempts, policy.candidateArtifactKind);
       if (judged === undefined) {
         return {

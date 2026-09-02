@@ -223,3 +223,42 @@ export function judgedBy(
       ),
   );
 }
+
+/**
+ * A running evaluation attempt, and the candidate it is judging (#220, ADR-0057).
+ *
+ * `digest` is absent when the attempt does not consume exactly one artifact of the policy's
+ * candidate kind. Zero and several are the same answer, for the reason {@link onlyOfKind} gives:
+ * neither establishes which candidate is meant, and picking one would be `.at(-1)` with extra steps.
+ * The caller must not turn that absence into a decision — a reconciliation notice about an
+ * unidentified candidate names a subject nobody can check.
+ */
+export interface RunningEvaluation {
+  entry: AttemptWithMetadata;
+  digest?: string;
+}
+
+/**
+ * The newest attempt of an evaluating stage that is durably recorded as `running`.
+ *
+ * The counterpart to {@link judgedBy}, and the state that had nowhere to go. `judgedBy` and
+ * `latestJudged` both skip a non-succeeded attempt, which is right for deriving a *round* — an
+ * attempt that has not finished has judged nothing — and left a Run holding a killed evaluation
+ * reporting that there was nothing to decide about. There is: an attempt that started and cannot be
+ * said to have happened or not happened (ADR-0057).
+ *
+ * Newest-first, because the operator has to reconcile the attempt that is stuck now, and because a
+ * stage may hold several attempts of which only the last can still be running.
+ */
+export function runningEvaluation(
+  attempts: readonly AttemptWithMetadata[],
+  kind: string,
+): RunningEvaluation | undefined {
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    const entry = attempts[index];
+    if (entry === undefined || entry.attempt.status !== "running") continue;
+    const candidate = onlyOfKind(entry.attempt.inputArtifacts, kind);
+    return { entry, ...(candidate === undefined ? {} : { digest: candidate.sha256 }) };
+  }
+  return undefined;
+}
