@@ -139,16 +139,17 @@ function renderRunReport(report: RunReport): string[] {
   if (report.gates.length > 0) {
     lines.push("", "Gates");
     for (const gate of report.gates) {
-      // `enforcement` is the gate's **class**; `blocking` is whether it is stopping work **now**.
-      // These were rendered from `blocking` alone, so a satisfied blocking gate printed
+      // `enforcement` is the gate's **class**; `currentlyBlocking` is whether it is stopping work
+      // **now**. These were rendered from the second alone, so a satisfied blocking gate printed
       // `(advisory)` — a false statement about its class, and a statement the gate's own definition
       // contradicts: `script.freeze` exists so that freezing a script without its QA is impossible
       // rather than discouraged, and `(advisory)` says precisely the discouraged reading.
       //
       // The gates it misdescribed were exactly the ones that had already done their job, because
-      // being satisfied is what makes `blocking` false. An adopter driving a real run found every
-      // passing gate in their repository reported as advisory, and none of them is.
-      const stops = gate.blocking ? "  — stops work" : "";
+      // being satisfied is what makes `currentlyBlocking` false. An adopter driving a real run found
+      // every passing gate in their repository reported as advisory, and none of them is. The field
+      // was renamed from `blocking` for the same reason (#204): the old name was the substitution.
+      const stops = gate.currentlyBlocking ? "  — stops work" : "";
       lines.push(`  ${gate.gateId}  ${gate.state}  (${gate.enforcement})${stops}`);
 
       // **Why** it is stuck, which the engine already composed and this dropped.

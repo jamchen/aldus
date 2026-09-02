@@ -1146,4 +1146,22 @@ export const cases = [
     wantExit: 1,
     wantOutput: "refuses a human-oracle gate widened beyond humans, and says what to do instead",
   },
+  {
+    // #204. The pre-`next.27` label restored: the class vocabulary printed from the "is it stopping
+    // work now" fact, so a satisfied blocking gate reads `(advisory)` again. The test that must
+    // catch it asserts the row of exactly that gate and the absence of the word.
+    name: "status: printing the class from currentlyBlocking calls a satisfied blocking gate advisory",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-cli/src/render.ts",
+          "lines.push(`  ${gate.gateId}  ${gate.state}  (${gate.enforcement})${stops}`);",
+          'lines.push(`  ${gate.gateId}  ${gate.state}  (${gate.currentlyBlocking ? "blocking" : "advisory"})${stops}`); /* mutant */',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-cli", "test/gate-class.test.ts"],
+    wantExit: 1,
+    wantOutput: "calls a satisfied blocking gate blocking, not advisory",
+  },
 ];

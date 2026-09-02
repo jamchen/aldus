@@ -25,7 +25,7 @@ function plan(input: Partial<ActionPolicyInput> = {}) {
 
 /** A satisfied gate stops nothing, so `blocking` is false as the engine would report it. */
 function satisfied(gateId: string) {
-  return gateStatus({ gateId, state: "satisfied", blocking: false });
+  return gateStatus({ gateId, state: "satisfied", currentlyBlocking: false });
 }
 
 /** One satisfied gate and one unrelated pending gate — the shape that exposed the defect. */
@@ -113,7 +113,7 @@ describe("a stage that declares its gates", () => {
           gateId: "rhythm-advice",
           state: "pending",
           enforcement: "advisory",
-          blocking: false,
+          currentlyBlocking: false,
         }),
       ],
     });
@@ -287,7 +287,7 @@ describe("a gate nobody has decided is a next action (#86)", () => {
     // started blocking, the stage would stop being offered and this fails there first.
     const result = plan({
       stages: [{ stageId: "script", status: "never_run", requiredGates: ["style-note"] }],
-      gates: [gateStatus({ gateId: "style-note", state: "pending", blocking: false })],
+      gates: [gateStatus({ gateId: "style-note", state: "pending", currentlyBlocking: false })],
     });
 
     expect(result.next.map((action) => action.stageId)).toEqual(["script"]);

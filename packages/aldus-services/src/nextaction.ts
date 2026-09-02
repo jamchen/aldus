@@ -177,7 +177,7 @@ const DECIDABLE_STATES = new Set(["pending", "stale", "changes_requested"]);
 
 /** True when the gate stops work (contract §12: an advisory gate never blocks). */
 function isBlocking(gate: GateStatus): boolean {
-  return gate.blocking;
+  return gate.currentlyBlocking;
 }
 
 /**

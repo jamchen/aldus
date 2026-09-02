@@ -8,6 +8,49 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.57 — 2026-09-02
+
+### BREAKING
+
+**`GateStatus.blocking` is renamed `GateStatus.currentlyBlocking`** (`@aldus-runtime/gate-engine`,
+and therefore `StatusReport.gates[]` in `@aldus-runtime/services` and the `gates[]` rows of
+`aldus status --json`). The value is unchanged: `true` exactly when the gate's `enforcement` is
+`blocking` **and** its `state` is neither `satisfied` nor `waived` — whether the gate is stopping
+work right now, not what it was declared to be.
+
+<!-- breaking: aldus-gate-engine:GateStatus.currentlyBlocking -->
+
+Migration: rename the field at every read and every construction. A type-checked reader finds every
+site by compiling; a reader of `--json` output has to look, since `blocking` will simply be absent
+and `currentlyBlocking` present. Nothing else about the row moved: `enforcement` still carries the
+declared class, as it always did.
+
+Why a rename and not a note (#204). The display defect fixed in `next.27` — a satisfied blocking
+gate printed `(advisory)` — was the renderer reading `blocking` as though it held the declared
+enforcement. It never did; its docstring said so. But the name asked to be read that way, and in the
+only adopter that exists it was wrong in **every** instance: twelve gate declarations, twelve
+`enforcement: "blocking"`, so `(advisory)` was never once true there and had become a second
+vocabulary meaning "satisfied" that nobody declared. Fixing the renderer fixed one reader. Renaming
+the field for the fact it holds is what stops the next renderer, the next `--json` consumer and the
+next test double from making the same substitution; the first adopter proposed it under that name
+and the coordinator ruled for it on 2026-08-25.
+
+### Fixed
+
+**`aldus status` prints the declared enforcement and, separately, whether the gate is stopping work
+now, from the fields that hold each fact.** The row is unchanged from `next.27`:
+
+```
+  script.freeze   satisfied  (blocking)
+  outline.freeze  pending    (blocking) — stops work
+  lint.report     pending    (advisory)
+```
+
+What is new is a test that the renderer reads `currentlyBlocking` and not a row's `blocking`, so a
+payload still carrying the old name stops nothing — the rename is only a rename if the renderer
+followed it — and a mutant case (`run-mutants.mjs`) that restores the pre-`next.27` label and
+asserts the test catches it.
+
 ## 0.2.0-next.56 — 2026-09-02
 
 ### BREAKING

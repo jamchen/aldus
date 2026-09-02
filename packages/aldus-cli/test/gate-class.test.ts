@@ -12,7 +12,7 @@ import { renderStatus } from "../src/index.js";
  * run saw every passing gate in their repository reported as advisory, and none of them is.
  *
  * The gates it misdescribed were exactly the ones that had already done their job, because being
- * satisfied is what makes `blocking` false.
+ * satisfied is what makes `currentlyBlocking` false.
  */
 
 type Gate = Record<string, unknown>;
@@ -39,13 +39,13 @@ const gate = (over: Gate): Gate => ({
   level: "content_freeze",
   enforcement: "blocking",
   state: "satisfied",
-  blocking: false,
+  currentlyBlocking: false,
   ...over,
 });
 
 describe("a gate's class is not its state", () => {
   it("calls a satisfied blocking gate blocking, not advisory", () => {
-    const out = renderStatus(report([gate({ state: "satisfied", blocking: false })]));
+    const out = renderStatus(report([gate({ state: "satisfied", currentlyBlocking: false })]));
     expect(out).toContain("script.freeze  satisfied  (blocking)");
     expect(out).not.toContain("advisory");
   });
@@ -58,14 +58,25 @@ describe("a gate's class is not its state", () => {
   });
 
   it("says separately when a gate is stopping work right now", () => {
-    const out = renderStatus(report([gate({ state: "pending", blocking: true })]));
+    const out = renderStatus(report([gate({ state: "pending", currentlyBlocking: true })]));
     expect(out).toContain("(blocking)");
     expect(out).toContain("stops work");
   });
 
+  it("reads `currentlyBlocking`, not the pre-#204 `blocking`", () => {
+    // The rename is only a rename if the renderer followed it. A row that carries `blocking` under
+    // the old name — a payload built before the rename — must not print "stops work", or the
+    // renderer is still reading the field the type no longer has.
+    const out = renderStatus(
+      report([gate({ state: "pending", currentlyBlocking: false, blocking: true })]),
+    );
+    expect(out).toContain("(blocking)");
+    expect(out).not.toContain("stops work");
+  });
+
   it("does not say a satisfied gate stops work", () => {
     // The control: the two facts must not collapse back into one in the other direction either.
-    const out = renderStatus(report([gate({ state: "satisfied", blocking: false })]));
+    const out = renderStatus(report([gate({ state: "satisfied", currentlyBlocking: false })]));
     expect(out).not.toContain("stops work");
   });
 });
@@ -80,7 +91,7 @@ describe("status says why a gate is stuck", () => {
         gate({
           gateId: "caption.sync",
           state: "pending",
-          blocking: true,
+          currentlyBlocking: true,
           missingSubjects: ["subtitle/sync-report"],
           explanation:
             'Gate "caption.sync" has no recorded decision, and "subtitle/sync-report" has not ' +
@@ -98,7 +109,7 @@ describe("status says why a gate is stuck", () => {
         gate({
           gateId: "release.upload",
           state: "blocked_upstream",
-          blocking: true,
+          currentlyBlocking: true,
           missingSubjects: ["release/receipt"],
           blockedBy: ["caption.sync"],
         }),
@@ -113,7 +124,9 @@ describe("status says why a gate is stuck", () => {
     // The control. Noise is how an explanation stops being read, so a gate that is fine says
     // nothing beyond its row.
     const out = renderStatus(
-      report([gate({ state: "satisfied", blocking: false, explanation: "should not appear" })]),
+      report([
+        gate({ state: "satisfied", currentlyBlocking: false, explanation: "should not appear" }),
+      ]),
     );
 
     expect(out).not.toContain("should not appear");

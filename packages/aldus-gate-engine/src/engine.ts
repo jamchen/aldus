@@ -107,13 +107,19 @@ export interface GateStatus {
   /** Operator-facing explanation of why work may not proceed past this gate. */
   explanation?: string;
   /**
-   * Whether this state stops work.
+   * Whether this gate is stopping work **right now** — `enforcement` is `blocking` and `state` is
+   * neither `satisfied` nor `waived`.
    *
    * An advisory gate is never blocking whatever its state — §12 level 2 "reports a possible issue
    * without blocking" — which is why enforcement and state are separate fields rather than one
    * conflated verdict.
+   *
+   * Named for the fact it holds, not the class it is derived from (#204). As `blocking` it was read
+   * as the declared enforcement and printed as `(advisory)` for every satisfied blocking gate — a
+   * word that was false in every instance for the first adopter, whose gates are all blocking. The
+   * value was right; the name invited a reader to answer the neighbouring question with it.
    */
-  blocking: boolean;
+  currentlyBlocking: boolean;
 }
 
 /** Current digests of what each gate binds, keyed by gate. */
@@ -403,7 +409,7 @@ export class GateEngine {
       return {
         ...base,
         state: "pending",
-        blocking: blocks("pending"),
+        currentlyBlocking: blocks("pending"),
         // Naming the missing values rather than only the absence of a decision: an operator told
         // "no recorded decision" goes looking for who forgot to approve, when the answer is that
         // nothing has produced what the approval would bind (§13.2).
@@ -422,7 +428,7 @@ export class GateEngine {
         ...base,
         state: latest.decision,
         decision: latest,
-        blocking: blocks(latest.decision),
+        currentlyBlocking: blocks(latest.decision),
         explanation:
           latest.comment ?? `Gate "${gate.gateId}" was ${latest.decision.replace("_", " ")}.`,
       };
@@ -439,7 +445,7 @@ export class GateEngine {
         state: "stale",
         decision: latest,
         drift,
-        blocking: blocks("stale"),
+        currentlyBlocking: blocks("stale"),
         explanation:
           `Gate "${gate.gateId}" was ${latest.decision}, but ` +
           `${drift.changed.length > 0 ? `[${drift.changed.join(", ")}] changed` : "its bound inputs changed"}` +
@@ -448,7 +454,7 @@ export class GateEngine {
     }
 
     const state: GateState = latest.decision === "waived" ? "waived" : "satisfied";
-    return { ...base, state, decision: latest, blocking: blocks(state) };
+    return { ...base, state, decision: latest, currentlyBlocking: blocks(state) };
   }
 
   /**
@@ -471,7 +477,7 @@ export class GateEngine {
 
         const blockedBy = gate.dependsOn.filter((dependency) => {
           const upstream = result.get(dependency);
-          return upstream !== undefined && upstream.blocking;
+          return upstream !== undefined && upstream.currentlyBlocking;
         });
         if (blockedBy.length === 0) continue;
         if (current.blockedBy !== undefined && sameIds(current.blockedBy, blockedBy)) continue;
@@ -497,7 +503,7 @@ export class GateEngine {
           ...current,
           state,
           blockedBy,
-          blocking: gate.enforcement === "blocking",
+          currentlyBlocking: gate.enforcement === "blocking",
           explanation: ownStateIsInformative
             ? `${current.explanation ?? `Gate "${gate.gateId}" is ${current.state}.`} Additionally, ${upstreamNote}`
             : `Gate "${gate.gateId}" cannot be relied on because ${upstreamNote}`,
