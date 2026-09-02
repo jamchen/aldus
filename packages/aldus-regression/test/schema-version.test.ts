@@ -11,10 +11,12 @@ import {
  * A record must be readable in order to be upgraded, so an older record parses and only a newer
  * one is refused (contract §12.1, ADR-0003).
  *
- * The two guards are exercised separately and deliberately. A newer record carrying an unknown
- * field is refused by strictness before the version check ever runs, so a case combining them
- * would report a pass for a mechanism that never executed — the version check is only tested by a
- * newer record whose shape is otherwise current.
+ * The two guards are exercised separately and deliberately. The version check runs on the raw
+ * input, before the shape is read, so a newer record that is also malformed reports the version
+ * code and the shape check never executes. A case combining them would therefore say nothing about
+ * strictness — the version check is tested by a newer record whose shape is otherwise current,
+ * strictness by a current record with an unknown field, and the order itself by one case that
+ * pins which code a newer-and-malformed record reports.
  */
 const run = (schemaVersion: string, extra: Record<string, unknown> = {}): unknown => ({
   schemaVersion,
@@ -122,6 +124,32 @@ describe("an undeclared newer shape", () => {
     // Same shape, different version: only the version guard can explain the difference.
     expectCode(() => parseEvaluatorRun(run("9.0")), "ALDUS_SCHEMA_VERSION_UNSUPPORTED");
     expect(() => parseEvaluatorRun(run(REGRESSION_SCHEMA_VERSION))).not.toThrow();
+  });
+});
+
+describe("a record that is both newer and malformed", () => {
+  // Version before fields (next.58): the cause is reported, not the symptom. A malformed field
+  // alone is still the shape code, so the pair of cases pins the order rather than either guard.
+  it("reports the version code on a corpus, because the version is checked first", () => {
+    expectCode(
+      () => parseDefectCorpus(corpus("9.0", { cases: "not-an-array" })),
+      "ALDUS_SCHEMA_VERSION_UNSUPPORTED",
+    );
+    expectCode(
+      () => parseDefectCorpus(corpus(REGRESSION_SCHEMA_VERSION, { cases: "not-an-array" })),
+      "ALDUS_CORPUS_MALFORMED",
+    );
+  });
+
+  it("reports the version code on a run", () => {
+    expectCode(
+      () => parseEvaluatorRun(run("9.0", { outcomes: "not-an-array" })),
+      "ALDUS_SCHEMA_VERSION_UNSUPPORTED",
+    );
+    expectCode(
+      () => parseEvaluatorRun(run(REGRESSION_SCHEMA_VERSION, { outcomes: "not-an-array" })),
+      "ALDUS_CORPUS_MALFORMED",
+    );
   });
 });
 

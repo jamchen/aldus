@@ -35,8 +35,12 @@ schemas now carries the refusal, so the rule holds whichever door a caller comes
      hand for the same reason the next.25 and next.56 entries were. -->
 
 **Migration.** A caller reading a corpus or run through `parseDefectCorpus` / `parseEvaluatorRun`
-sees no change: a newer record was already `ALDUS_SCHEMA_VERSION_UNSUPPORTED` there and still is,
-with the same code and the same `details`. A caller parsing through the schema object directly and
+sees one difference, in the order of the two guards: the version is now checked on the raw input,
+before the shape, so a record that is both newer **and** malformed reports
+`ALDUS_SCHEMA_VERSION_UNSUPPORTED` where it reported `ALDUS_CORPUS_MALFORMED` before — a caller
+matching on the shape code for such a record sees the version code instead (measured on this tree
+and on the base). A newer, well-formed record is unchanged: the same code and the same `details` as
+since `next.21`. A caller parsing through the schema object directly and
 relying on a newer record passing must decide what it meant by that — `compareSchemaVersion` is how
 to ask before parsing, and an **older** record is unchanged at both doors. The refusal's message
 names this package's own constant and never the received value.
