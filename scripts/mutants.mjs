@@ -1251,7 +1251,10 @@ export const cases = [
         replace: [
           "packages/aldus-core/src/validate.ts",
           "const dropped = droppedPaths(data, result.value);",
-          "const dropped: string[] = []; /* mutant: silent again */",
+          // The walk still runs, its answer is thrown away: `const dropped: string[] = []` left
+          // `droppedPaths` unused and the build refused under `noUnusedLocals`, so the first form of
+          // this case reported "build failed after setup" — a non-answer, not a measurement.
+          "const dropped = droppedPaths(data, result.value).slice(0, 0); /* mutant: silent again */",
         ],
       },
     ],
