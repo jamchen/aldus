@@ -1164,4 +1164,99 @@ export const cases = [
     wantExit: 1,
     wantOutput: "calls a satisfied blocking gate blocking, not advisory",
   },
+  /* ---------------------------------------------------------------------------------------------
+   * #186 / #199 — a version stamp is compared, at every door.
+   * ------------------------------------------------------------------------------------------ */
+  {
+    // #186: the value check gone, the shape check kept. `schemaVersion` still has to be
+    // MAJOR.MINOR, and any MAJOR.MINOR is accepted — the original defect, "validated just enough
+    // to look validated". Neutering the one predicate both doors share removes it from the parse
+    // functions and the exported schemas at once, so the measurement is of the rule, not one door.
+    name: "schema-version: dropping the value check lets a newer regression record parse",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-regression/src/corpus.ts",
+          'compareSchemaVersion(value) === "newer";',
+          "false; /* mutant: shape check only */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-regression",
+      "test/schema-version.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "is refused by parseEvaluatorRun",
+  },
+  {
+    // #199, regression side: the exported schema loses the rule while the parse function keeps
+    // it — the reachability hole exactly as measured on 2026-08-25. `String.replace` edits the
+    // first occurrence, which is `defectCorpusSchema`; the enumerating test must name that door.
+    name: "schema-version: an exported regression schema without the rule is found by enumeration",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-regression/src/corpus.ts",
+          "schemaVersion: recordSchemaVersion,",
+          "schemaVersion: schemaVersionString, /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-regression",
+      "test/exported-schemas-carry-the-rule.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "defectCorpusSchema refuses a newer minor",
+  },
+  {
+    // #199, core side: one export slips out of the combinator. A hand-listed test would need the
+    // maintainer who forgot the guard to remember the list; the sweep needs neither.
+    name: "schema-version: an exported core schema without the combinator is found by enumeration",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/schema/index.ts",
+          "export const artifactRefSchema = withForeignMajorRefused(artifactRefSchemaBase);",
+          "export const artifactRefSchema = artifactRefSchemaBase; /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-core",
+      "test/exported-schemas-carry-the-rule.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "artifactRefSchema refuses a foreign major",
+  },
+  {
+    // #199, the third order of the ruling: the enforcing path reports what it dropped. Silenced,
+    // a forward read returns to `compatibility: "forward"` with nothing said about the loss.
+    name: "schema-version: silencing droppedPaths returns a forward read to a silent one",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-core/src/validate.ts",
+          "const dropped = droppedPaths(data, result.value);",
+          "const dropped: string[] = []; /* mutant: silent again */",
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-core", "test/validate.test.ts"],
+    wantExit: 1,
+    wantOutput: "names the paths a forward read dropped, and never their values",
+  },
 ];

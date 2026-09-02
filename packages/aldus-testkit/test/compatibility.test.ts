@@ -186,6 +186,37 @@ describe("forward compatibility", () => {
     }
   });
 
+  // #199: a forward read is where a non-strict parse loses something, and until `droppedPaths` the
+  // loss was silent even on the enforcing path. Data-driven over the corpus, so the walker is
+  // exercised on every record shape that has a nested array of objects rather than on one.
+  it("names a drop nested inside a declared array, at its exact path", () => {
+    let probed = 0;
+    for (const fixture of versionedFixtures) {
+      const name = fixture.entry.schema as VersionedSchemaName;
+      const record = structuredClone(fixture.record) as Record<string, unknown>;
+      const arrayKey = Object.keys(record).find((key) => {
+        const value = record[key];
+        return (
+          Array.isArray(value) &&
+          value.length > 0 &&
+          typeof value[0] === "object" &&
+          value[0] !== null
+        );
+      });
+      if (arrayKey === undefined) continue;
+      probed += 1;
+      const first = (record[arrayKey] as Record<string, unknown>[])[0]!;
+      first["fieldFromAFutureMinorVersion"] = "value-this-build-cannot-interpret";
+      const result = validateRecord(name, withVersion(record, nextMinor(SCHEMA_VERSION)));
+      expect(result.ok, `${name} could not read the record`).toBe(true);
+      if (!result.ok) continue;
+      expect(result.droppedPaths).toContain(`${arrayKey}[0].fieldFromAFutureMinorVersion`);
+      expect(JSON.stringify(result.droppedPaths)).not.toContain("value-this-build");
+    }
+    // A positive control: a corpus with no such shape would have asserted nothing.
+    expect(probed).toBeGreaterThan(0);
+  });
+
   it("classifies an older minor version as compatible", () => {
     expect(checkSchemaVersion("1.0", "1.7")).toBe("compatible");
     expect(checkSchemaVersion("1.7", "1.7")).toBe("compatible");

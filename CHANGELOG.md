@@ -8,6 +8,63 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.58 — 2026-09-02
+
+Closes the remainder of #186 and #199. Most of both rulings shipped on 2026-08-25 (`next.21`,
+`next.25`): the regression parsers compare `schemaVersion` by value and are strict, and every
+exported `core` schema refuses a foreign major through one combinator with a test that enumerates
+the exports. What had not shipped is below — one behaviour change, one addition, and the rule
+written down.
+
+### BREAKING
+
+**`@aldus-runtime/regression`: `defectCorpusSchema.safeParse` and `evaluatorRunSchema.safeParse`
+now refuse a record whose `schemaVersion` is newer than `REGRESSION_SCHEMA_VERSION`, minor
+included — the same rule `parseDefectCorpus` and `parseEvaluatorRun` have applied since `next.21`.**
+
+Until now the two doors disagreed: the parse functions refused a `1.16` or `2.0` record and the
+exported schema objects, reachable from the same index, accepted the identical bytes (#199, measured
+2026-08-25 and again on this tree). A consumer composing with the exported schema — `.extend`,
+`.pick`, or a plain `safeParse` — got no version rule at all. The `schemaVersion` field of both
+schemas now carries the refusal, so the rule holds whichever door a caller comes through.
+
+<!-- No machine marker: check-breaking-notes reports no surface finding, because no signature
+     changed — both schemas are still `ZodObject`s with the same shape. The break is behavioural: a
+     `safeParse` that returned `success: true` for a newer record now returns an issue at path
+     `schemaVersion`. `SCHEMA_VERSION` does not move, because no schema field changed. Written by
+     hand for the same reason the next.25 and next.56 entries were. -->
+
+**Migration.** A caller reading a corpus or run through `parseDefectCorpus` / `parseEvaluatorRun`
+sees no change: a newer record was already `ALDUS_SCHEMA_VERSION_UNSUPPORTED` there and still is,
+with the same code and the same `details`. A caller parsing through the schema object directly and
+relying on a newer record passing must decide what it meant by that — `compareSchemaVersion` is how
+to ask before parsing, and an **older** record is unchanged at both doors. The refusal's message
+names this package's own constant and never the received value.
+
+### Added
+
+**`validateRecord` and `assertValidRecord` in `@aldus-runtime/core` return `droppedPaths`** — the
+paths of properties the record carried and this build's schema does not declare — whenever the
+parse discarded something (#199). A `forward` read is where that ordinarily happens: a newer minor
+added a field, this build stripped it, and `compatibility: "forward"` told the caller the record
+was newer without telling them what they lost. Paths only, never values (§19.2); a dropped subtree
+is reported once at its root; the field is absent rather than empty when nothing was dropped, so its
+presence is the signal. Additive on both return types — an existing destructure of `{ value,
+compatibility }` compiles and behaves as before.
+
+### Changed
+
+**The two compatibility rules are written down side by side** (ADR-0053, amendment; cross-referenced
+from ADR-0003). Same-major readability is a property of `core`'s records and not of `regression`'s:
+`core` reads a newer minor and reports it `forward`, because its schemas strip unknown properties;
+`regression` refuses one, because its schemas are strict and a corpus whose fields vanish is a wrong
+number. Neither converges on the other, and the ADR says why. Until now the contract was silent, and
+a consumer learning one package's behaviour reasonably inferred the other's.
+
+**Mutants for the rule**, four cases in `scripts/mutants.mjs`: the value check dropped; an exported
+`regression` schema without the rule; an exported `core` schema outside the combinator; and
+`droppedPaths` silenced. Each is caught by the test that names it.
+
 ## 0.2.0-next.57 — 2026-09-02
 
 ### BREAKING

@@ -198,6 +198,39 @@ describe("validateRecord (ADR-0003)", () => {
     if (result.ok) expect(result.compatibility).toBe("forward");
   });
 
+  // #199: `compatibility: "forward"` said the record came from a newer build and nothing said what
+  // the parse discarded on the way. The loss was silent even on the enforcing path.
+  it("names the paths a forward read dropped, and never their values", () => {
+    const secretValue = "value-this-build-cannot-interpret";
+    const result = validateRecord("EpisodeRef", {
+      ...episode,
+      schemaVersion: NEWER_MINOR,
+      fieldFromTheFuture: { nested: secretValue },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.compatibility).toBe("forward");
+    // The subtree is reported once at its root — its interior is the other build's schema, not
+    // this one's. A drop nested inside a declared array is located in the testkit's
+    // compatibility suite, which has fixtures with that shape.
+    expect(result.droppedPaths).toEqual(["fieldFromTheFuture"]);
+    expect(JSON.stringify(result.droppedPaths)).not.toContain(secretValue);
+  });
+
+  it("reports nothing dropped when nothing was, so the field's presence is itself the signal", () => {
+    const result = validateRecord("EpisodeRef", episode);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect("droppedPaths" in result).toBe(false);
+  });
+
+  it("names a dropped path on a compatible read too, because the loss is the same loss", () => {
+    const result = validateRecord("EpisodeRef", { ...episode, undeclaredHere: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.compatibility).toBe("compatible");
+    expect(result.droppedPaths).toEqual(["undeclaredHere"]);
+  });
+
   it("refuses a differing major version", () => {
     const result = validateRecord("EpisodeRef", { ...episode, schemaVersion: "2.0" });
     expect(result.ok).toBe(false);
@@ -237,6 +270,18 @@ describe("assertValidRecord", () => {
     const { value, compatibility } = assertValidRecord("EpisodeRef", episode);
     expect(value.showId).toBe("example-show");
     expect(compatibility).toBe("compatible");
+  });
+
+  it("carries the dropped paths through, so the throwing door reports the same loss", () => {
+    const [major, minor] = SCHEMA_VERSION.split(".").map(Number) as [number, number];
+    const result = assertValidRecord("EpisodeRef", {
+      ...episode,
+      schemaVersion: `${major}.${minor + 1}`,
+      fieldFromTheFuture: 1,
+    });
+    expect(result.compatibility).toBe("forward");
+    expect(result.droppedPaths).toEqual(["fieldFromTheFuture"]);
+    expect("droppedPaths" in assertValidRecord("EpisodeRef", episode)).toBe(false);
   });
 
   it("throws ALDUS_SCHEMA_VERSION_UNSUPPORTED for a differing major", () => {
