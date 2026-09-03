@@ -1530,4 +1530,139 @@ export const cases = [
     wantExit: 1,
     wantOutput: "parks when the port throws",
   },
+  /* ---------------------------------------------------------------------------------------------
+   * #278 / ADR-0059 — a settled gate is not a wait, and the stage parked on it is runnable.
+   *
+   * Two halves, measured separately because they are separate questions: what the derived status
+   * says, and what the operator surface prints and offers. The sixth case is the composition — the
+   * derivation had the stage record and not the gate states, and each half was individually right.
+   * ------------------------------------------------------------------------------------------ */
+  {
+    // The classification gone: every parked attempt is a wait again, which is the reported defect
+    // exactly. Measured in the pure rules, where the precedence is asserted directly.
+    name: "settled-gate: treating every parked attempt as a wait restores the permanent waiting Run",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/runstate.ts",
+          "    if (stage.gateId !== undefined && settled.has(stage.gateId)) {",
+          "    if (false /* mutant */) {",
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/runstate.test.ts"],
+    wantExit: 1,
+    wantOutput: "is not waiting, and does not name the settled gate",
+  },
+  {
+    // The negative control, and the one #241's own table needed too: a rule that ignores which
+    // gate a stage parked at would pass every positive case above while releasing a stage whose
+    // gate nobody has decided.
+    name: "settled-gate: ignoring the parked gate id releases a stage from any settled gate",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/runstate.ts",
+          "    if (stage.gateId !== undefined && settled.has(stage.gateId)) {",
+          "    if (stage.gateId !== undefined && settled.size > 0) {\n      /* mutant */",
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/runstate.test.ts"],
+    wantExit: 1,
+    wantOutput: "releases only the stage whose own gate is settled",
+  },
+  {
+    // Decision 2 of the ADR, as a measurement. Widened to #241's decision-exists grain, a
+    // changes-requested gate would stop being named — and an operator's outstanding approval
+    // would read as a Run quietly in progress.
+    name: "settled-gate: widening settled to any recorded decision stops naming an outstanding one",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/nextaction.ts",
+          'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived"]);',
+          'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived", "changes_requested", "rejected"]); /* mutant */',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/runstate.test.ts"],
+    wantExit: 1,
+    wantOutput: "keeps waiting on a gate that asked for changes",
+  },
+  {
+    // The plan's half of the same defect, and the sharper one: before ADR-0059 the parked stage
+    // reached neither `next` nor `blocked`, so the only act that moves the Run was the only one
+    // missing. Dropping the registration restores exactly that silence.
+    name: "settled-gate: not registering the released park leaves the plan silent about the stage",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/nextaction.ts",
+          "      releasedParks.set(stage.stageId, gate.gateId);",
+          "      /* mutant: registered nowhere */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/nextaction.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "offers running the stage again, not deciding the gate",
+  },
+  {
+    // The display. The gate leaves the "Waiting" line either way once the derivation is right, so
+    // a renderer that prints nothing in its place is the plausible regression: accurate about the
+    // status, silent about the one outstanding act.
+    name: "settled-gate: a renderer that drops the released park says nothing an operator can act on",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-cli/src/render.ts",
+          '      `Released ${park.stageId}  — gate "${park.gateId}" has been decided; run the stage again`,',
+          "      `` /* mutant */,",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-cli",
+      "test/parked-on-decided-gate.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "says the stage is parked on a decision already made, and to run it again",
+  },
+  {
+    // The composition, measured across the package boundary the defect lived on. `#runState` is
+    // the listing path; handed no gate states it cannot tell a released park from a wait, and a
+    // directory of Runs goes back to reporting `waiting` forever.
+    name: "settled-gate: the Run listing handed no gate states reports waiting forever again",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/services.ts",
+          "    return deriveRunState(manifest, stages, this.#context.workflow, gates);",
+          "    return deriveRunState(manifest, stages, this.#context.workflow, []); /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-e2e",
+      "test/parked-on-decided-gate.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "reports the same thing in a list of Runs, which reads its own path",
+  },
 ];

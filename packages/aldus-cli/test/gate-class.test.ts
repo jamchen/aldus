@@ -26,7 +26,7 @@ const report = (gates: Gate[]): StatusReport =>
     summary: "one run",
     focused: {
       run: { runId: "run-a", workflowId: "wf", workflowVersion: "1" },
-      state: { status: "in_progress", waitingOn: [], currentStage: undefined },
+      state: { status: "in_progress", waitingOn: [], releasedStages: [], currentStage: undefined },
       stages: [],
       gates,
       costs: { recordCount: 0, byCurrency: {}, unknown: 0 },

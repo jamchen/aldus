@@ -1498,8 +1498,16 @@ export class AldusServices {
     return this.#context.actor ?? { kind: "system", id: "aldus-services" };
   }
 
-  /** Derive one Run's state from its stage executions (ADR-0026). */
+  /**
+   * Derive one Run's state from its stage executions and its gates (ADR-0026, ADR-0059).
+   *
+   * The gates are read here and not only in {@link AldusServices.#policyInput} because a *list*
+   * needs them too: a stage parked on a gate that has since been settled is released, not waiting,
+   * and without the gate states this line would report `waiting` forever for a Run whose path
+   * completed through another stage (#278).
+   */
   async #runState(runId: string, manifest: RunManifest, runner: StageRunner): Promise<RunState> {
+    const gates = await this.#gateStatuses(runId);
     const state = await runner.stageState(runId);
     const stages = this.#stageReports(state.stages).map((report) =>
       toSnapshot(
@@ -1508,7 +1516,7 @@ export class AldusServices {
         this.#context.predecessorsFor(report.stageId),
       ),
     );
-    return deriveRunState(manifest, stages, this.#context.workflow);
+    return deriveRunState(manifest, stages, this.#context.workflow, gates);
   }
 
   /** Load a Run or fail with a clear cause. */
@@ -1557,7 +1565,7 @@ export class AldusServices {
       // a cancelled or completed Run; before ADR-0026 it simply never received either.
       run: {
         runId: manifest.runId,
-        status: deriveRunState(manifest, stages, this.#context.workflow).status,
+        status: deriveRunState(manifest, stages, this.#context.workflow, gates).status,
       },
       // Required gates are resolved here rather than inside the policy, so `decideActions` stays
       // a pure function of state and the workflow graph stays a caller concern (ADR-0021).
@@ -1586,7 +1594,7 @@ export class AldusServices {
 
     return {
       run: manifest,
-      state: deriveRunState(manifest, input.stages, this.#context.workflow),
+      state: deriveRunState(manifest, input.stages, this.#context.workflow, input.gates),
       stages,
       gates: input.gates as GateStatus[],
       costs: summariseCosts(costRecords),

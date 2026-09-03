@@ -16,8 +16,22 @@
 
 import type { RunStatus } from "@aldus-runtime/core";
 
-import type { StageSnapshot } from "./nextaction.js";
+import { gateIsSettled, type GateSettlement, type StageSnapshot } from "./nextaction.js";
 import type { WorkflowGraph } from "./workflow.js";
+
+/**
+ * A parked stage whose gate has since been settled (ADR-0059; #241, #278).
+ *
+ * Not a wait: the decision exists, so the stage is runnable and nothing but running it will move
+ * it. It is reported rather than silently dropped, because a parked attempt nobody re-runs is
+ * still a fact about the Run — and the operator's action is `run`, not `approve`.
+ */
+export interface ReleasedPark {
+  /** The stage whose latest attempt is `waiting_for_gate`. */
+  stageId: string;
+  /** The gate it parked at, now `satisfied` or `waived`. */
+  gateId: string;
+}
 
 /** The parts of a Run manifest that determine its state. */
 export interface RunStateSource {
@@ -48,8 +62,20 @@ export interface RunState {
    *
    * Named at the Run level because "waiting" alone sends an operator hunting through a workflow's
    * gates to find which one. The per-stage detail already existed; it simply was not surfaced up.
+   *
+   * **A settled gate is never here** (ADR-0059). Before that, every gate a parked attempt named
+   * appeared for as long as the record existed, so `status` told an operator to go and decide
+   * something that had already been decided — and `waitingOn` was the field it read (#278).
    */
   waitingOn: readonly string[];
+  /**
+   * Parked stages whose gate has since been settled (ADR-0059).
+   *
+   * These are why the Run is *not* `waiting` despite a `waiting_for_gate` attempt in the record:
+   * a decided gate releases the stage parked on it (#241), so the outstanding action is to run
+   * the stage again. Empty in the ordinary case.
+   */
+  releasedStages: readonly ReleasedPark[];
   /** The goals in force, whether declared on the Run or defaulted from the graph. */
   goalStages: readonly string[];
   /** Goals not yet succeeded. Empty when every goal is met — or when none were declared. */
@@ -87,7 +113,10 @@ export function goalStagesFor(
  * 1. **cancelled** — an explicit record beats any amount of observed activity, because a human
  *    said so and no later event revokes that.
  * 2. **running** — something is in flight right now.
- * 3. **waiting** — halted at a gate. §5.1 makes this an ordinary resting state, not an error.
+ * 3. **waiting** — halted at a gate **that still awaits a decision**. §5.1 makes this an ordinary
+ *    resting state, not an error. A stage parked on a gate that has since been settled is
+ *    *released*, not waiting (ADR-0059): the decision exists, the stage can be run again, and
+ *    nothing an operator does to the gate would change anything.
  * 4. **completed** — every declared goal succeeded.
  * 5. **failed** — a stage's latest attempt failed.
  * 6. **created** — nothing has run.
@@ -99,11 +128,19 @@ export function goalStagesFor(
  * suppress completion would make a Run permanently uncompletable after a single bad afternoon,
  * and the only escape would be a new Run, abandoning the accepted paid takes attached to the old
  * one (§15.1).
+ *
+ * `gates` is **required**, not optional with a default (ADR-0059). A caller who omitted it would
+ * silently get the pre-#278 answer — every parked attempt a permanent wait — which is exactly the
+ * defect, restored by forgetting an argument. Pass `[]` to state that no gate states are
+ * available; a gate absent from the list is then evaluated conservatively as still awaiting a
+ * decision, since an unknown gate is not evidence that one exists (the same rule ADR-0021 applies
+ * to an unknown stage).
  */
 export function deriveRunState(
   source: RunStateSource,
   stages: readonly StageSnapshot[],
   graph: WorkflowGraph | undefined,
+  gates: readonly GateSettlement[],
 ): RunState {
   const goalStages = goalStagesFor(source, graph);
   const succeeded = new Set(
@@ -114,12 +151,28 @@ export function deriveRunState(
   const inFlight = stages.filter(
     (stage) => stage.status === "running" || stage.status === "queued",
   );
-  const halted = stages.filter((stage) => stage.status === "waiting_for_gate");
+  // A parked attempt is one of two very different things, and before ADR-0059 both read as the
+  // first: a gate someone still has to decide, or a gate that has been decided and therefore
+  // releases the stage (#241). Only the first is a wait.
+  const settled = new Set(
+    gates.filter((gate) => gateIsSettled(gate.state)).map((gate) => gate.gateId),
+  );
+  const parked = stages.filter((stage) => stage.status === "waiting_for_gate");
+  const releasedStages: ReleasedPark[] = [];
+  const halted: StageSnapshot[] = [];
+  for (const stage of parked) {
+    // An attempt parked with no gate recorded cannot be shown to be released, so it stays a wait.
+    if (stage.gateId !== undefined && settled.has(stage.gateId)) {
+      releasedStages.push({ stageId: stage.stageId, gateId: stage.gateId });
+    } else {
+      halted.push(stage);
+    }
+  }
   const waitingOn = [
     ...new Set(halted.flatMap((stage) => (stage.gateId === undefined ? [] : [stage.gateId]))),
   ];
 
-  const base = { waitingOn, goalStages, outstandingGoals };
+  const base = { waitingOn, goalStages, outstandingGoals, releasedStages };
 
   if (source.cancellation !== undefined) {
     return { ...base, status: "cancelled", waitingOn: [] };
@@ -166,6 +219,10 @@ export function deriveRunState(
   // makes long pauses ordinary, so "in progress" cannot mean "a process is executing right now".
   // `waiting` is reserved for being halted at a gate, which is a different thing an operator
   // acts on differently.
+  //
+  // A released park lands here too, and `running` is the honest answer for it: the work outstanding
+  // is a stage to run, exactly like a stage that has never run. `releasedStages` says which one,
+  // so "in progress" is not the whole answer an operator gets (ADR-0059).
   const started = stages.some((stage) => stage.status !== "never_run");
   return {
     ...base,
