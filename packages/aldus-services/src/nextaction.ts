@@ -22,7 +22,43 @@
  * asserted directly rather than inferred from an integration test.
  */
 
-import type { GateStatus } from "@aldus-runtime/gate-engine";
+import type { GateState, GateStatus } from "@aldus-runtime/gate-engine";
+
+/**
+ * The part of a gate's status that says whether anything is still awaiting a decision on it
+ * (contract §13; ADR-0059).
+ *
+ * Structurally typed so the rules can be exercised against hand-built states without evaluating a
+ * gate engine, and `GateState` is imported rather than widened to `string`: the two states that
+ * release a parked stage are named values, and a typo in a caller's literal must not read as
+ * "still awaiting a decision".
+ */
+export interface GateSettlement {
+  gateId: string;
+  /** The gate's **derived** state, as `GateEngine.evaluate` reports it (ADR-0009). */
+  state: GateState;
+}
+
+/**
+ * Gate states in which nothing awaits a decision (contract §13; ADR-0059).
+ *
+ * Deliberately the gate's **state**, not `currentlyBlocking`. An advisory gate is never
+ * `currentlyBlocking` whatever its state, so reading that field here would report a stage parked
+ * on an *undecided* advisory gate as released — the #204 confusion of a gate's class with what is
+ * true of it right now, one field over and in the more dangerous direction.
+ *
+ * `rejected` and `changes_requested` are deliberately **not** settled, even though #241's runner
+ * predicate unparks the stage for any recorded decision. The two questions differ: the runner asks
+ * "may this stage be claimed", and the answer is yes; the plan and the derived status ask "is
+ * anything outstanding", and the answer is a fresh decision, which is what `status` must go on
+ * naming (ADR-0059).
+ */
+const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived"]);
+
+/** True when a gate is settled: `satisfied` or `waived`, so no decision is outstanding on it. */
+export function gateIsSettled(state: GateState): boolean {
+  return SETTLED_GATE_STATES.has(state);
+}
 
 /** Terminal and in-flight states a stage can be in (contract §6.3). */
 export type StageSummaryStatus =
@@ -246,11 +282,29 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
   }
 
   // 2. Gates a stage is halted on.
+  //
+  /**
+   * Stages parked on a gate that has since been settled, by stage id (ADR-0059; #241, #278).
+   *
+   * Filled here and drained by the stage loop below, where the same ordering, gate and spend
+   * blockers as any other runnable stage are consulted — a released park is a stage to run, so it
+   * must not reach an operator through a second, thinner code path.
+   */
+  const releasedParks = new Map<string, string>();
   const haltedGateIds = new Set<string>();
   for (const stage of stages) {
     if (stage.status !== "waiting_for_gate" || stage.gateId === undefined) continue;
     haltedGateIds.add(stage.gateId);
     const gate = gateById.get(stage.gateId);
+
+    // Decided, so there is nothing to decide. Before ADR-0059 this fell through every arm below
+    // and the plan said nothing at all about the stage: not offered, not blocked, and the gate
+    // still named as the Run's wait. The operator was told to decide something they had decided,
+    // and never told the one thing that would move it — run the stage again (#278).
+    if (gate !== undefined && gateIsSettled(gate.state)) {
+      releasedParks.set(stage.stageId, gate.gateId);
+      continue;
+    }
 
     if (gate === undefined) {
       blocked.push({
@@ -356,7 +410,13 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
       });
       continue;
     }
-    if (stage.status !== "never_run" && stage.status !== "queued") continue;
+    // A released park is a runnable stage, and it takes this path rather than one of its own so
+    // that ordering, the *other* gates it requires, and unresolved spend are all still consulted
+    // (ADR-0059). Only the sentence at the end differs, because what an operator needs to know is
+    // different: this stage has run and stopped, and the stop has been answered.
+    const releasedFromGate = releasedParks.get(stage.stageId);
+    if (stage.status !== "never_run" && stage.status !== "queued" && releasedFromGate === undefined)
+      continue;
 
     // Ordering before gates: when both hold a stage, running the predecessor is what makes
     // progress, and the gate may not be decidable until the predecessor has produced what it
@@ -403,9 +463,15 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
 
     next.push({
       kind: "run-stage",
-      summary: `Run "${stage.stageId}": it has not run in this Run yet.`,
+      summary:
+        releasedFromGate === undefined
+          ? `Run "${stage.stageId}": it has not run in this Run yet.`
+          : `Run "${stage.stageId}" again: it is parked at gate "${releasedFromGate}", which ` +
+            "has been decided. The decision releases the stage, and running it is the only " +
+            "thing that moves it.",
       command: `aldus run ${stage.stageId} --run ${run.runId}`,
       stageId: stage.stageId,
+      ...(releasedFromGate === undefined ? {} : { gateId: releasedFromGate }),
       priority: PRIORITY.runStage,
     });
   }

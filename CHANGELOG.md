@@ -8,6 +8,60 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.62 — 2026-09-03
+
+### BREAKING
+
+**`deriveRunState` takes the gate states, and `RunState` carries the parks a decision released.**
+Three changes to one surface, and the third is the one a compiler cannot show you.
+
+<!-- breaking: aldus-services:RunState.releasedStages -->
+
+- **`deriveRunState(source, stages, graph)` → `deriveRunState(source, stages, graph, gates)`.** The
+  fourth argument is `readonly { gateId, state }[]` — the same `GateStatus` rows `status` already
+  renders satisfy it structurally, so pass `gates` from your report or
+  `await gateEngine.evaluate(...)`. It is required rather than defaulted on purpose: the default
+  would be the old, wrong answer, restored by forgetting an argument. Pass `[]` to keep the previous
+  behaviour exactly — every parked attempt reads as a wait — and a gate missing from the list is
+  treated conservatively as still awaiting a decision.
+- **`RunState.releasedStages` is a new required member**, `readonly { stageId, gateId }[]`. If you
+  construct a `RunState` yourself (a test double, a fixture), add `releasedStages: []`. If you only
+  read one, nothing to do but see the next point.
+- **`RunState.waitingOn` means something narrower.** It no longer contains a gate that is
+  `satisfied` or `waived`. This compiles unchanged and returns a different list, which is the shape
+  no `.d.ts` comparison can catch: if you render `waitingOn` as "gates awaiting a decision" it is
+  now true, and if you relied on it enumerating every gate any parked attempt ever named, read
+  `releasedStages` for the rest. `aldus status` prints those as
+  `Released <stage> — gate "<gate>" has been decided; run the stage again`.
+
+- **`RunState.status` can return a different value for records that have not changed.** A Run whose
+  only unfinished stage is parked on a gate that has since been `satisfied` or `waived` reported
+  `waiting` and now reports `completed` or `running`. Nothing in the stored records moved — the
+  status is derived on read (ADR-0026) — so a consumer switching on `status`, alerting on
+  `waiting`, or asserting it in a fixture sees the change without any write having happened. If you
+  need the old reading, ask the gate states yourself: the Run is waiting in the pre-`next.62` sense
+  when `waitingOn` is non-empty **or** `releasedStages` is.
+
+### Changed
+
+**A stage parked on a gate that has since been decided no longer keeps a Run `waiting` forever, and
+`status` no longer names that gate as something to decide.** Reproduced by the first adopter on a
+real Run: a stage threw a gate-required signal and parked, the operator decided the gate, a
+_different_ stage consumed the decision and succeeded, and the path finished — after which the Run
+reported `waiting` for as long as the record existed, named a `satisfied` gate as its wait, and
+offered no action that cleared either. The plan said nothing at all about the parked stage: its
+halted-gate arm found the gate undecidable, and its runnable-stage arm skipped a status that was
+neither `never_run` nor `queued`.
+
+A gate that is `satisfied` or `waived` now **releases** the stage parked on it — #241's rule read
+one level up, at the Run rather than the runner — so such a Run reports `completed` (or `running`
+when the park is itself an outstanding goal), lists the released park, and offers the one act that
+moves it: run the stage again. Settled deliberately means `satisfied` or `waived` and not merely
+decided: after a rejection or a changes-requested a fresh decision _is_ outstanding, and `status`
+must go on naming it. Nothing rewrites the record — the `waiting_for_gate` attempt §6.3 keeps stays
+exactly as it was, and the status is still derived on read (ADR-0026). Rationale: ADR-0059. Closes
+#278; refs #204, #241, #275.
+
 ## 0.2.0-next.61 — 2026-09-03
 
 ### Changed

@@ -68,11 +68,13 @@ export {
   enforcedBlockerFor,
   enforcedGateBlockerFor,
   gateBlockerFor,
+  gateIsSettled,
   orderingBlockerFor,
   type ActionPlan,
   type ActionPolicyInput,
   type BlockedAction,
   type BlockEnforcement,
+  type GateSettlement,
   type NextAction,
   type RunSnapshot,
   type StageBlocker,
@@ -97,7 +99,13 @@ export {
   type ReworkVerdict,
 } from "./rework.js";
 
-export { deriveRunState, goalStagesFor, type RunState, type RunStateSource } from "./runstate.js";
+export {
+  deriveRunState,
+  goalStagesFor,
+  type ReleasedPark,
+  type RunState,
+  type RunStateSource,
+} from "./runstate.js";
 
 export type {
   ReworkLoopStatus,

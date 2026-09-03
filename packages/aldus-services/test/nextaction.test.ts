@@ -243,3 +243,85 @@ describe("the summary sentence", () => {
     expect(result.summary).toContain("stage-a");
   });
 });
+
+/**
+ * A stage parked on a gate that has since been settled (ADR-0059; #241, #278).
+ *
+ * The plan used to say **nothing at all** about such a stage: the halted-gate loop found the gate
+ * undecidable and moved on, and the runnable-stage loop skipped it because its status was neither
+ * `never_run` nor `queued`. So the one act that moves the Run — running the stage again — was the
+ * only one missing, while the settled gate was still named as the wait.
+ */
+describe("a settled gate releases the stage parked on it", () => {
+  const parked = { stageId: "stage-a", status: "waiting_for_gate" as const, gateId: "gate-a" };
+
+  it("offers running the stage again, not deciding the gate", () => {
+    const result = plan({
+      stages: [parked],
+      gates: [gateStatus({ gateId: "gate-a", state: "satisfied", currentlyBlocking: false })],
+    });
+    expect(result.next.map((action) => action.kind)).toEqual(["run-stage"]);
+    expect(result.next[0]?.stageId).toBe("stage-a");
+    expect(result.next[0]?.command).toContain("aldus run stage-a");
+    expect(result.next.some((action) => action.kind === "approve-gate")).toBe(false);
+  });
+
+  it("says the gate has been decided, so the sentence is not the unrun-stage one", () => {
+    const result = plan({
+      stages: [parked],
+      gates: [gateStatus({ gateId: "gate-a", state: "satisfied", currentlyBlocking: false })],
+    });
+    expect(result.next[0]?.summary).toContain("has been decided");
+    expect(result.next[0]?.summary).toContain("gate-a");
+    expect(result.next[0]?.summary).not.toContain("has not run in this Run yet");
+  });
+
+  it("offers a decision instead while the gate is still pending", () => {
+    // The negative control: releasing every parked stage regardless of its gate would pass the
+    // two cases above.
+    const result = plan({
+      stages: [parked],
+      gates: [gateStatus({ gateId: "gate-a", state: "pending" })],
+    });
+    expect(result.next.map((action) => action.kind)).toEqual(["approve-gate"]);
+  });
+
+  it("still refuses the re-run when another gate the stage requires is blocking", () => {
+    // A released park takes the ordinary runnable-stage path precisely so this is consulted: the
+    // decision releases the park, it does not authorize everything else the stage needs.
+    const result = plan({
+      stages: [{ ...parked, requiredGates: ["gate-a", "gate-b"] }],
+      gates: [
+        gateStatus({ gateId: "gate-a", state: "satisfied", currentlyBlocking: false }),
+        gateStatus({ gateId: "gate-b", state: "pending" }),
+      ],
+    });
+    expect(result.next.some((action) => action.kind === "run-stage")).toBe(false);
+    const block = result.blocked.find((entry) => entry.kind === "run-stage");
+    expect(block?.gateId).toBe("gate-b");
+    expect(block?.enforcement).toBe("enforced");
+  });
+
+  it("still refuses the re-run while a predecessor has not succeeded", () => {
+    const result = plan({
+      stages: [
+        { ...parked, requiredGates: [], after: ["stage-b"] },
+        { stageId: "stage-b", status: "never_run", requiredGates: [] },
+      ],
+      gates: [gateStatus({ gateId: "gate-a", state: "satisfied", currentlyBlocking: false })],
+    });
+    expect(result.next.map((action) => action.stageId)).toEqual(["stage-b"]);
+    const block = result.blocked.find((entry) => entry.stageId === "stage-a");
+    expect(block?.reason).toContain("must run after");
+  });
+
+  it("still refuses the re-run while an unresolved charge stands against the Run", () => {
+    const result = plan({
+      stages: [{ ...parked, requiredGates: [] }],
+      gates: [gateStatus({ gateId: "gate-a", state: "satisfied", currentlyBlocking: false })],
+      unresolvedSpend: [{ reservationId: "reservation-a", operation: "operation-a" }],
+    });
+    expect(result.next).toEqual([]);
+    expect(result.blocked.some((entry) => entry.reason.includes("unresolved charge"))).toBe(true);
+  });
+});

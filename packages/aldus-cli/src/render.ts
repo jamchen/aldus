@@ -114,7 +114,20 @@ function renderRunReport(report: RunReport): string[] {
   lines.push(`Workflow ${report.run.workflowId}@${report.run.workflowVersion}`);
   if (report.state.waitingOn.length > 0) {
     // Named here so "waiting" does not send an operator hunting through the gate list.
+    //
+    // Only gates that still await a decision reach this line. A settled one used to appear for as
+    // long as the parked attempt existed, so `status` told a reader to go and decide something
+    // already decided — and the filtering is done in the derivation, not here, because the JSON
+    // path serialises the same field this renders (#278, ADR-0059).
     lines.push(`Waiting  ${report.state.waitingOn.join(", ")}`);
+  }
+  for (const park of report.state.releasedStages) {
+    // The other half of the same defect. A parked stage whose gate has been decided is not a gate
+    // to decide, and it is not nothing either: nothing in the runtime re-runs a parked stage, so
+    // the outstanding act is `run` and the operator has to be told which stage and which gate.
+    lines.push(
+      `Released ${park.stageId}  — gate "${park.gateId}" has been decided; run the stage again`,
+    );
   }
   if (report.state.status === "cancelled" && report.run.cancellation !== undefined) {
     const reason =
