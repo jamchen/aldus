@@ -8,6 +8,23 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.61 — 2026-09-03
+
+### Changed
+
+**`aldus rework status` no longer says an executor is coming.** Its header read "Nothing executes a
+rework policy yet", and the word carrying the most weight was "yet" — a reader planning around it
+was planning around a release that is not coming. #220 and #219 closed on the evidence of the first
+adopter's own bounded repair loop, which ran on real Runs with declared verdicts, an authorised
+bound, three measured stop reasons and an escalation a person answered: an adopter built the
+controller **in the adopter**, on contracts Aldus already published, and the Runtime's whole
+contribution to that path was one read-only port (`StageContext.gateStatus`, `next.59`). So the
+vocabulary — `REWORK_STOP_REASONS`, `ReworkPolicy`'s bound, `deriveReworkRounds`, `decideRework` —
+is the deliverable, and `decideRework` remaining a preview is its correct end state: the decision
+belongs to whoever owns the money and the editorial judgement, and Aldus's part is making it
+expressible and auditable rather than taking it. The header now says that, and the test asserts the
+claim rather than the old sentence.
+
 ## 0.2.0-next.60 — 2026-09-03
 
 ### Changed
