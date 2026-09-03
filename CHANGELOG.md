@@ -8,6 +8,40 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.63 — 2026-09-03
+
+### Changed
+
+**`aldus status` no longer describes a waived gate the way it describes a rejected one.** The plan
+had one sentence for every gate that is not `satisfied` —
+
+> "release.public" is waived, so the operations it authorizes are refused.
+
+— so an operator who had just used the verb built for exactly their situation was told, in the same
+words a rejection gets, that nothing had changed. What the waiver did change was invisible: the gate
+stopped blocking, the stage parked on it was released (`next.62`), and the cascade below it cleared.
+
+A waived gate now gets its own line, saying both halves:
+
+> "release.public" is waived, which bypassed the check rather than passing it. The waiver settles
+> the gate — no decision is outstanding on it and it holds up no stage (contract §13, ADR-0059) —
+> but it authorizes nothing: §13.4's operations are granted by an approval, so they stay refused.
+> Approve "release.public" to authorize them.
+
+**The verdict is unchanged, and that is the finding rather than an omission.** #281 asked for the
+opposite — that a waived gate's operations be reported as **authorized** — reasoning from two
+predicates that treat `satisfied` and `waived` alike. Both exist; neither is about grants.
+`currentlyBlocking` answers "does this stop a stage right now" and `gateIsSettled` answers "is a
+decision outstanding". §13.4's question is answered by `GateEngine.authorize`, which requires
+`state === "satisfied"` **and** an `approved` decision, and has since it was written: the case
+`does not let a waived upload gate authorize publication` states it as "the waiver unblocks the
+chain, but grants nothing". Reporting a waived `release.public` as authorizing publication would
+have made `status` promise what the release path then refuses. Rationale: ADR-0060.
+
+If a waiver _should_ grant, that is a change to §13.4 authority — `GateEngine.authorize` and the
+case above — not to a sentence, and it needs its own decision. Closes #281; refs #278, ADR-0058,
+ADR-0059.
+
 ## 0.2.0-next.62 — 2026-09-03
 
 ### BREAKING

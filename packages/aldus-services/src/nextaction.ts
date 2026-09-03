@@ -529,15 +529,31 @@ export function decideActions(input: ActionPolicyInput): ActionPlan {
 
   // Operations that gates grant but nobody has authorized. Reported even when no stage asked for
   // them: an operator wondering "why can I not publish" needs the answer to be present.
+  //
+  // Three cases, not two, and a waiver is the third (#281). `satisfied` is skipped because the
+  // operations are authorized. Everything else is refused *and* the gate is still in the way. A
+  // waiver sits between them: it settles the gate — `gateIsSettled`, so nothing awaits a decision
+  // (ADR-0059) and `currentlyBlocking` is false, so no stage is held — and grants nothing, because
+  // `GateEngine.authorize` requires an approval. One sentence for the two halves is what made the
+  // line read as though the waiver had done nothing.
   for (const gate of gates) {
     if (gate.state === "satisfied" || haltedGateIds.has(gate.gateId)) continue;
     if (gate.state === "stale") continue; // already reported above
     blocked.push({
       kind: "gate-not-satisfied",
       summary: `Anything "${gate.gateId}" authorizes`,
-      reason:
-        gate.explanation ??
-        `"${gate.gateId}" is ${gate.state}, so the operations it authorizes are refused.`,
+      // The waiver arm is read before `explanation` rather than after it. A `waived` status never
+      // carries one today — the engine writes an explanation for every state except the two it
+      // computes from a current decision — so the order changes nothing now, and it is the order
+      // that stays correct if one is ever added: the distinction below is what an operator needs,
+      // and a generic sentence must not be able to displace it.
+      reason: gateIsSettled(gate.state)
+        ? `"${gate.gateId}" is waived, which bypassed the check rather than passing it. The ` +
+          "waiver settles the gate — no decision is outstanding on it and it holds up no stage " +
+          "(contract §13, ADR-0059) — but it authorizes nothing: §13.4's operations are granted " +
+          `by an approval, so they stay refused. Approve "${gate.gateId}" to authorize them.`
+        : (gate.explanation ??
+          `"${gate.gateId}" is ${gate.state}, so the operations it authorizes are refused.`),
       gateId: gate.gateId,
     });
   }
