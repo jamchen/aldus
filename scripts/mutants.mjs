@@ -1545,8 +1545,8 @@ export const cases = [
       {
         replace: [
           "packages/aldus-services/src/runstate.ts",
-          "    if (stage.gateId !== undefined && settled.has(stage.gateId)) {",
-          "    if (false /* mutant */) {",
+          "    gates.filter((gate) => gateIsSettled(gate.state)).map((gate) => gate.gateId),",
+          "    gates.filter((gate) => gateIsSettled(gate.state) && false).map((gate) => gate.gateId), // mutant",
         ],
       },
     ],
@@ -1625,7 +1625,7 @@ export const cases = [
         replace: [
           "packages/aldus-cli/src/render.ts",
           '      `Released ${park.stageId}  — gate "${park.gateId}" has been decided; run the stage again`,',
-          "      `` /* mutant */,",
+          "      `Released ${park.stageId}`, // mutant: the stage, without the decision or the remedy",
         ],
       },
     ],
@@ -1650,7 +1650,7 @@ export const cases = [
         replace: [
           "packages/aldus-services/src/services.ts",
           "    return deriveRunState(manifest, stages, this.#context.workflow, gates);",
-          "    return deriveRunState(manifest, stages, this.#context.workflow, []); /* mutant */",
+          "    return deriveRunState(manifest, stages, this.#context.workflow, gates.filter(() => false)); // mutant",
         ],
       },
     ],
