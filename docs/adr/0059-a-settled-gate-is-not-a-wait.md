@@ -76,6 +76,14 @@ changes-requested, something is: a fresh decision, which the gate is still block
 which is the worse direction (ADR-0026 rejected "nothing runnable and nothing blocked" for the
 same reason).
 
+One consequence of admitting `waived`, stated because the status now asserts something the runner
+will not act on: ADR-0058 deliberately keeps refusing to convert a stage's `GateRequiredSignal`
+into a conflict on a waiver, since a waiver is §13's statement that a check was bypassed _without_
+being passed. So for a waived gate the plan's "run the stage again" invites an unconditional-throw
+stage to park a second time. That is the correct status — nobody owes a decision — and it is not a
+remedy in that one class; the remedy is the stage reading `context.gateStatus` and deciding what a
+waiver means for itself, which is where ADR-0058 put it.
+
 The predicate reads the gate's **state**, never `currentlyBlocking`. An advisory gate is never
 `currentlyBlocking` whatever its state, so reading that field would release a stage parked on an
 _undecided_ advisory gate — #204's confusion, reintroduced in the dangerous direction.

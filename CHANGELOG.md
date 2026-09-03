@@ -34,6 +34,14 @@ Three changes to one surface, and the third is the one a compiler cannot show yo
   `releasedStages` for the rest. `aldus status` prints those as
   `Released <stage> — gate "<gate>" has been decided; run the stage again`.
 
+- **`RunState.status` can return a different value for records that have not changed.** A Run whose
+  only unfinished stage is parked on a gate that has since been `satisfied` or `waived` reported
+  `waiting` and now reports `completed` or `running`. Nothing in the stored records moved — the
+  status is derived on read (ADR-0026) — so a consumer switching on `status`, alerting on
+  `waiting`, or asserting it in a fixture sees the change without any write having happened. If you
+  need the old reading, ask the gate states yourself: the Run is waiting in the pre-`next.62` sense
+  when `waitingOn` is non-empty **or** `releasedStages` is.
+
 ### Changed
 
 **A stage parked on a gate that has since been decided no longer keeps a Run `waiting` forever, and

@@ -279,6 +279,38 @@ describe("a settled gate releases the stage parked on it", () => {
     expect(state.waitingOn).toEqual(["gate-a"]);
   });
 
+  it("keeps waiting on a rejected gate, which is the reason this predicate is narrower than #241's", () => {
+    // The stated reason ADR-0059 does not reuse #241's "a decision exists": after a rejection a
+    // fresh decision is outstanding, so the Run is waiting even though the runner would let the
+    // stage be claimed. Bound here because a mutant adding "rejected" to the settled set survived
+    // the suite — the narrowing was argued in the ADR and asserted nowhere.
+    const state = deriveRunState(
+      { goalStages: ["second"] },
+      [stage("first", "waiting_for_gate", "gate-a"), stage("second", "succeeded")],
+      graph,
+      [{ gateId: "gate-a", state: "rejected" }],
+    );
+    expect(state.status).toBe("waiting");
+    expect(state.waitingOn).toEqual(["gate-a"]);
+    expect(state.releasedStages).toEqual([]);
+  });
+
+  it("keeps waiting on a stale gate: an approval whose subjects moved is not a settlement", () => {
+    // The state the first adopter actually produces — editing their script made the freeze gate
+    // stale — and the one where "settled" would be most tempting, because a
+    // person did approve. What they approved is not what is there now, so something is
+    // outstanding. A mutant adding "stale" to the settled set survived the suite before this.
+    const state = deriveRunState(
+      { goalStages: ["second"] },
+      [stage("first", "waiting_for_gate", "gate-a"), stage("second", "succeeded")],
+      graph,
+      [{ gateId: "gate-a", state: "stale" }],
+    );
+    expect(state.status).toBe("waiting");
+    expect(state.waitingOn).toEqual(["gate-a"]);
+    expect(state.releasedStages).toEqual([]);
+  });
+
   it("releases only the stage whose own gate is settled", () => {
     // A rule that ignored the gate id would release every parked stage from any settled gate.
     const state = deriveRunState(

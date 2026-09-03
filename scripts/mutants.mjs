@@ -1576,19 +1576,60 @@ export const cases = [
     // Decision 2 of the ADR, as a measurement. Widened to #241's decision-exists grain, a
     // changes-requested gate would stop being named — and an operator's outstanding approval
     // would read as a Run quietly in progress.
-    name: "settled-gate: widening settled to any recorded decision stops naming an outstanding one",
+    //
+    // One state per case, because this was one case adding `changes_requested` **and** `rejected`
+    // while asserting only the first one's test. It reported a kill for a claim half of which was
+    // unmeasured — a mutant that catches on the wrong half is the same non-answer this file exists
+    // to remove, one level in. Found by review, not by use.
+    name: "settled-gate: widening settled to a changes-requested gate stops naming an outstanding one",
     setup: [
       {
         replace: [
           "packages/aldus-services/src/nextaction.ts",
           'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived"]);',
-          'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived", "changes_requested", "rejected"]); /* mutant */',
+          'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived", "changes_requested"]); /* mutant */',
         ],
       },
     ],
     command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/runstate.test.ts"],
     wantExit: 1,
     wantOutput: "keeps waiting on a gate that asked for changes",
+  },
+  {
+    // The state the whole narrowing is argued from: after a rejection a fresh decision is
+    // outstanding, which is why this predicate is not #241's. Survived the suite until the test
+    // named below existed.
+    name: "settled-gate: widening settled to a rejected gate reads a refusal as a settlement",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/nextaction.ts",
+          'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived"]);',
+          'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived", "rejected"]); /* mutant */',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/runstate.test.ts"],
+    wantExit: 1,
+    wantOutput: "keeps waiting on a rejected gate",
+  },
+  {
+    // `stale` is the state the first adopter actually produces — a script edit voids the freeze —
+    // and the one where "a person did approve" makes settling most tempting. What they approved is
+    // not what is there now. Also survived the suite.
+    name: "settled-gate: widening settled to a stale gate settles an approval whose subjects moved",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/nextaction.ts",
+          'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived"]);',
+          'const SETTLED_GATE_STATES: ReadonlySet<GateState> = new Set<GateState>(["satisfied", "waived", "stale"]); /* mutant */',
+        ],
+      },
+    ],
+    command: ["npx", "vitest", "run", "--root", "packages/aldus-services", "test/runstate.test.ts"],
+    wantExit: 1,
+    wantOutput: "keeps waiting on a stale gate",
   },
   {
     // The plan's half of the same defect, and the sharper one: before ADR-0059 the parked stage
