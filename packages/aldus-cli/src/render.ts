@@ -713,7 +713,7 @@ export function renderCancelRun(report: RunReport): string {
 }
 
 /**
- * Render `rework status` (#220, criterion 7 open).
+ * Render `rework status` (#220, closed 2026-09-03: the executor is the adopter's, not Aldus's).
  *
  * **Every line says which kind of statement it is.** Nothing executes a declared policy yet, so
  * completed repairs are labelled `recorded` and the decision is labelled `would decide` — a
@@ -731,8 +731,9 @@ export function renderRework(report: ReworkStatusReport): string {
   const lines: string[] = [
     `Run ${report.runId}`,
     "",
-    "Nothing executes a rework policy yet. Repairs below are recorded executions the policy's",
-    "joins match; the decision is what the policy would answer, not one anything took.",
+    "Aldus does not execute a rework policy, by decision rather than for want of one (#220).",
+    "Repairs below are recorded executions the policy's joins match; the decision is what the",
+    "policy would answer, and taking it belongs to whoever owns the money and the judgement.",
     "",
   ];
 

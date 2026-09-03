@@ -58,7 +58,12 @@ describe("the loop explains where it is", () => {
       }),
     );
 
-    expect(out).toContain("Nothing executes a rework policy yet");
+    // The sentence says Aldus does not execute a policy **by decision** (#220, closed 2026-09-03),
+    // not that an executor is pending. A reader who takes "yet" as a roadmap plans around a
+    // release that is not coming; the two words that carry it are asserted here so the claim
+    // cannot quietly revert to the roadmap reading.
+    expect(out).toContain("does not execute a rework policy, by decision");
+    expect(out).not.toContain("yet");
     expect(out).toContain("recorded rounds");
     expect(out).toContain("would decide");
   });
