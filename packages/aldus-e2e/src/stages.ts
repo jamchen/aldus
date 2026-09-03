@@ -101,8 +101,10 @@ export function producingStage(
 /**
  * A stage that halts at a gate (contract §11, §13).
  *
- * `subjectHashes` is what the eventual decision binds, recorded at the moment the stage saw them
- * so that a later change to those inputs invalidates the approval (§13.1).
+ * `subjectHashes` is what the stage saw at the moment it stopped, so that a later change to those
+ * inputs invalidates the approval (§13.1). It is not necessarily what the decision binds — that is
+ * the subjects provider's digest set — and the two are compared as multisets by the runner's
+ * already-decided refusal (ADR-0058).
  */
 export function gatedStage(
   id: string,

@@ -8,6 +8,30 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.60 — 2026-09-03
+
+### Changed
+
+**`subjectHashes` on a `gate_required` result says what the stage saw, and its docstring now says
+so too.** It read "hashes the eventual decision binds to", which was never quite true and became
+load-bearing in `next.59`: a decision binds the digests the composition's subjects provider supplies
+over the gate's declared `binds`, while these are the stage's own reading of the same moment. The
+runner's `ALDUS_GATE_ALREADY_DECIDED` refusal compares the two as multisets, so a stage that passes
+a superset — its journal digest alongside the two subjects the gate binds — never matches the
+refusal and must consume the decision through `StageContext.gateStatus` instead. The first adopter
+shipped exactly that shape and found the drift by hitting it. Comment only; no behaviour changes,
+and the same correction is made in the e2e harness's `gatedStage`.
+
+**ADR-0058 now argues the `waive` case instead of listing it.** A waiver is a decision, and the
+engine reports `satisfied: false` for it, so the already-decided refusal does not fire and an
+unconditional-throw stage parks again on a gate somebody has already bypassed — the reported
+livelock, reproduced. That is deliberate: a waiver is §13's statement that a check was bypassed
+without being passed, and a runner that treated it as an approval would let a bypass release work
+nobody judged. The stage decides what a waiver means for itself; the runner keeps parking and the
+port keeps saying `state: "waived"`, `satisfied: false`.
+
+**The `next.59` entry said five mutant cases; there are six.** The sixth is the throwing port.
+
 ## 0.2.0-next.59 — 2026-09-03
 
 Closes #275, reproduced by the first adopter on a real Run: a stage that throws
@@ -58,7 +82,7 @@ Beside `gateIsKnown` and `gateHasDecision`, not replacing either: `gateHasDecisi
 blind to a decision's content because a rejection must release a parked stage too, and this arm
 needs the state and what it binds.
 
-**Mutants for the arm and the port**, five cases in `scripts/mutants.mjs`: the port never consulted;
+**Mutants for the arm and the port**, six cases in `scripts/mutants.mjs`: the port never consulted;
 `subjectHashes` ignored; matching hashes counted as satisfied; the context member answering
 `undefined` for every stage; and the services wiring `satisfied` to decision-exists, which turns a
 rejection into an approval. Each is caught by the test that names it.

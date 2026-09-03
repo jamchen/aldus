@@ -2,3 +2,12 @@ dist/
 coverage/
 node_modules/
 packages/*/schema/*.json
+
+# Copies of this repository that agents check out; formatting them measures the same files twice
+# and, on a stale worktree, measures a version nobody will run.
+.claude/worktrees/
+
+# Rendered HTML of the architecture contract. Produced by a renderer outside this repository and
+# dropped here for reading; Prettier reformatting generated markup is noise, and it made
+# `npm run verify` unable to pass locally while CI — which checks out clean — saw nothing.
+docs/*.html
