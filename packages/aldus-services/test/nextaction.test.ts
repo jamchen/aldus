@@ -179,6 +179,56 @@ describe("what is withheld, and why", () => {
     expect(blocked?.summary).toContain("release-publish");
   });
 
+  // #281. The old sentence — «is waived, so the operations it authorizes are refused» — was the
+  // same one every undecided state got, and it read as though the waiver had done nothing. Both
+  // halves are asserted, because either alone is a sentence that already existed: a waiver settles
+  // the gate, and it still grants nothing.
+  it("says a waiver bypassed the check rather than passing it", () => {
+    const result = plan({
+      gates: [gateStatus({ gateId: "release-publish", state: "waived", currentlyBlocking: false })],
+    });
+    const blocked = result.blocked.find((entry) => entry.kind === "gate-not-satisfied");
+    expect(blocked?.gateId).toBe("release-publish");
+    expect(blocked?.reason).toContain("bypassed the check rather than passing it");
+    expect(blocked?.reason).toContain("holds up no stage");
+    expect(blocked?.reason).toContain("granted");
+    // The generic sentence must not survive alongside it: an operator reading both learns nothing
+    // from the second.
+    expect(blocked?.reason).not.toContain("so the operations it authorizes are refused");
+  });
+
+  // A waiver does not release a stage from this list by being settled — `GateEngine.authorize`
+  // requires an approval, and a plan that stopped saying so would promise what `publish` refuses.
+  it("still reports a waived gate's operations as refused", () => {
+    const result = plan({
+      gates: [gateStatus({ gateId: "release-publish", state: "waived", currentlyBlocking: false })],
+    });
+    expect(result.blocked.map((entry) => entry.kind)).toEqual(["gate-not-satisfied"]);
+    expect(result.blocked[0]?.reason).toContain("stay refused");
+  });
+
+  it.each(["rejected", "changes_requested", "pending"] as const)(
+    "still reports a %s gate's operations as refused in the plain sentence",
+    (state) => {
+      const result = plan({ gates: [gateStatus({ gateId: "release-publish", state })] });
+      const blocked = result.blocked.find((entry) => entry.kind === "gate-not-satisfied");
+      expect(blocked?.reason).toContain(
+        `"release-publish" is ${state}, so the operations it authorizes are refused.`,
+      );
+      expect(blocked?.reason).not.toContain("bypassed the check");
+    },
+  );
+
+  // `stale` is reported by the drifted-approval arm above and deliberately not here, so the
+  // assertion is that it is absent from *this* list rather than that it carries the sentence.
+  it("still reports a stale gate through the drifted-approval arm, not this one", () => {
+    const result = plan({
+      gates: [gateStatus({ gateId: "release-publish", state: "stale" })],
+    });
+    expect(result.blocked.some((entry) => entry.kind === "gate-not-satisfied")).toBe(false);
+    expect(result.next.some((action) => action.gateId === "release-publish")).toBe(true);
+  });
+
   it("does not report a satisfied gate as blocking anything", () => {
     const result = plan({
       gates: [

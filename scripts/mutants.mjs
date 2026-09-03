@@ -1706,4 +1706,64 @@ export const cases = [
     wantExit: 1,
     wantOutput: "reports the same thing in a list of Runs, which reads its own path",
   },
+  /* ---------------------------------------------------------------------------------------------
+   * #281 — what the plan says about a waived gate's grants.
+   *
+   * The two cases point in opposite directions on purpose, because the defect and its
+   * over-correction are both single edits to the same three lines: one restores the generic
+   * sentence, the other drops the line altogether. Only one of the two is a regression anybody
+   * would write by accident, and it is the second.
+   * ------------------------------------------------------------------------------------------ */
+  {
+    // The reason string. Restoring the generic sentence for a waiver is what #281 filed: an
+    // operator is told the grants are refused and nothing distinguishes that from a rejection, so
+    // the verb they used reads as having done nothing.
+    name: "waived-grants: falling back to the generic sentence loses the waiver's distinction",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/nextaction.ts",
+          "      reason: gateIsSettled(gate.state)",
+          "      reason: false /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/nextaction.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "says a waiver bypassed the check rather than passing it",
+  },
+  {
+    // The verdict, and the one worth a case: skipping a waived gate the way `satisfied` is skipped
+    // — the shape #281 proposed — makes the plan report a waived `release.public` as authorizing
+    // publication. `GateEngine.authorize` requires an approval and refuses it, so the plan would be
+    // promising exactly what the command then refuses, which is the defect this whole module exists
+    // to avoid.
+    name: "waived-grants: skipping a waived gate promises what GateEngine.authorize refuses",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/nextaction.ts",
+          '    if (gate.state === "satisfied" || haltedGateIds.has(gate.gateId)) continue;',
+          "    if (gateIsSettled(gate.state) || haltedGateIds.has(gate.gateId)) continue; /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/nextaction.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "still reports a waived gate's operations as refused",
+  },
 ];

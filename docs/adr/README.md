@@ -76,3 +76,4 @@ Rules:
 | [0057](0057-a-running-attempt-is-a-reconciliation-not-a-verdict.md)                         | A durably running attempt is a reconciliation, not a verdict                               | Accepted | #220              |
 | [0058](0058-a-decided-gate-is-not-asked-for-twice.md)                                       | A decided gate is not asked for twice                                                      | Accepted | #275              |
 | [0059](0059-a-settled-gate-is-not-a-wait.md)                                                | A settled gate is not a wait, and the stage parked on it is runnable                       | Accepted | #278              |
+| [0060](0060-a-waiver-settles-a-gate-without-granting-it.md)                                 | A waiver settles a gate without granting what it authorizes                                | Accepted | #281              |
