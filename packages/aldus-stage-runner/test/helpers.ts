@@ -27,6 +27,7 @@ import type { PaidDispatchController } from "../src/paid-dispatch.js";
 import type {
   ArtifactRecorder,
   StageDefinition,
+  StageGateStatus,
   StageOutcome,
   StageContext,
 } from "../src/definition.js";
@@ -100,6 +101,11 @@ export interface TempRunOptions {
    * stays the default every other test in the package measures against.
    */
   stageSpendEvidence?: (runId: string, stageId: string) => Promise<StageDispatchEvidence>;
+  /**
+   * The gate-status port (#275). Omitted so the unwired case — a `GateRequiredSignal` parks
+   * whatever the gate's state — stays the default every other test in the package runs under.
+   */
+  gateStatus?: (gateId: string, runId: string) => Promise<StageGateStatus | undefined>;
 }
 
 /** Create an isolated workspace with one Run, and a runner bound to it. */
@@ -139,6 +145,7 @@ export async function makeTempRun(options: TempRunOptions = {}): Promise<TempRun
     ...(options.stageSpendEvidence !== undefined
       ? { stageSpendEvidence: options.stageSpendEvidence }
       : {}),
+    ...(options.gateStatus !== undefined ? { gateStatus: options.gateStatus } : {}),
     now: () => {
       clock += 1000;
       return new Date(clock);

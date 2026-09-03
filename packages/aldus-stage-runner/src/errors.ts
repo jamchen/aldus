@@ -178,6 +178,20 @@ export const StageRunnerErrorCodes = {
    */
   GATE_REQUIRED_UNKNOWN_GATE: "ALDUS_GATE_REQUIRED_UNKNOWN_GATE",
   /**
+   * A stage asked for a gate decision that already exists over the same subjects (#275).
+   *
+   * The gate is `satisfied` and its decision binds exactly the hashes the stage supplied, so
+   * parking again would wait for an answer that has been given. The stage has to consume the
+   * decision — branch on `StageContext.gateStatus` — rather than ask for it a second time;
+   * the runner does not complete the stage on its behalf, because the stage's output is the
+   * stage's.
+   *
+   * Category `conflict`: the request contradicts recorded state. (The issue asked for
+   * `invalid_request`, which is not an `ERROR_CATEGORIES` member, and adding one is a MAJOR
+   * schema change under ADR-0003.)
+   */
+  GATE_ALREADY_DECIDED: "ALDUS_GATE_ALREADY_DECIDED",
+  /**
    * A terminal attempt was recorded with a reduced record because the full one would not validate.
    *
    * The attempt's own status is unaffected — it is `failed` or `cancelled`, durably, which is the

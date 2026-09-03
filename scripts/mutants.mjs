@@ -1378,4 +1378,156 @@ export const cases = [
     wantExit: 1,
     wantOutput: "a worker receives the clause and is refused",
   },
+  {
+    // #275's arm, never consulted. A runner that parks every `GateRequiredSignal` whatever the
+    // gate's state is the livelock the first adopter reproduced, and every pre-existing test is
+    // green under it — which is why the positive case has to be here.
+    name: "gate-already-decided: a runner that never asks the port re-parks a decided gate",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-stage-runner/src/runner.ts",
+          "      status = await this.#gateStatus(gateId, runId);",
+          // `void`s keep the parameters used, because `noUnusedParameters` would otherwise refuse
+          // the build and report a non-answer where a kill is expected.
+          "      status = undefined as StageGateStatus | undefined; void gateId; void runId; /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-stage-runner",
+      "test/runner.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "fails the attempt with ALDUS_GATE_ALREADY_DECIDED",
+  },
+  {
+    // The negative control for the hash comparison. "Satisfied, therefore decided" refuses a
+    // stage asking about content the operator never saw; the case that catches it is the one
+    // where the hashes differ.
+    name: "gate-already-decided: ignoring subjectHashes refuses a new question as an old one",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-stage-runner/src/runner.ts",
+          "    return sameHashes(status.subjectHashes, subjectHashes);",
+          "    return sameHashes(status.subjectHashes, subjectHashes) || true; /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-stage-runner",
+      "test/runner.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "parks when the gate is satisfied over different subjects",
+  },
+  {
+    // The negative control for `satisfied`. A decision whose hashes match is not an approval that
+    // still binds — stale and rejected both carry the same `subjectHashes` — and the runner must
+    // take the engine's judgement rather than recompute it from the hashes.
+    name: "gate-already-decided: matching hashes alone must not count as satisfied",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-stage-runner/src/runner.ts",
+          "    if (status === undefined || !status.satisfied || status.subjectHashes === undefined) {",
+          "    if (status === undefined || status.subjectHashes === undefined) { /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-stage-runner",
+      "test/runner.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "parks when the gate is decided but not satisfied",
+  },
+  {
+    // The stage-facing half of the port. The runner refusing correctly while `context.gateStatus`
+    // answers `undefined` for every stage would leave the adopter with a legible error and no way
+    // to act on it — the port exists so the stage can branch *before* throwing.
+    name: "gate-already-decided: a context port that never answers leaves the stage unable to consume the decision",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-stage-runner/src/runner.ts",
+          "      gateStatus: async (gateId) =>\n        this.#gateStatus === undefined ? undefined : await this.#gateStatus(gateId, runId),",
+          "      gateStatus: async (_gateId) => undefined, /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-stage-runner",
+      "test/runner.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "gives the stage the same answer through context.gateStatus",
+  },
+  {
+    // The services wiring, and the reason `satisfied` is the engine's word rather than "a decision
+    // exists". Wired as `gateHasDecision`'s predicate — any decision — a rejection over the same
+    // hashes would be refused as already decided, and the operator's "no" would read as a "yes".
+    name: "gate-already-decided: wiring satisfied to decision-exists turns a rejection into an approval",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/context.ts",
+          '          satisfied: status.state === "satisfied",',
+          "          satisfied: status.decision !== undefined, /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/gate-already-decided.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "parks again after a rejection",
+  },
+  {
+    // The hardening: a port that throws is "cannot answer". Without the catch the throw escapes
+    // after the stage has settled, and the test observes a rejected promise rather than a parked
+    // attempt.
+    name: "gate-already-decided: a throwing port must park, not escape the attempt",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-stage-runner/src/runner.ts",
+          "    } catch {\n      // A port that could not answer is a port that did not answer.",
+          "    } catch (error) {\n      throw error; /* mutant */\n      // A port that could not answer is a port that did not answer.",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-stage-runner",
+      "test/runner.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "parks when the port throws",
+  },
 ];

@@ -50,6 +50,7 @@ import {
   type ArtifactRecorder,
   type StageDefinition,
   type StageContext,
+  type StageGateStatus,
   type StageOutcome,
   type StageOutputRegistration,
   type StageRunResult,
@@ -120,6 +121,20 @@ const DISPATCH_EVIDENCE_SENTENCE: Record<StageDispatchEvidence, string> = {
   indeterminate: "",
 };
 
+/**
+ * True when two digest lists bind the same subjects, order aside (#275).
+ *
+ * Sorted copies compared element-wise, so the comparison does not depend on whether a stage
+ * listed its subjects in the order the gate engine stored them. A multiset comparison, like the
+ * engine's own `detectDrift`: two identical digests count twice on both sides.
+ */
+function sameHashes(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((hash, index) => hash === right[index]);
+}
+
 /** Everything the runner needs, expressed as ports rather than a concrete workspace. */
 export interface StageRunnerOptions {
   /** Run manifests (contract §6.2). */
@@ -161,6 +176,25 @@ export interface StageRunnerOptions {
    * Absent means the old behaviour — refuse — because a runner with no way to ask must not assume.
    */
   gateHasDecision?: (gateId: string, runId: string) => Promise<boolean>;
+  /**
+   * What a gate currently **is** on this Run, and what its decision binds (#275).
+   *
+   * The fourth port of the same shape, and the one that serves two consumers at once: the
+   * runner's `GateRequiredSignal` arm, and a stage asking through
+   * {@link StageContext.gateStatus} before it throws one. One port rather than two, so the
+   * answer the runner refuses on and the answer the stage branches on cannot disagree.
+   *
+   * Why `gateHasDecision` is not enough. That predicate asks whether **any** decision exists and
+   * is deliberately blind to its content, because its job is to release a parked stage whatever
+   * the operator said (#240, #241). This arm needs the opposite: whether the gate is `satisfied`
+   * — approved and still bound to the current inputs, the gate engine's judgement, not a copy of
+   * it here — and **which** subject digests that approval binds, so a stage asking for the same
+   * gate over different subjects is still a new question and still parks.
+   *
+   * Absent, or answering `undefined`, means the runner cannot tell and parks as it always has —
+   * a runner with no way to ask must not assume, the same rule the two fields above state.
+   */
+  gateStatus?: (gateId: string, runId: string) => Promise<StageGateStatus | undefined>;
   /**
    * What the spend reservation store can establish about a stuck stage's dispatch window
    * (ADR-0044; `docs/design/spend-reservation-store.md` §5; #244).
@@ -269,6 +303,8 @@ export class StageRunner {
 
   readonly #gateIsKnown: ((gateId: string, stageId: string) => boolean) | undefined;
   readonly #gateHasDecision: ((gateId: string, runId: string) => Promise<boolean>) | undefined;
+  readonly #gateStatus:
+    ((gateId: string, runId: string) => Promise<StageGateStatus | undefined>) | undefined;
   readonly #stageSpendEvidence:
     ((runId: string, stageId: string) => Promise<StageDispatchEvidence>) | undefined;
 
@@ -326,9 +362,94 @@ export class StageRunner {
     });
   }
 
+  /**
+   * Whether the decision a stage is asking for already exists over exactly these subjects (#275).
+   *
+   * Two paths lead a stage to a gate, and until now only one of them consulted gate state:
+   *
+   * - **Runner-declared** (`requiredGates`, ADR-0021/ADR-0024): the services refuse the stage
+   *   *before* it runs while the gate is unsatisfied, and a decided gate releases a stage parked
+   *   on it (#241, `gateHasDecision`). The gate is a precondition; the runtime owns the check.
+   * - **Stage-thrown** (`GateRequiredSignal` / `{ kind: "gate_required" }`, ADR-0055's arm,
+   *   #219): the stage discovers mid-run that a human must decide, and the runner parks it.
+   *   #219 made the runner check that the gate is *known* (`#canWaitOn`); nothing checked its
+   *   *state*. So a stage that throws unconditionally — the first adopter's refinement stage
+   *   does, whenever its loop journal is not `converged` — was re-parked on every attempt after
+   *   the operator approved, and the approval had no consumer.
+   *
+   * "Already decided" is deliberately narrow: the gate is `satisfied` **and** its decision binds
+   * the same digests the stage supplied, compared as sorted lists. A satisfied gate over
+   * different subjects is a new question and parks as before — the operator approved something
+   * else. A stage that supplies no hashes matches only a decision that binds none; it has not
+   * said what it is asking about, and guessing here would be the runner deciding on the stage's
+   * behalf. Every other answer — unwired port, unknown gate, pending, rejected, stale — is
+   * `false`, and the stage parks exactly as it did before this existed.
+   */
+  async #alreadyDecided(
+    gateId: string,
+    runId: string,
+    subjectHashes: readonly string[],
+  ): Promise<boolean> {
+    if (this.#gateStatus === undefined) return false;
+    let status: StageGateStatus | undefined;
+    try {
+      status = await this.#gateStatus(gateId, runId);
+    } catch {
+      // A port that could not answer is a port that did not answer. Letting the throw escape here
+      // would leave the attempt `running` after the stage had already settled — #254's shape — and
+      // refusing on it would turn a failed read into a claim about the gate. Parking is what the
+      // runner did before it could ask, and it is the one answer that asserts nothing.
+      return false;
+    }
+    if (status === undefined || !status.satisfied || status.subjectHashes === undefined) {
+      return false;
+    }
+    return sameHashes(status.subjectHashes, subjectHashes);
+  }
+
+  /**
+   * Record a refusal rather than a second wait for an answer that has been given (#275).
+   *
+   * A legible failure at the stage, not a completion on its behalf: the stage's output is the
+   * stage's, and the runner cannot know what "consume the decision" means for it. What it can do
+   * is stop the livelock where it can see it and say what the stage has to do instead.
+   */
+  #gateAlreadyDecided<O>(
+    manifest: RunManifest,
+    definition: StageDefinition<never, unknown> | StageDefinition<unknown, unknown>,
+    attempt: StageAttempt,
+    metadata: AttemptMetadata,
+    invocationKey: string,
+    gateId: string,
+  ): Promise<StageRunResult<O>> {
+    return this.#terminal<O>(manifest, definition, attempt, metadata, {
+      status: "failed",
+      invocationKey,
+      error: redactError(
+        toStructuredError(
+          stageRunnerError(
+            StageRunnerErrorCodes.GATE_ALREADY_DECIDED,
+            `Stage "${definition.id}" asked for a decision on gate "${gateId}", but that gate ` +
+              "is already satisfied over the same subjects: the decision exists and this stage " +
+              "must consume it rather than ask again. Parking would wait forever for an answer " +
+              "that has been given (contract §13). Read `context.gateStatus(gateId)` before " +
+              "stopping at the gate.",
+            {
+              category: "conflict",
+              retryable: false,
+              details: { stageId: definition.id, gateId },
+            },
+          ),
+          { code: StageRunnerErrorCodes.GATE_ALREADY_DECIDED, category: "conflict" },
+        ),
+      ),
+    });
+  }
+
   constructor(options: StageRunnerOptions) {
     this.#gateIsKnown = options.gateIsKnown;
     this.#gateHasDecision = options.gateHasDecision;
+    this.#gateStatus = options.gateStatus;
     this.#stageSpendEvidence = options.stageSpendEvidence;
     this.#options = {
       runs: options.runs,
@@ -751,6 +872,11 @@ export class StageRunner {
       ...(effectKey !== undefined ? { effectKey } : {}),
       inputArtifacts: input.inputArtifacts,
       signal: controller.signal,
+      // Always supplied, answering `undefined` where nothing is wired: a stage can ask the same
+      // question the runner's own `GateRequiredSignal` arm answers, through the same port, so
+      // what the stage sees and what the runner refuses on cannot disagree (#275).
+      gateStatus: async (gateId) =>
+        this.#gateStatus === undefined ? undefined : await this.#gateStatus(gateId, runId),
       recordOutput: (artifact) => {
         assertValid("ArtifactRef", artifact);
         outputs.push(artifact);
@@ -1335,6 +1461,19 @@ export class StageRunner {
             thrown.gateId,
           );
         }
+        // And the other half of decidability: a gate that **has** been decided, over exactly what
+        // the stage is asking about. Parking again is the same permanent stop #219 closed for an
+        // unknown gate, with a human's approval sitting next to it (#275).
+        if (await this.#alreadyDecided(thrown.gateId, runId, thrown.subjectHashes)) {
+          return this.#gateAlreadyDecided(
+            manifest,
+            definition,
+            settled,
+            withNotes(),
+            invocationKey,
+            thrown.gateId,
+          );
+        }
         return this.#terminal(
           manifest,
           definition,
@@ -1375,6 +1514,16 @@ export class StageRunner {
       // fixing only the thrown one would leave the commoner shape unchecked.
       if (!this.#canWaitOn(outcome.gateId, definition)) {
         return this.#undecidableGate(
+          manifest,
+          definition,
+          settled,
+          withNotes(),
+          invocationKey,
+          outcome.gateId,
+        );
+      }
+      if (await this.#alreadyDecided(outcome.gateId, runId, outcome.subjectHashes ?? [])) {
+        return this.#gateAlreadyDecided(
           manifest,
           definition,
           settled,

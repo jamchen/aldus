@@ -8,6 +8,61 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.59 — 2026-09-03
+
+Closes #275, reproduced by the first adopter on a real Run: a stage that throws
+`GateRequiredSignal(gateId, { subjectHashes })` for a gate the operator has already approved over the
+same subjects was parked again on every attempt. The runner checked that the gate was known (#220)
+and that a decided gate releases a parked stage (#241); nothing checked whether the decision being
+asked for already existed, and the stage had no port to ask. The approval had no consumer. Decision
+recorded in ADR-0058.
+
+### Changed
+
+**A `GateRequiredSignal` — thrown or returned — for a gate that is currently `satisfied` over a
+decision binding the same `subjectHashes` no longer parks the stage.** The attempt fails with
+`ALDUS_GATE_ALREADY_DECIDED` (category `conflict`, not retryable), naming the gate and the stage and
+saying that the decision exists and the stage must consume it rather than ask again. Everything else
+parks exactly as before: a satisfied gate over different subjects (a new question), a pending,
+rejected, stale or waived gate, a stage that supplied no hashes against a decision that binds some,
+and every composition that wires no gate state to the runner. The runner does not complete the
+stage on its behalf — the stage's output is the stage's.
+
+Behaviour visible to an adopter: a stage that throws the signal unconditionally, as the reproducing
+stage does, now gets a legible failure on the attempt after approval instead of a silent second
+`waiting_for_gate`. It still has to change — the failure says how — which is the migration.
+
+<!-- No machine marker: check-breaking-notes reports no surface change against next.58, because no
+     signature moved. The change is behavioural — an attempt that recorded `waiting_for_gate` now
+     records `failed` — and is listed under Changed for the reason this file states at the top:
+     an adopter learns it here, not from a test going red. `SCHEMA_VERSION` does not move; no
+     schema gained a field. -->
+
+### Added
+
+**`StageContext.gateStatus?(gateId): Promise<StageGateStatus | undefined>`**
+(`@aldus-runtime/stage-runner`) — a read-only question a stage asks **before** stopping at a gate:
+whether the decision it would request already exists over the subjects it would bind.
+`StageGateStatus` is `{ satisfied: boolean; state: string; subjectHashes?: readonly string[] }`:
+the gate engine's judgement that the approval still binds the current inputs, the engine's state
+name passed through as an opaque string so a stage can tell a rejection from an undecided gate, and
+the sorted digests the current decision binds. `undefined` means the runtime cannot answer — no gate
+engine wired, or the gate unregistered — never that the gate is undecided; a stage receiving it
+behaves as before and the runner's arm above is the backstop. Optional on the interface so a test
+double written against an earlier version compiles; the runner always supplies it.
+
+**`StageRunnerOptions.gateStatus?(gateId, runId)`**, the one port behind both consumers, wired in
+`@aldus-runtime/services` from the gate engine through the same subjects provider `approve` and
+`status` read — so the runner's refusal, the stage's answer and `aldus inspect` describe one state.
+Beside `gateIsKnown` and `gateHasDecision`, not replacing either: `gateHasDecision` is deliberately
+blind to a decision's content because a rejection must release a parked stage too, and this arm
+needs the state and what it binds.
+
+**Mutants for the arm and the port**, five cases in `scripts/mutants.mjs`: the port never consulted;
+`subjectHashes` ignored; matching hashes counted as satisfied; the context member answering
+`undefined` for every stage; and the services wiring `satisfied` to decision-exists, which turns a
+rejection into an approval. Each is caught by the test that names it.
+
 ## 0.2.0-next.58 — 2026-09-02
 
 Closes the remainder of #186 and #199. Most of both rulings shipped on 2026-08-25 (`next.21`,
