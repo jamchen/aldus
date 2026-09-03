@@ -49,6 +49,18 @@ stale, waived, or blocked upstream parks as before; `satisfied` is the engine's 
 does not recompute it from the hashes. A stage that supplies no hashes matches only a decision that
 binds none. An unwired port, or a gate the port cannot answer for, parks as before.
 
+**A waiver reproduces the reported livelock exactly, and is left doing so.** `waived` is a decision
+— a person answered — but the engine reports `satisfied: false` for it, so the refusal above does
+not fire and an unconditional-throw stage parks again, forever, on a gate somebody has already
+bypassed. That is deliberate rather than overlooked. The refusal's premise is that the answer is
+«ship it», and a waiver is `§13`'s explicit statement that the check was bypassed _without_ being
+passed; a runner that treated the two alike would let a bypass release work that no one judged. So
+the runner keeps parking and the port keeps telling the truth: `state: "waived"`, `satisfied:
+false`. What ends the loop is the stage reading that and saying what it means for itself — the first
+adopter's stage fails with the state named rather than parking, because for a repair loop a waiver
+is not an acceptance of the findings it could not close. A stage for which a waiver _is_ a release
+may complete on it. Neither reading belongs in the runner.
+
 ### 2. The runner does not complete the stage on its behalf
 
 The alternative the adopter's issue names — the runtime completing the stage with its candidate as

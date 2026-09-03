@@ -789,10 +789,21 @@ export type StageOutcome<O> =
       /** Gate that must be decided before this stage can continue (contract §13). */
       gateId: string;
       /**
-       * Hashes the eventual decision binds to (contract §13 `subjectHashes`).
+       * Hashes of what **this stage saw**, recorded at the moment it stopped (contract §13
+       * `subjectHashes`).
        *
-       * Recorded now so that WP-05 can bind an approval to exactly what the stage saw, and so
-       * that a later change to those inputs invalidates the approval (§13.1, §13.2).
+       * Not «what the decision binds», which is what this said until `0.2.0-next.60`. A decision
+       * binds the digests the composition's subjects provider supplies over the gate's declared
+       * `binds`; these are the stage's own reading of the same moment, and the two are equal only
+       * when the stage computes exactly that set. Recorded so an approval can be bound to what the
+       * stage saw, and so a later change to those inputs invalidates it (§13.1, §13.2).
+       *
+       * Since `0.2.0-next.59` the difference is load-bearing rather than academic: the runner
+       * compares these hashes against the decision's as multisets before refusing an
+       * already-decided gate (ADR-0058). A stage that passes a superset — its own journal digest
+       * alongside the two the gate binds, say — never matches, so the refusal never fires for it
+       * and it must consume the decision through `StageContext.gateStatus` instead. The first
+       * adopter shipped exactly that shape and found it this way.
        */
       subjectHashes?: string[];
       /** Operator-facing explanation of what is being decided. */
