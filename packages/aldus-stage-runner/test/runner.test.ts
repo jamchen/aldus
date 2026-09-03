@@ -564,3 +564,203 @@ describe("a stage stuck in running says what it cannot see (#244)", () => {
     );
   });
 });
+
+describe("a gate already decided over the same subjects refuses rather than parking (#275)", () => {
+  // Reproduced by the first adopter on a real Run. Their refinement stage throws
+  // `GateRequiredSignal(gate, { subjectHashes })` whenever its loop journal is not `converged`;
+  // the operator approved the gate; the stage ran again, threw the same signal for the same gate
+  // over the same hashes, and was parked again — forever. #219 made the runner check that the
+  // gate is *known*; nothing checked its *state*, and the stage had no port to ask.
+  const GATE = "content-freeze";
+  const HASH_A = "a".repeat(64);
+  const HASH_B = "b".repeat(64);
+
+  /** A port answering one fixed status, and recording what it was asked. */
+  function fixedStatus(
+    status: { satisfied: boolean; state: string; subjectHashes?: readonly string[] } | undefined,
+  ): {
+    port: (gateId: string, runId: string) => Promise<typeof status>;
+    asked: { gateId: string; runId: string }[];
+  } {
+    const asked: { gateId: string; runId: string }[] = [];
+    return {
+      asked,
+      port: async (gateId, runId) => {
+        asked.push({ gateId, runId });
+        return status;
+      },
+    };
+  }
+
+  function throwingStage(subjectHashes: readonly string[]) {
+    return aStage({
+      requiredGates: [GATE],
+      execute: async () => {
+        throw new GateRequiredSignal(GATE, { subjectHashes });
+      },
+    });
+  }
+
+  it("fails the attempt with ALDUS_GATE_ALREADY_DECIDED when the gate is satisfied over the same hashes", async () => {
+    await harness.cleanup();
+    const { port, asked } = fixedStatus({
+      satisfied: true,
+      state: "satisfied",
+      subjectHashes: [HASH_B, HASH_A],
+    });
+    harness = await makeTempRun({ gateStatus: port });
+    // Listed in the other order, because a stage need not know how the engine sorts.
+    harness.registry.register(throwingStage([HASH_A, HASH_B]));
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe(StageRunnerErrorCodes.GATE_ALREADY_DECIDED);
+    expect(result.error?.category).toBe("conflict");
+    expect(result.error?.retryable).toBe(false);
+    // Names the gate, says the decision exists and the stage must consume it, and names the stage.
+    expect(result.error?.message).toContain(`gate "${GATE}"`);
+    expect(result.error?.message).toContain("must consume it");
+    expect(result.error?.message).toContain('Stage "stage-a"');
+    // Asked about this gate on this Run, not about anything else.
+    expect(asked).toEqual([{ gateId: GATE, runId: harness.manifest.runId }]);
+  });
+
+  it("refuses on the returned path too, because the runner treats both forms identically", async () => {
+    await harness.cleanup();
+    harness = await makeTempRun({
+      gateStatus: fixedStatus({ satisfied: true, state: "satisfied", subjectHashes: [HASH_A] })
+        .port,
+    });
+    harness.registry.register(
+      aStage({
+        requiredGates: [GATE],
+        execute: async () => ({ kind: "gate_required", gateId: GATE, subjectHashes: [HASH_A] }),
+      }),
+    );
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe(StageRunnerErrorCodes.GATE_ALREADY_DECIDED);
+  });
+
+  it("parks when the gate is satisfied over different subjects, because that is a new question", async () => {
+    // The negative control for the hash comparison. Without it a check that ignored
+    // `subjectHashes` — "satisfied, therefore decided" — would pass the case above and refuse a
+    // stage asking about content the operator never saw.
+    await harness.cleanup();
+    harness = await makeTempRun({
+      gateStatus: fixedStatus({ satisfied: true, state: "satisfied", subjectHashes: [HASH_A] })
+        .port,
+    });
+    harness.registry.register(throwingStage([HASH_B]));
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("waiting_for_gate");
+    expect(result.gateId).toBe(GATE);
+  });
+
+  it("parks when the gate is pending, however its hashes compare", async () => {
+    await harness.cleanup();
+    harness = await makeTempRun({
+      gateStatus: fixedStatus({ satisfied: false, state: "pending" }).port,
+    });
+    harness.registry.register(throwingStage([HASH_A]));
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("waiting_for_gate");
+  });
+
+  it("parks when the gate is decided but not satisfied — rejected, or stale", async () => {
+    // `satisfied` is the gate engine's judgement that the approval still binds the current
+    // inputs; the runner does not second-guess it from the hashes alone.
+    await harness.cleanup();
+    harness = await makeTempRun({
+      gateStatus: fixedStatus({ satisfied: false, state: "stale", subjectHashes: [HASH_A] }).port,
+    });
+    harness.registry.register(throwingStage([HASH_A]));
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("waiting_for_gate");
+  });
+
+  it("parks when the port cannot answer, which is what an unwired runner has always done", async () => {
+    await harness.cleanup();
+    harness = await makeTempRun({ gateStatus: fixedStatus(undefined).port });
+    harness.registry.register(throwingStage([HASH_A]));
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("waiting_for_gate");
+  });
+
+  it("parks when the port throws, because a failed read is not an answer about the gate", async () => {
+    // The stage has already settled by the time the runner asks. A throw escaping here would leave
+    // the attempt `running` with the stage finished (#254's shape); refusing on it would turn a
+    // read failure into a claim that the gate is decided. Parking asserts nothing.
+    await harness.cleanup();
+    harness = await makeTempRun({
+      gateStatus: async () => {
+        throw new Error("gate store unreadable");
+      },
+    });
+    harness.registry.register(throwingStage([HASH_A]));
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("waiting_for_gate");
+  });
+
+  it("gives the stage the same answer through context.gateStatus", async () => {
+    // One port, two consumers: what the stage reads before deciding whether to throw is what the
+    // runner would refuse on. The stage here consumes the decision instead of asking again — the
+    // shape the adopter's fix takes.
+    await harness.cleanup();
+    const { port, asked } = fixedStatus({
+      satisfied: true,
+      state: "satisfied",
+      subjectHashes: [HASH_A],
+    });
+    harness = await makeTempRun({ gateStatus: port });
+    harness.registry.register(
+      aStage({
+        requiredGates: [GATE],
+        execute: async (context) => {
+          const status = await context.gateStatus?.(GATE);
+          if (status?.satisfied === true) return { kind: "completed", output: status };
+          throw new GateRequiredSignal(GATE, { subjectHashes: [HASH_A] });
+        },
+      }),
+    );
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(result.status).toBe("succeeded");
+    expect(result.output).toEqual({ satisfied: true, state: "satisfied", subjectHashes: [HASH_A] });
+    expect(asked).toEqual([{ gateId: GATE, runId: harness.manifest.runId }]);
+  });
+
+  it("answers undefined through context.gateStatus when nothing is wired", async () => {
+    // The default harness has no port. `undefined` means "cannot answer", never "undecided", and
+    // the stage that then throws is parked exactly as before this existed.
+    let seen: unknown = "unset";
+    harness.registry.register(
+      aStage({
+        requiredGates: [GATE],
+        execute: async (context) => {
+          seen = await context.gateStatus?.(GATE);
+          throw new GateRequiredSignal(GATE, { subjectHashes: [HASH_A] });
+        },
+      }),
+    );
+
+    const result = await harness.runner.run(harness.manifest.runId, "stage-a", {});
+
+    expect(seen).toBeUndefined();
+    expect(result.status).toBe("waiting_for_gate");
+  });
+});

@@ -74,3 +74,4 @@ Rules:
 | [0055](0055-rework-is-not-retry-and-a-policy-is-not-a-judgement.md)                         | Rework is not retry, and a declared policy is not a judgement                              | Accepted | #220              |
 | [0056](0056-an-advisory-channel-may-warrant-repair-but-never-a-stop.md)                     | An advisory channel may warrant repair, but never a stop                                   | Accepted | #220              |
 | [0057](0057-a-running-attempt-is-a-reconciliation-not-a-verdict.md)                         | A durably running attempt is a reconciliation, not a verdict                               | Accepted | #220              |
+| [0058](0058-a-decided-gate-is-not-asked-for-twice.md)                                       | A decided gate is not asked for twice                                                      | Accepted | #275              |

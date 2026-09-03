@@ -887,6 +887,36 @@ export interface ArtifactRecorder {
 }
 
 /**
+ * What the runtime can say about one gate on the current Run, read through
+ * {@link StageContext.gateStatus} (contract §13; #275).
+ *
+ * A projection of the gate engine's evaluated status, not the status itself: this package sits
+ * below the gate engine (§4.3) and reads the one fact the two consumers need — the runner's
+ * `GateRequiredSignal` arm and a stage deciding whether to throw one — rather than the whole
+ * record.
+ */
+export interface StageGateStatus {
+  /**
+   * The gate is approved **and still bound to the current inputs** — the gate engine's
+   * `satisfied`. `false` for every other state: undecided, rejected, changes requested, waived,
+   * stale (approved, then the bound content moved), or blocked upstream.
+   */
+  readonly satisfied: boolean;
+  /**
+   * The gate engine's state name, passed through as an opaque string (`"pending"`, `"rejected"`,
+   * …), so a stage can tell a rejection from an undecided gate without this package enumerating
+   * the engine's states. `satisfied` is the only value the runner itself interprets.
+   */
+  readonly state: string;
+  /**
+   * The subject digests the current decision binds (§13.2 `subjectHashes`), sorted. Absent when
+   * no decision is recorded. What a stage compares its own `subjectHashes` against before
+   * concluding that the decision it would ask for already exists.
+   */
+  readonly subjectHashes?: readonly string[];
+}
+
+/**
  * What a stage is given when it runs.
  *
  * Everything the stage may legitimately touch arrives through here. §11 requires a stage to
@@ -987,6 +1017,24 @@ export interface StageContext {
    * `ALDUS_WORKER_CAPABILITY_UNAVAILABLE`
    */
   runWorker<I, O>(request: StageWorkerRequest<I>): Promise<WorkerResult<O>>;
+  /**
+   * Ask what the runtime currently knows about a gate on this Run (contract §13; #275).
+   *
+   * Read-only, and the question a stage asks **before** throwing a {@link GateRequiredSignal}:
+   * whether the decision it is about to request already exists over the subjects it would bind.
+   * The first adopter's refinement stage threw the same signal for the same gate over the same
+   * hashes on every attempt after the operator approved it, because it had no way to ask — and
+   * the human's approval had no consumer.
+   *
+   * `undefined` means the runtime **cannot answer** — the composition wired no gate engine to the
+   * runner, or the gate is not registered — never that the gate is undecided. A stage receiving
+   * `undefined` behaves as it did before this port existed: it throws, and the runner's own arm
+   * (`ALDUS_GATE_ALREADY_DECIDED`) is the backstop where the runtime does know.
+   *
+   * Optional on the interface so a test double written against an earlier version still
+   * compiles; the runner always supplies it.
+   */
+  gateStatus?(gateId: string): Promise<StageGateStatus | undefined>;
   /**
    * Dispatch one agent execution through the configured backend (§10; #107, ADR-0047).
    *

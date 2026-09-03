@@ -23,6 +23,7 @@ export {
   type RetryBackoff,
   type RetryPolicy,
   type StageContext,
+  type StageGateStatus,
   type StageDefinition,
   type StageRetrySafety,
   type WorkerEffect,

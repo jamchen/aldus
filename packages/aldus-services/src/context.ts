@@ -369,6 +369,30 @@ export class AldusContext {
       // (#240).
       gateHasDecision: async (gateId, runId) =>
         (await this.#gateDecisions.list(runId)).some((decision) => decision.gateId === gateId),
+      // And what the gate **is**, over which subjects — the gate engine's judgement, read through
+      // the same subjects provider `status` and `approve` use, so the runner's refusal, the
+      // stage's `context.gateStatus`, and `aldus inspect` all describe one state (#275). Without
+      // it a stage throwing `GateRequiredSignal` for a gate the operator had already approved was
+      // re-parked on every attempt: the runner checked that the gate was known (#220) and that a
+      // parked stage could be released (#241), and nothing checked whether the decision being
+      // asked for already existed.
+      //
+      // `undefined` for an unregistered gate rather than a throw: the runner has already refused
+      // an unknown gate through `gateIsKnown` by the time it asks, and a stage asking about one
+      // should learn "cannot answer", not receive an exception from a read-only question.
+      gateStatus: async (gateId, runId) => {
+        if (!this.gateRegistry.has(gateId)) return undefined;
+        const statuses = await this.gates.evaluate(runId, await this.subjectsFor(runId));
+        const status = statuses.get(gateId);
+        if (status === undefined) return undefined;
+        return {
+          satisfied: status.state === "satisfied",
+          state: status.state,
+          ...(status.decision === undefined
+            ? {}
+            : { subjectHashes: [...status.decision.subjectHashes].sort() }),
+        };
+      },
       // And what the spend store establishes about a stuck stage's dispatch window (#244). The
       // runner's refusal for a `running` stage reported two entirely different situations
       // identically — authorization committed with the provider never called, and a call that may
