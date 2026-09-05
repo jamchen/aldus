@@ -473,13 +473,36 @@ export function renderCosts(report: CostReport, actorKind?: string): string {
     `  ${entry.reservationId}  ${entry.status}  holds ${entry.reservedAuthorizationAmount.amount} ` +
     `${entry.reservedAuthorizationAmount.currency}  (${entry.operation})`;
 
+  // **The printed remedy has to be one that resolves it** (#283). The line here named neither
+  // `--amount` nor `--uncharged`, and `settle` treated their absence as the audit-only resolution
+  // — so an operator who ran exactly what was printed got `Reservation … is now billing_unknown`,
+  // the status it already had, and read the zero exit as success. `settle` now refuses that call;
+  // this prints the two forms that actually release, with the reservation's own id in them rather
+  // than a placeholder, because the string is meant to be run and not edited.
+  //
+  // Both are offered rather than one chosen: settling *is* choosing which the evidence supports,
+  // and a hint that picked would be recommending an operator release authorization on a finding
+  // they have not made.
+  const remedy = (entry: (typeof report.unresolved)[number]): string[] => [
+    "  settling needs the disposition your evidence supports — one of:",
+    `    aldus costs settle ${entry.reservationId} --evidence <what it rests on> ` +
+      "--amount <what was charged>",
+    `    aldus costs settle ${entry.reservationId} --evidence <what it rests on> --uncharged`,
+    "  `--uncharged` is positive evidence that nothing was charged, not a failure to find a",
+    "  charge; `--investigation-ended` records that search and resolves nothing.",
+  ];
+
   const blocked = [
     ...(unresolved.length === 0
       ? []
       : [
           `${unresolved.length} unresolved charge(s) — every later dispatch on the grant is refused`,
-          ...unresolved.map(line),
-          `  resolve with: aldus costs settle <reservation-id> --evidence <what it rests on>${transcribe}`,
+          ...unresolved.flatMap((entry) => [line(entry), ...remedy(entry)]),
+          // Named because the figure is routinely larger than anything the stage has ever cost: an
+          // unestimated execution reserves the grant's per-request maximum, so a hold of several
+          // times the real charge is the policy working rather than a measurement.
+          "  the amount held is authorization set aside before dispatch, not a measured charge" +
+            transcribe,
           "",
         ]),
     ...(held.length === 0

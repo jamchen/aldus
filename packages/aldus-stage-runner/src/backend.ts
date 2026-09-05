@@ -106,6 +106,67 @@ export interface AgentResult {
    * budget-bypass class #107 reported.
    */
   costs?: readonly import("@aldus-runtime/core").CostObservation[];
+  /**
+   * The backend's own statement that it never dispatched anything (§13.2, §19.3; #283).
+   *
+   * **A declaration, never an inference.** Absent — the default — a failure means what it has
+   * always meant: the request may have been billed and nobody can say, so the reservation stays
+   * committed. `false` is a backend asserting the opposite about *this* call: it refused before
+   * spawning, so no provider was reached and no charge can exist.
+   *
+   * Only `false` carries meaning. `true` is accepted and says nothing the ordinary path does not
+   * already assume.
+   *
+   * It is the same trust `billingStatus: "free"` already receives — a backend stating a billing
+   * fact the runtime cannot observe — narrowed to the one fact a refusing backend actually knows.
+   * A backend that declares this and *did* spawn releases authorization for money that is gone,
+   * which is why the runtime never derives it from a failure, an exit code, or a message.
+   *
+   * Measured: an execution refused by an adopter-side ceiling printed "nothing was spawned" and
+   * left a reservation holding its full reserved amount as `billing_unknown`, which then refused
+   * every later dispatch on the grant. The backend knew; it had no way to say so.
+   */
+  dispatched?: boolean;
+}
+
+/**
+ * A marker carried on an error a backend throws when it refused **before** dispatching (#283).
+ *
+ * The thrown half of {@link AgentResult.dispatched}. A backend that refuses by throwing — the
+ * common shape — wraps its reason with this, and the runtime releases the reservation instead of
+ * retaining it as an unknown charge.
+ *
+ * A symbol rather than a message pattern or an error subclass: a message is a description that
+ * drifts, and a subclass forces a backend to import a base class to say one fact.
+ */
+const UNDISPATCHED = Symbol.for("aldus.undispatched");
+
+/**
+ * Declare that a refusal happened before anything was dispatched (§19.3; #283).
+ *
+ * `throw undispatched("the workspace ceiling is already exceeded, so nothing was spawned")`.
+ * The reason is recorded on the released reservation, so the trace answers why authorization
+ * stopped being committed without a charge (§20).
+ *
+ * Wraps an existing error when one is passed, so a backend keeps its own failure shape.
+ */
+export function undispatched(reason: string, cause?: unknown): Error {
+  const error = new Error(reason, cause === undefined ? undefined : { cause });
+  Object.defineProperty(error, UNDISPATCHED, { value: reason, enumerable: false });
+  return error;
+}
+
+/**
+ * The declared reason a thrown failure never dispatched, or `undefined` (§19.3; #283).
+ *
+ * `undefined` for **every** error that did not declare it, including one whose message says so in
+ * words. Reading a refusal out of prose is how a failure that did spend money releases its
+ * reservation.
+ */
+export function undispatchedReason(thrown: unknown): string | undefined {
+  if (typeof thrown !== "object" || thrown === null) return undefined;
+  const declared = (thrown as Record<symbol, unknown>)[UNDISPATCHED];
+  return typeof declared === "string" && declared.trim() !== "" ? declared : undefined;
 }
 
 /**

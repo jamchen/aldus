@@ -940,9 +940,17 @@ async function runCosts(argv: readonly string[], environment: CliEnvironment): P
  * - `--amount` — evidence established what was charged.
  * - `--uncharged` — positive evidence that **nothing** was charged. Not the same as having found
  *   nothing, which is the third case.
- * - neither — the investigation ended without an answer. **Resolves nothing**, deliberately:
- *   *"I could not find a charge"* is not evidence that no charge occurred, and recording it as one
- *   is how a budget is quietly exceeded.
+ * - `--investigation-ended` — the investigation ended without an answer. **Resolves nothing**,
+ *   deliberately: *"I could not find a charge"* is not evidence that no charge occurred, and
+ *   recording it as one is how a budget is quietly exceeded.
+ *
+ * **One of the three is required** (#283). It used to be the third by default, so the operator who
+ * ran the remedy this CLI printed — which named neither `--amount` nor `--uncharged` — was told
+ * `Reservation … is now billing_unknown`: the status it already had, the hold still standing, the
+ * grant still blocked. A command that runs, exits zero, and changes nothing is worse than one that
+ * refuses, because the reader believes the state moved and looks elsewhere for why it did not.
+ * Recording an audit-only note is a thing an operator can mean; it is not a thing they can mean by
+ * accident.
  *
  * `--decided-by` / `--verbatim` record a decision someone else made, exactly as on `approve`.
  *
@@ -959,6 +967,7 @@ async function runCostsSettle(
     amount: { type: "string" },
     currency: { type: "string" },
     uncharged: { type: "boolean", default: false },
+    "investigation-ended": { type: "boolean", default: false },
     observation: { type: "string" },
     "decided-by": { type: "string" },
     verbatim: { type: "string" },
@@ -972,11 +981,34 @@ async function runCostsSettle(
 
   const amount = values["amount"];
   const uncharged = values["uncharged"] === true;
+  const investigationEnded = values["investigation-ended"] === true;
   if (typeof amount === "string" && uncharged) {
     throw new AldusError(
       "ALDUS_INVALID_REQUEST",
       "`--amount` and `--uncharged` are different findings: one says what was charged, the other " +
         "says nothing was. Pass one.",
+      { category: "validation" },
+    );
+  }
+  if (investigationEnded && (typeof amount === "string" || uncharged)) {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`--investigation-ended` says the investigation produced no finding, so it cannot be " +
+        "combined with one. Pass the finding, or pass `--investigation-ended` alone.",
+      { category: "validation" },
+    );
+  }
+  // The disposition is required, and naming which one is the whole point of the refusal (#283).
+  // Defaulting to the audit-only resolution let the remedy this CLI prints exit zero and resolve
+  // nothing, which reads as success.
+  if (!investigationEnded && !uncharged && typeof amount !== "string") {
+    throw new AldusError(
+      "ALDUS_INVALID_REQUEST",
+      "`costs settle` needs the disposition your evidence supports, because settling is choosing " +
+        "one and no default is honest. Pass `--amount <n>` when the evidence establishes what was " +
+        "charged, `--uncharged` when it establishes that nothing was, or `--investigation-ended` " +
+        "to record a search that found neither — which is audit-only and leaves the reservation " +
+        "unresolved.",
       { category: "validation" },
     );
   }
@@ -1094,9 +1126,12 @@ async function runCostsAbandon(
     [
       `Reservation ${data.reservationId} is now ${data.status}.`,
       "  It still holds its full reserved amount: unknown is neither free nor zero.",
-      "  Resolve it with: aldus costs settle " +
-        data.reservationId +
-        " --evidence <what it rests on>",
+      // With a disposition, for the same reason `costs` now prints one (#283): `settle` refuses a
+      // call that names none, so a remedy without one is a command that cannot work.
+      "  Resolve it with one of:",
+      `    aldus costs settle ${data.reservationId} --evidence <what it rests on> ` +
+        "--amount <what was charged>",
+      `    aldus costs settle ${data.reservationId} --evidence <what it rests on> --uncharged`,
     ].join("\n"),
   );
 }

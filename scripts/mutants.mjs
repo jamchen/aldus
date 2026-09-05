@@ -1766,4 +1766,101 @@ export const cases = [
     wantExit: 1,
     wantOutput: "still reports a waived gate's operations as refused",
   },
+
+  /* ------------------------------------------------------------------------------------------
+   * #283 — a refusal that never dispatched, and a remedy that resolves what it is printed for.
+   *
+   * Four cases, one per claim, and the third is the guard on the guard: the release must come from
+   * the backend's declaration and not from the fact that something went wrong. A mutant that
+   * released on every failure would pass the first case and be the more dangerous defect, because
+   * it restores authorization for money that may already be gone.
+   * ------------------------------------------------------------------------------------------ */
+  {
+    name: "undispatched: a declared pre-dispatch refusal that is retained holds the grant again",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/agent-execution.ts",
+          "      const declaredUndispatched = undispatchedReason(thrown);",
+          "      const declaredUndispatched = undispatchedReason(undefined); /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/undispatched-refusal.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "holds nothing after a backend refuses before spawning",
+  },
+  {
+    name: "undispatched: releasing on any failure, not only a declared one, is caught",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-services/src/agent-execution.ts",
+          "      const declaredUndispatched = undispatchedReason(thrown);",
+          "      const declaredUndispatched = undispatchedReason(thrown) ?? String(thrown); /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-services",
+      "test/undispatched-refusal.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "still holds when a backend throws without declaring",
+  },
+  {
+    name: "printed remedy: reverting to the placeholder form prints a command that cannot release",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-cli/src/render.ts",
+          "    `    aldus costs settle ${entry.reservationId} --evidence <what it rests on> --uncharged`,",
+          '    "    aldus costs settle <reservation-id> --evidence <what it rests on>", /* mutant */',
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-cli",
+      "test/costs-printed-remedy.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "no releasing remedy printed",
+  },
+  {
+    name: "settle: dropping the required disposition makes the command succeed and resolve nothing",
+    setup: [
+      {
+        replace: [
+          "packages/aldus-cli/src/cli.ts",
+          '  if (!investigationEnded && !uncharged && typeof amount !== "string") {',
+          "  if (false as boolean) { /* mutant */",
+        ],
+      },
+    ],
+    command: [
+      "npx",
+      "vitest",
+      "run",
+      "--root",
+      "packages/aldus-cli",
+      "test/costs-printed-remedy.test.ts",
+    ],
+    wantExit: 1,
+    wantOutput: "says which flag it needs rather than reporting success",
+  },
 ];

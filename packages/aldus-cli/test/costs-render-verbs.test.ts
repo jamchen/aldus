@@ -40,7 +40,10 @@ describe("each unresolved state is offered the verb that accepts it", () => {
     // The other half, and the reason this is two assertions rather than one: a render that named
     // `abandon` everywhere would pass the first test and be exactly as wrong.
     const out = renderCosts(report("billing_unknown"));
-    expect(out).toContain("aldus costs settle <reservation-id>");
+    // The reservation's own id, and a disposition — `settle` refuses a call that names none, so a
+    // remedy without one is a command that runs and resolves nothing (#283).
+    expect(out).toContain("aldus costs settle res-a --evidence <what it rests on> --uncharged");
+    expect(out).toContain("--amount <what was charged>");
     expect(out).not.toContain("costs abandon");
   });
 });
