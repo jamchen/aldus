@@ -78,7 +78,8 @@ Command options
                 --uncharged                     positive evidence nothing was charged
                 --investigation-ended           the investigation produced no finding;
                                                 resolves nothing, and the hold stays open
-                (one of the three is required; passing none exits non-zero)
+                (exactly one of --amount / --uncharged / --investigation-ended is
+                 required; passing none exits non-zero)
   cancel        --reason <text>
   reject        --comment <text>
   release       --bundle <path>            plan, reconcile, and execute
