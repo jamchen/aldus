@@ -29,6 +29,7 @@ import {
 import type { SpendGrant } from "@aldus-runtime/gate-engine";
 import {
   isChargeBearing,
+  undispatchedReason,
   type AgentBackend,
   type AgentRequest,
   type AgentResult,
@@ -196,9 +197,52 @@ export class AgentExecutionService {
       // stays committed and the effect becomes non-retryable: assuming a failed request cost
       // nothing is how a budget is quietly exceeded (§19.3), and after `dispatch_prepared` a
       // failure is not proof of no charge (ADR-0044).
-      if (reservation !== undefined) await this.#options.spend.markUnknown(reservation);
-      await this.#emit(input, [], { threw: true });
+      //
+      // Unless the backend **said** it never dispatched (#283). That is the one thing the runtime
+      // cannot see and the backend certainly can, and without a channel for it a refusal that
+      // spent nothing held its full reserved amount as `billing_unknown` and refused every later
+      // dispatch on the grant. The declaration is a marker, never a reading of the message — a
+      // failure that did spend money must not release itself by describing itself well.
+      const declaredUndispatched = undispatchedReason(thrown);
+      if (reservation !== undefined) {
+        if (declaredUndispatched === undefined) {
+          await this.#options.spend.markUnknown(reservation);
+        } else {
+          await this.#options.spend.releaseUndispatched(reservation, {
+            declaredBy: this.#options.backend.id,
+            reason: declaredUndispatched,
+          });
+        }
+      }
+      await this.#emit(input, [], {
+        threw: true,
+        ...(declaredUndispatched === undefined ? {} : { dispatched: false }),
+      });
       throw thrown;
+    }
+
+    // The same declaration, returned rather than thrown. A backend that answers with a refusal
+    // instead of raising one is stating the identical fact, and a channel that existed on only one
+    // of the two would leave whichever shape a given backend uses holding authorization.
+    //
+    // **Charge-bearing observations override it.** A result that says nothing was dispatched and
+    // reports a charge is contradicting itself; the money is the harder fact, so it falls through
+    // to ordinary settlement rather than releasing on the claim.
+    if (
+      result.dispatched === false &&
+      !(result.costs ?? []).some((observation) => isChargeBearing(observation.billingStatus))
+    ) {
+      if (reservation !== undefined) {
+        await this.#options.spend.releaseUndispatched(reservation, {
+          declaredBy: this.#options.backend.id,
+          // A fixed sentence, not `result.error.message`. The thrown channel's reason is a string
+          // a backend wrote *to be* a reason; a failure message is not, and copying one into a
+          // durable record is how a value nobody redacted reaches the trace (§19.2).
+          reason: "the result declared `dispatched: false`",
+        });
+      }
+      await this.#emit(input, [], { ok: result.ok, dispatched: false });
+      return { result, costs: [], billingUnconfirmed: false };
     }
 
     // Costs are recorded whether or not the execution succeeded. A provider may charge for a

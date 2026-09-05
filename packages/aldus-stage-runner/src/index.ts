@@ -57,6 +57,8 @@ export {
 export {
   assertCapabilities,
   backendActor,
+  undispatched,
+  undispatchedReason,
   type AgentBackend,
   type AgentCapabilities,
   type AgentRequest,

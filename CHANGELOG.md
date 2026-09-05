@@ -8,6 +8,77 @@ below apply to the whole set unless a package is named.
 **Behaviour changes are listed before features.** An adopter should learn that something they
 rely on now behaves differently by reading this file, not by watching a test go red.
 
+## 0.2.0-next.64 — 2026-09-06
+
+### Changed
+
+**`aldus costs settle` refuses a call that names no disposition, instead of quietly recording an
+audit note.** Omitting both `--amount` and `--uncharged` used to mean "the investigation ended
+without an answer", which **resolves nothing** by design — so the command exited zero and printed
+`Reservation … is now billing_unknown`, the status the reservation already had. Found by an adopter
+who ran the remedy this CLI printed, read the zero exit as success, and went looking elsewhere for
+why their grant was still blocked.
+
+Settling is choosing which disposition the evidence supports, and no default is honest, so one of
+three is now required:
+
+- `--amount <n>` — the evidence establishes what was charged;
+- `--uncharged` — the evidence establishes that nothing was;
+- `--investigation-ended` — a search that found neither. Audit-only, and **unchanged in effect**:
+  it records the decision and leaves the reservation unresolved. What changed is that it is now
+  something you ask for rather than something you get by omitting a flag.
+
+If you script `costs settle` with no disposition, add `--investigation-ended` to keep the previous
+behaviour exactly.
+
+**`aldus costs` and `aldus costs abandon` print a remedy that resolves the state they print it
+for.** The line was
+`resolve with: aldus costs settle <reservation-id> --evidence <what it rests on>` — the command
+above, the one that changed nothing. Both now print the reservation's own id and both dispositions
+that release, so the string is meant to be run rather than edited. The listing also says that the
+amount held is authorization set aside before dispatch, not a measured charge: an unestimated
+execution reserves the grant's `maxPerRequest`, so a hold several times larger than the stage has
+ever cost is the policy working and not a measurement.
+
+### Added
+
+**A backend can say it never dispatched, and the reservation is released rather than held.**
+`AgentResult.dispatched?: boolean` and `undispatched(reason)` / `undispatchedReason(thrown)` in
+`@aldus-runtime/stage-runner`, with `SpendService.releaseUndispatched` behind them.
+
+The case is a refusal that certainly spent nothing — an adopter-side ceiling that declined before
+spawning anything. The runtime could not see past the backend boundary, so the refusal arrived as
+an ordinary failure and the reservation stayed committed as `billing_unknown` holding its full
+reserved amount, which then refused **every later dispatch on the grant**. Measured: 12.00 USD held
+against a stage whose real dispatches cost 0.94, 1.43 and 0.74.
+
+Both channels are declarations and nothing is inferred:
+
+```ts
+// throwing
+throw undispatched("the workspace ceiling is already exceeded, so nothing was spawned");
+// returning
+return { ok: false, dispatched: false, error };
+```
+
+A failure that declares neither behaves exactly as before — retained, non-retryable, awaiting
+reconciliation — because after `dispatch_prepared` a failure is not proof of no charge. The trust
+is the trust `billingStatus: "free"` already receives, narrowed to the one fact a refusing backend
+actually knows, and the released reservation records **whose** word it rests on. A result that
+declares `dispatched: false` and reports a charge-bearing observation is contradicting itself; the
+money wins and it settles normally.
+
+`releaseUndispatched` is a second verb rather than a relaxation of `releaseBeforeDispatch`, which
+still refuses past `dispatch_prepared`. They differ in whose knowledge the release rests on: the
+first is the runtime's claim from its own vantage, this one is the backend's about a call the
+runtime did make. Closes #283.
+
+**Not covered, and it is the same shape:** the Worker path in `StageRunner` and the synthesis
+gateway both retain a reservation on a thrown dispatch for the same reason, and neither has this
+channel. #283 was reported from one agent dispatch and its own `does not:` says it does not
+establish whether the shape occurs on a non-agent effect, so those are left for a separate change
+with its own measurement.
+
 ## 0.2.0-next.63 — 2026-09-03
 
 ### Changed

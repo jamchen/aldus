@@ -76,7 +76,10 @@ Command options
   costs settle  --evidence <text>               (required) what the finding rests on
                 --amount <n> [--currency USD]   evidence established this charge
                 --uncharged                     positive evidence nothing was charged
-                (neither)                       investigation ended; resolves nothing
+                --investigation-ended           the investigation produced no finding;
+                                                resolves nothing, and the hold stays open
+                (exactly one of --amount / --uncharged / --investigation-ended is
+                 required; passing none exits non-zero)
   cancel        --reason <text>
   reject        --comment <text>
   release       --bundle <path>            plan, reconcile, and execute

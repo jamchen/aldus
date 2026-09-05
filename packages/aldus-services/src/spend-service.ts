@@ -756,6 +756,38 @@ export class SpendService {
     return this.#appendOne(reservation, "reservation.released", { reason });
   }
 
+  /**
+   * Release a reservation on the **dispatcher's** declaration that it never dispatched (#283).
+   *
+   * The companion to {@link releaseBeforeDispatch}, and deliberately a second verb rather than a
+   * relaxation of the first. They differ in whose knowledge the release rests on:
+   *
+   * - `releaseBeforeDispatch` is the *runtime's* claim, from its own vantage — it never made the
+   *   call. That vantage expires at `dispatch_prepared`, which is why it refuses past it.
+   * - this one is the *backend's* claim about a call the runtime did make. The runtime cannot see
+   *   past the boundary, so past `dispatch_prepared` the backend is the only party who can say —
+   *   and a refusal that certainly spent nothing is the case the first verb cannot express.
+   *
+   * The trust is the trust `settle` already extends to `billingStatus: "free"`: a billing fact
+   * only the provider's side can state. What keeps it narrow is that nothing infers it — the
+   * declaration is an explicit field or an explicit marker, never a failure, an exit code or a
+   * message (see `undispatched` in `@aldus-runtime/stage-runner`).
+   *
+   * Measured before it existed: a ceiling refusal that printed "nothing was spawned" left its
+   * reservation `billing_unknown` holding the full reserved amount, which refused every later
+   * dispatch on the grant until a human reconciled a charge that never happened.
+   */
+  async releaseUndispatched(
+    reservation: SpendReservation,
+    declaration: { declaredBy: string; reason: string },
+  ): Promise<SpendReservation> {
+    return this.#appendOne(reservation, "reservation.released", {
+      // Named, so the trace distinguishes a release the runtime decided from one it was told.
+      // §20 has to be able to answer *on whose word* authorization stopped being committed.
+      reason: `"${declaration.declaredBy}" declared nothing was dispatched: ${declaration.reason}`,
+    });
+  }
+
   /** Retain the reservation and make the effect non-retryable (§19.3, #150). */
   async markUnknown(
     reservation: SpendReservation,
