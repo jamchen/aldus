@@ -197,3 +197,20 @@ describe("`costs settle` refuses a call that names no disposition", () => {
     expect(result.stdout).toContain("billing_unknown");
   });
 });
+
+describe("`--help` names the same dispositions the command requires", () => {
+  it("names all three, and does not offer omission as one of them", async () => {
+    // The other place the CLI describes this command. `usage.ts` said `(neither) investigation
+    // ended; resolves nothing` — the exact reading that cost the adopter their afternoon, still
+    // printed by `--help` after the remedy above was fixed. Asserted against the **printed** text
+    // for the reason stated at the top of this file: the flag existing in the source is not the
+    // claim, the CLI telling an operator about it is.
+    const result = await invoke(base, "--help");
+
+    expect(result.code).toBe(0);
+    for (const flag of ["--amount", "--uncharged", "--investigation-ended"]) {
+      expect(result.stdout, `\`aldus --help\` does not name ${flag}`).toContain(flag);
+    }
+    expect(result.stdout).not.toContain("(neither)");
+  });
+});
